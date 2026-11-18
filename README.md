@@ -1,4 +1,4 @@
-# Excel Planning Uploader Pro (SAP Analytics Cloud)
+# File Planning Uploader Pro (SAP Analytics Cloud)
 
 > Enterprise-grade custom web component for SAP Analytics Cloud (SAC) featuring Full/Delta load strategy, interactive multi-sheet consolidation, multi-severity validation rules with semaphores (🟢🟡🔴🟣), scoped rules & temporal validity windows, Assisted Code Formulas & Auto-Fix (`✨`), configurable file format & tabulador, drill-down Audit Monitor with customizable exports, built-in interactive Help Guide (`? Help`), and SAP Fiori Horizon UX.
 
