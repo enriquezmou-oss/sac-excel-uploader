@@ -10,7 +10,7 @@ class ExcelUploaderPro extends HTMLElement {
     super();
     this._shadow = this.attachShadow({ mode: 'open' });
     this._step = 1;
-    this._filesQueue = []; // Almacena objetos { file: File, comment: string }
+    this._filesQueue = [];
     this._rows = [];
     this._headers = [];
     this._currentUser = 'SAP User (Planning)';
@@ -38,9 +38,7 @@ class ExcelUploaderPro extends HTMLElement {
     const shadow = this._shadow;
 
     const fileInput = shadow.getElementById('fileInput');
-    const chooseBtn = shadow.getElementById('chooseFileBtn');
-    if (chooseBtn && fileInput) {
-      chooseBtn.addEventListener('click', () => fileInput.click());
+    if (fileInput) {
       fileInput.addEventListener('change', (e) => {
         if (e.target.files.length) {
           this._handleFilesSelection(e.target.files);
@@ -63,7 +61,6 @@ class ExcelUploaderPro extends HTMLElement {
       downloadLogBtn.addEventListener('click', () => this._exportErrorLog());
     }
 
-    // Añadir nueva fila vacía o inicializada manualmente
     if (addRowBtn) {
       addRowBtn.addEventListener('click', () => {
         const newRowNum = this._rows.length + 2;
@@ -77,7 +74,6 @@ class ExcelUploaderPro extends HTMLElement {
       });
     }
 
-    // Guardar comentarios de los ficheros al escribir en el input
     shadow.querySelectorAll('.file-comment-input').forEach(input => {
       input.addEventListener('input', (e) => {
         const idx = parseInt(e.target.dataset.index, 10);
@@ -87,7 +83,6 @@ class ExcelUploaderPro extends HTMLElement {
       });
     });
 
-    // Eliminar ficheros individuales de la cola
     shadow.querySelectorAll('.remove-file-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const idx = parseInt(e.target.dataset.index, 10);
@@ -269,7 +264,7 @@ class ExcelUploaderPro extends HTMLElement {
         }
       });
 
-      const id = String(row.ID || '').trim();
+      const id = String(r.ID || '').trim();
       if (id && idCounts[id] > 1) {
         row._errors['ID'] = 'Duplicate value not allowed';
       }
@@ -346,8 +341,10 @@ class ExcelUploaderPro extends HTMLElement {
         .btn-danger { background: #FFF; color: #bb0000; border-color: #f5c6c6; }
         .btn-danger:hover { background: #feeaea; }
 
-        .drop-zone { border: 2px dashed #0070F2; border-radius: 10px; padding: 45px; text-align: center; background: #FFFFFF; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
-        .drop-zone:hover { background: rgba(0,112,242,0.02); border-color: #005cb9; transform: translateY(-1px); }
+        /* DROP ZONE NATIVA PARA EVITAR BLOQUEO DE NAVEGADOR */
+        .drop-zone { border: 2px dashed #0070F2; border-radius: 10px; padding: 45px; text-align: center; background: #FFFFFF; position: relative; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+        .drop-zone:hover { background: rgba(0,112,242,0.02); border-color: #005cb9; }
+        .file-input-native { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 10; }
 
         .metrics-bar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 16px; }
         .metric-box { background: #FFFFFF; border: 1px solid #cdd6df; padding: 12px 16px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
@@ -415,12 +412,12 @@ class ExcelUploaderPro extends HTMLElement {
           </div>
 
           ${this._step === 1 ? `
-            <div class="drop-zone" id="chooseFileBtn">
+            <div class="drop-zone">
+              <input type="file" id="fileInput" class="file-input-native" multiple accept=".xlsx, .xls, .xlsm" />
               <h3 style="margin:0 0 6px 0; color:#0070F2;">Drag and drop one or more planning Excel files</h3>
-              <p style="margin:0; color:#6a6d70; font-size:12px;">You can select multiple files simultaneously (.xlsx, .xls)</p>
-              <button class="btn" style="margin-top:14px;" type="button">Select Files</button>
+              <p style="margin:0; color:#6a6d70; font-size:12px;">Click here or select multiple files simultaneously (.xlsx, .xls)</p>
+              <button class="btn" style="margin-top:14px; pointer-events:none;" type="button">Select Files</button>
             </div>
-            <input type="file" id="fileInput" style="display:none" multiple accept=".xlsx, .xls, .xlsm" />
           ` : ''}
 
           ${this._step === 2 ? `
