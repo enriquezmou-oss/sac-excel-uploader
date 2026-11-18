@@ -3,7 +3,7 @@ class ExcelUploaderPro extends HTMLElement {
     super();
     this._shadow = this.attachShadow({ mode: 'open' });
     this._step = 1;
-    this._activeTab = 'uploaderTab'; // 'uploaderTab' | 'rulesTab' | 'monitorTab'
+    this._activeTab = 'uploaderTab';
     this._filesQueue = [];
     this._rows = [];
     this._headers = [];
@@ -11,40 +11,134 @@ class ExcelUploaderPro extends HTMLElement {
     this._isLoading = false;
     this._loadingText = 'Processing files...';
     this._xlsxReady = typeof XLSX !== 'undefined';
+    this._showHelpModal = false;
 
-    // Configuración de Formato, Tabulador (Delimitador) y Números
+    // Configuración de Carga y Formato
+    this._loadStrategy = 'FULL'; // 'FULL' | 'DELTA'
     this._parseConfig = {
-      format: 'AUTO',       // 'AUTO' | 'XLSX' | 'CSV_TXT'
-      delimiter: 'AUTO',    // 'AUTO' | '\t' | ';' | ',' | '|'
-      numberFormat: 'STD',  // 'STD' (1,234.56) | 'EU' (1.234,56 -> 1234.56)
-      headerRow: 1          // 1-based index
+      format: 'AUTO',
+      delimiter: 'AUTO',
+      numberFormat: 'STD',
+      headerRow: 1
     };
 
     const defaultCols = ['ID', 'DESCRIPTION', 'H1', 'COMPANY', 'COSTCENTER', 'ASSET_CLASS', 'CAPITALIZED'];
     const savedCols = this._storageGet('sac_required_cols');
     this._requiredColumns = Array.isArray(savedCols) && savedCols.length > 0 ? savedCols : defaultCols;
 
-    // Motor de Reglas de Validación Configurables por el Usuario
+    // Configuración de exportación del Audit Monitor
+    this._auditExportConfig = {
+      open: false,
+      numCols: this._requiredColumns.length,
+      selectedCols: [...this._requiredColumns],
+      includeComments: true,
+      includeAuditDetail: true,
+      format: 'XLSX'
+    };
+
+    // Reglas con semáforo, alcance temporal y archivos objetivo ('ALL' o nombres específicos)
     const defaultRules = [
-      { id: 'RULE-1', col: 'ID', type: 'UNIQUE', param: '', min: '', max: '', active: true, desc: 'No duplicate IDs allowed across consolidated sheets' },
-      { id: 'RULE-2', col: 'COMPANY', type: 'IN_LIST', param: '1000, 2000, 950', min: '', max: '', active: true, desc: 'Must match SAP Master Data Company Codes' },
-      { id: 'RULE-3', col: 'COSTCENTER', type: 'IN_LIST', param: 'CC_IT_01, CC_FIN_02, 12234566, 10180000', min: '', max: '', active: true, desc: 'Must match SAP Master Data Cost Centers' },
-      { id: 'RULE-4', col: 'H1', type: 'NUMERIC_RANGE', param: '', min: '0', max: '', active: true, desc: 'Planning amount H1 must be numeric (>= 0)' }
+      {
+        id: 'RULE-1',
+        col: 'ID',
+        severity: 'BLOCKING',
+        semaphore: 'RED',
+        type: 'UNIQUE',
+        param: '',
+        min: '',
+        max: '',
+        autoFix: "value + '_' + row._rowNum",
+        scopeFiles: 'ALL',
+        startDate: '',
+        endDate: '',
+        active: true,
+        desc: 'No duplicate IDs allowed across consolidated sheets'
+      },
+      {
+        id: 'RULE-2',
+        col: 'COMPANY',
+        severity: 'BLOCKING',
+        semaphore: 'RED',
+        type: 'IN_LIST',
+        param: '1000, 2000, 950',
+        min: '',
+        max: '',
+        autoFix: "'1000'",
+        scopeFiles: 'ALL',
+        startDate: '',
+        endDate: '',
+        active: true,
+        desc: 'Must match SAP Master Data Company Codes'
+      },
+      {
+        id: 'RULE-3',
+        col: 'COSTCENTER',
+        severity: 'BLOCKING',
+        semaphore: 'RED',
+        type: 'IN_LIST',
+        param: 'CC_IT_01, CC_FIN_02, 12234566, 10180000',
+        min: '',
+        max: '',
+        autoFix: "'CC_IT_01'",
+        scopeFiles: 'ALL',
+        startDate: '',
+        endDate: '',
+        active: true,
+        desc: 'Must match SAP Master Data Cost Centers'
+      },
+      {
+        id: 'RULE-4',
+        col: 'H1',
+        severity: 'PREVENTIVE',
+        semaphore: 'AMBER',
+        type: 'NUMERIC_RANGE',
+        param: '',
+        min: '0',
+        max: '100000',
+        autoFix: 'num < 0 ? Math.abs(num) : 100000',
+        scopeFiles: 'ALL',
+        startDate: '',
+        endDate: '',
+        active: true,
+        desc: 'Preventive budget threshold: H1 between 0 and 100,000'
+      },
+      {
+        id: 'RULE-5',
+        col: 'CAPITALIZED',
+        severity: 'CHECK',
+        semaphore: 'PURPLE',
+        type: 'ASSISTED_CODE',
+        param: "Number(row.H1 || 0) <= 50000 || String(value).toUpperCase() === 'Y' || String(value).toUpperCase() === 'X'",
+        min: '',
+        max: '',
+        autoFix: "'Y'",
+        scopeFiles: 'ALL',
+        startDate: '',
+        endDate: '',
+        active: true,
+        desc: 'Check: If H1 > 50,000, asset should be CAPITALIZED (Y/X)'
+      }
     ];
-    const savedRules = this._storageGet('sac_validation_rules_v1');
+
+    const savedRules = this._storageGet('sac_validation_rules_v3');
     this._validationRules = Array.isArray(savedRules) ? savedRules : defaultRules;
 
-    // Estado del formulario de nueva regla
     this._newRuleForm = {
       col: this._requiredColumns[0] || 'ID',
+      severity: 'BLOCKING',
+      semaphore: 'RED',
       type: 'IN_LIST',
       param: '',
       min: '',
       max: '',
+      autoFix: '',
+      scopeFiles: 'ALL',
+      startDate: '',
+      endDate: '',
       desc: ''
     };
 
-    const savedHistory = this._storageGet('sac_audit_history_v2');
+    const savedHistory = this._storageGet('sac_audit_history_v3');
     this._history = Array.isArray(savedHistory) ? savedHistory : [];
 
     this._currentSessionLogs = [];
@@ -54,6 +148,7 @@ class ExcelUploaderPro extends HTMLElement {
 
     this._issueFilter = 'all';
     this._searchQuery = '';
+    this._acknowledgeNonBlocking = false;
     this._toast = null;
     this._toastTimer = null;
     this._showAddColModal = false;
@@ -141,11 +236,11 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   _saveHistory() {
-    this._storageSet('sac_audit_history_v2', this._history.slice(0, 30));
+    this._storageSet('sac_audit_history_v3', this._history.slice(0, 30));
   }
 
   _saveRules() {
-    this._storageSet('sac_validation_rules_v1', this._validationRules);
+    this._storageSet('sac_validation_rules_v3', this._validationRules);
   }
 
   _notify(msg, type = 'info') {
@@ -157,6 +252,16 @@ class ExcelUploaderPro extends HTMLElement {
       const banner = this._shadow.querySelector('.toast-banner');
       if (banner) banner.remove();
     }, 3800);
+  }
+
+  _syncExportColumnsWithSchema(availableCols) {
+    const validSelected = (this._auditExportConfig.selectedCols || []).filter(c => availableCols.includes(c));
+    if (validSelected.length === 0) {
+      this._auditExportConfig.selectedCols = [...availableCols];
+    } else {
+      this._auditExportConfig.selectedCols = validSelected;
+    }
+    this._auditExportConfig.numCols = this._auditExportConfig.selectedCols.length;
   }
 
   _recordCellModification(row, colName, oldVal, newVal) {
@@ -172,12 +277,10 @@ class ExcelUploaderPro extends HTMLElement {
     }
   }
 
-  // Normalización de valores según configuración de formato numérico (Europeo vs Estándar)
   _normalizeCellValue(val) {
     if (val === undefined || val === null) return '';
     let str = String(val).trim();
     if (this._parseConfig.numberFormat === 'EU' && str !== '') {
-      // Detecta patrón europeo tipo 1.234,56 o -123,45
       if (/^-?\d{1,3}(\.\d{3})*(,\d+)$/.test(str) || /^-?\d+(,\d+)$/.test(str)) {
         str = str.replace(/\./g, '').replace(',', '.');
       }
@@ -185,7 +288,6 @@ class ExcelUploaderPro extends HTMLElement {
     return str;
   }
 
-  // Reconstruye this._rows combinando filas manuales + las pestañas seleccionadas de cada fichero
   _syncRowsFromActiveSheets() {
     const manualRows = this._rows.filter(r => r._fileOwner === '__MANUAL__');
     const sheetRows = [];
@@ -208,8 +310,120 @@ class ExcelUploaderPro extends HTMLElement {
     this._validateRows();
   }
 
+  _evalAssistedCode(expr, row, colName) {
+    const value = String(row[colName] ?? '').trim();
+    const num = Number(value);
+    const fn = new Function('value', 'num', 'row', `"use strict"; return (${expr});`);
+    return fn(value, num, row);
+  }
+
+  _applyCellAutoFix(origIdx, colName, ruleId) {
+    const row = this._rows[origIdx];
+    if (!row) return;
+    const alerts = (row._alerts && row._alerts[colName]) || [];
+    const targetAlert = ruleId ? alerts.find(a => a.ruleId === ruleId) : alerts.find(a => a.autoFix);
+    if (!targetAlert || !targetAlert.autoFix) return;
+
+    try {
+      const oldVal = String(row[colName] ?? '').trim();
+      const computed = this._evalAssistedCode(targetAlert.autoFix, row, colName);
+      const newVal = String(computed ?? '').trim();
+      if (oldVal !== newVal) {
+        row[colName] = newVal;
+        this._recordCellModification(row, colName, oldVal || '(Blank)', newVal);
+        this._logAction(
+          'AUTO_FIX_CODE',
+          `Row #${row._rowNum} [${colName}]`,
+          `Assisted auto-fix (${targetAlert.autoFix}) applied for rule ${targetAlert.ruleId}`,
+          oldVal || '(Blank)',
+          newVal
+        );
+        this._validateRows();
+        this._notify(`Auto-fixed Row #${row._rowNum} [${colName}] → '${newVal}'`, 'success');
+      }
+    } catch (e) {
+      this._notify(`Assisted auto-fix error: ${e.message}`, 'error');
+    }
+  }
+
+  _applyAllAutoFixes() {
+    let fixedCount = 0;
+    this._rows.forEach(row => {
+      this._requiredColumns.forEach(col => {
+        const alerts = (row._alerts && row._alerts[col]) || [];
+        const fixable = alerts.find(a => a.autoFix);
+        if (fixable) {
+          try {
+            const oldVal = String(row[col] ?? '').trim();
+            const computed = this._evalAssistedCode(fixable.autoFix, row, col);
+            const newVal = String(computed ?? '').trim();
+            if (oldVal !== newVal) {
+              row[col] = newVal;
+              this._recordCellModification(row, col, oldVal || '(Blank)', newVal);
+              fixedCount++;
+            }
+          } catch (e) {}
+        }
+      });
+    });
+
+    if (fixedCount > 0) {
+      this._logAction(
+        'BULK_AUTO_FIX',
+        `Grid Auto-Fix (${fixedCount} cells)`,
+        'Executed Assisted Code Auto-Fix across all fixable alerts',
+        `${fixedCount} alerts`,
+        'FIXED'
+      );
+      this._validateRows();
+      this._notify(`Assisted Code repaired ${fixedCount} cell(s) automatically!`, 'success');
+    } else {
+      this._notify('No cells with Assisted Auto-Fix rules pending.', 'info');
+    }
+  }
+
+  _acknowledgeCheckCell(origIdx, colName, ruleId) {
+    const row = this._rows[origIdx];
+    if (!row) return;
+    if (!row._checkedRules) row._checkedRules = {};
+    const key = `${colName}__${ruleId}`;
+    row._checkedRules[key] = true;
+    this._logAction(
+      'CHECK_VERIFIED',
+      `Row #${row._rowNum} [${colName}]`,
+      `User manually verified & approved check alert (${ruleId})`,
+      'Pending Check',
+      'Verified ✓'
+    );
+    this._validateRows();
+    this._render();
+  }
+
   _bindEvents() {
     const shadow = this._shadow;
+
+    const toggleHelpBtn = shadow.getElementById('toggleHelpBtn');
+    const closeHelpModalBtn = shadow.getElementById('closeHelpModalBtn');
+    if (toggleHelpBtn) {
+      toggleHelpBtn.addEventListener('click', () => {
+        this._showHelpModal = !this._showHelpModal;
+        this._render();
+      });
+    }
+    if (closeHelpModalBtn) {
+      closeHelpModalBtn.addEventListener('click', () => {
+        this._showHelpModal = false;
+        this._render();
+      });
+    }
+
+    const loadStrategySel = shadow.getElementById('loadStrategySel');
+    if (loadStrategySel) {
+      loadStrategySel.addEventListener('change', (e) => {
+        this._loadStrategy = e.target.value;
+        this._logAction('STRATEGY_CHANGE', 'Load Strategy', `Switched planning mode to ${this._loadStrategy}`, '', this._loadStrategy);
+      });
+    }
 
     const fileInput = shadow.getElementById('fileInput');
     const dropZone = shadow.getElementById('dropZone');
@@ -240,40 +454,24 @@ class ExcelUploaderPro extends HTMLElement {
       });
     }
 
-    // Configuración de Formato, Tabulador (Delimitador) y Fila de Cabecera
     const cfgFormat = shadow.getElementById('cfgFormat');
     const cfgDelimiter = shadow.getElementById('cfgDelimiter');
     const cfgNumFormat = shadow.getElementById('cfgNumFormat');
     const cfgHeaderRow = shadow.getElementById('cfgHeaderRow');
     const reparseFilesBtn = shadow.getElementById('reparseFilesBtn');
 
-    if (cfgFormat) {
-      cfgFormat.addEventListener('change', (e) => {
-        this._parseConfig.format = e.target.value;
-      });
-    }
-    if (cfgDelimiter) {
-      cfgDelimiter.addEventListener('change', (e) => {
-        this._parseConfig.delimiter = e.target.value;
-      });
-    }
-    if (cfgNumFormat) {
-      cfgNumFormat.addEventListener('change', (e) => {
-        this._parseConfig.numberFormat = e.target.value;
-      });
-    }
+    if (cfgFormat) cfgFormat.addEventListener('change', (e) => { this._parseConfig.format = e.target.value; });
+    if (cfgDelimiter) cfgDelimiter.addEventListener('change', (e) => { this._parseConfig.delimiter = e.target.value; });
+    if (cfgNumFormat) cfgNumFormat.addEventListener('change', (e) => { this._parseConfig.numberFormat = e.target.value; });
     if (cfgHeaderRow) {
       cfgHeaderRow.addEventListener('change', (e) => {
         this._parseConfig.headerRow = Math.max(1, parseInt(e.target.value, 10) || 1);
       });
     }
     if (reparseFilesBtn) {
-      reparseFilesBtn.addEventListener('click', () => {
-        this._reparseAllFilesWithNewConfig();
-      });
+      reparseFilesBtn.addEventListener('click', () => this._reparseAllFilesWithNewConfig());
     }
 
-    // Navegación del Stepper
     shadow.querySelectorAll('.step-item').forEach(stepEl => {
       stepEl.addEventListener('click', (e) => {
         const targetStep = parseInt(e.currentTarget.dataset.step, 10);
@@ -286,7 +484,6 @@ class ExcelUploaderPro extends HTMLElement {
       });
     });
 
-    // Selección / Deselección de Pestañas (Sheets) por cada fichero Excel
     shadow.querySelectorAll('.sheet-toggle-chk').forEach(chk => {
       chk.addEventListener('change', (e) => {
         const fIdx = parseInt(e.currentTarget.dataset.fidx, 10);
@@ -295,13 +492,6 @@ class ExcelUploaderPro extends HTMLElement {
         if (fileItem && fileItem.sheets && fileItem.sheets[sIdx]) {
           const sh = fileItem.sheets[sIdx];
           sh.selected = e.currentTarget.checked;
-          this._logAction(
-            sh.selected ? 'SHEET_ENABLED' : 'SHEET_DISABLED',
-            `${fileItem.file.name} [${sh.name}]`,
-            `${sh.selected ? 'Included' : 'Excluded'} sheet (${sh.rows.length} rows) in consolidation`,
-            sh.selected ? 'Excluded' : 'Included',
-            sh.selected ? 'Included' : 'Excluded'
-          );
           this._syncRowsFromActiveSheets();
           this._render();
         }
@@ -315,24 +505,15 @@ class ExcelUploaderPro extends HTMLElement {
         const fileItem = this._filesQueue[fIdx];
         if (fileItem && fileItem.sheets) {
           fileItem.sheets.forEach(sh => { sh.selected = mode; });
-          this._logAction(
-            'SHEET_BULK_TOGGLE',
-            fileItem.file.name,
-            `${mode ? 'Selected all' : 'Deselected all'} sheets in workbook`,
-            '',
-            mode ? 'ALL_SELECTED' : 'NONE_SELECTED'
-          );
           this._syncRowsFromActiveSheets();
           this._render();
         }
       });
     });
 
-    // Botón para vaciar todos los ficheros de la cola
     const clearAllFilesBtn = shadow.getElementById('clearAllFilesBtn');
     if (clearAllFilesBtn) {
       clearAllFilesBtn.addEventListener('click', () => {
-        this._logAction('QUEUE_CLEARED', `All Files (${this._filesQueue.length})`, 'Removed all workbooks from queue', `${this._filesQueue.length} files`, '0 files');
         this._filesQueue = [];
         this._rows = this._rows.filter(r => r._fileOwner === '__MANUAL__');
         if (this._rows.length === 0) this._step = 1;
@@ -342,14 +523,10 @@ class ExcelUploaderPro extends HTMLElement {
     }
 
     const downloadTemplateBtn = shadow.getElementById('downloadTemplateBtn');
-    if (downloadTemplateBtn) {
-      downloadTemplateBtn.addEventListener('click', () => this._downloadTemplate());
-    }
+    if (downloadTemplateBtn) downloadTemplateBtn.addEventListener('click', () => this._downloadTemplate());
 
     const exportCleanBtn = shadow.getElementById('exportCleanBtn');
-    if (exportCleanBtn) {
-      exportCleanBtn.addEventListener('click', () => this._exportCleanExcel());
-    }
+    if (exportCleanBtn) exportCleanBtn.addEventListener('click', () => this._exportCleanExcel());
 
     const nextStep3Btn = shadow.getElementById('nextStep3Btn');
     const prevBtn = shadow.getElementById('prevStepBtn');
@@ -357,6 +534,7 @@ class ExcelUploaderPro extends HTMLElement {
     const exitBtn = shadow.getElementById('exitBtn');
     const downloadLogBtn = shadow.getElementById('downloadLogBtn');
     const addRowBtn = shadow.getElementById('addRowBtn');
+    const autoFixAllBtn = shadow.getElementById('autoFixAllBtn');
 
     if (nextStep3Btn) nextStep3Btn.addEventListener('click', () => { this._step = 3; this._render(); });
     if (prevBtn) prevBtn.addEventListener('click', () => { if (this._step > 1) { this._step--; this._render(); } });
@@ -371,22 +549,48 @@ class ExcelUploaderPro extends HTMLElement {
       });
     }
 
-    if (downloadLogBtn) {
-      downloadLogBtn.addEventListener('click', () => this._exportErrorLog());
-    }
+    if (downloadLogBtn) downloadLogBtn.addEventListener('click', () => this._exportErrorLog());
+    if (autoFixAllBtn) autoFixAllBtn.addEventListener('click', () => this._applyAllAutoFixes());
 
     if (addRowBtn) {
       addRowBtn.addEventListener('click', () => {
         const newId = 'PLN_' + Math.floor(Math.random() * 9000 + 1000);
-        const newRow = { _rowNum: 2, _sourceFile: 'Manual Entry', _fileOwner: '__MANUAL__', _isManual: true, _editedCols: {}, _errors: {} };
+        const newRow = { _rowNum: 2, _sourceFile: 'Manual Entry', _fileOwner: '__MANUAL__', _isManual: true, _editedCols: {}, _checkedRules: {}, _errors: {}, _alerts: {} };
         this._requiredColumns.forEach(col => {
           newRow[col] = col === 'ID' ? newId : '';
         });
         this._rows.unshift(newRow);
         this._rows.forEach((r, idx) => { r._rowNum = idx + 2; });
-        this._logAction('ROW_ADDED', `Row ID ${newId}`, 'Manual planning row inserted directly in grid', '', newId);
         this._validateRows();
-        this._notify('New planning row added at the top of the table.', 'success');
+        this._notify('New planning row added.', 'success');
+      });
+    }
+
+    shadow.querySelectorAll('.cell-autofix-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const origIdx = parseInt(e.currentTarget.dataset.origIdx, 10);
+        const col = e.currentTarget.dataset.col;
+        const ruleId = e.currentTarget.dataset.ruleId;
+        this._applyCellAutoFix(origIdx, col, ruleId);
+      });
+    });
+
+    shadow.querySelectorAll('.cell-check-ok-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const origIdx = parseInt(e.currentTarget.dataset.origIdx, 10);
+        const col = e.currentTarget.dataset.col;
+        const ruleId = e.currentTarget.dataset.ruleId;
+        this._acknowledgeCheckCell(origIdx, col, ruleId);
+      });
+    });
+
+    const ackNonBlockingChk = shadow.getElementById('ackNonBlockingChk');
+    if (ackNonBlockingChk) {
+      ackNonBlockingChk.addEventListener('change', (e) => {
+        this._acknowledgeNonBlocking = e.currentTarget.checked;
+        this._render();
       });
     }
 
@@ -421,8 +625,9 @@ class ExcelUploaderPro extends HTMLElement {
         }
         this._requiredColumns.push(upperCol);
         this._storageSet('sac_required_cols', this._requiredColumns);
+        this._auditExportConfig.selectedCols.push(upperCol);
+        this._auditExportConfig.numCols = this._auditExportConfig.selectedCols.length;
         this._rows.forEach(r => { if (r[upperCol] === undefined) r[upperCol] = ''; });
-        this._logAction('SCHEMA_ADD_COL', `Column [${upperCol}]`, 'Added new mandatory column to planning schema', '', upperCol);
         this._showAddColModal = false;
         this._validateRows();
         this._notify(`Column '${upperCol}' added to model.`, 'success');
@@ -441,16 +646,15 @@ class ExcelUploaderPro extends HTMLElement {
         }
         this._requiredColumns = this._requiredColumns.filter(c => c !== colToRemove);
         this._storageSet('sac_required_cols', this._requiredColumns);
+        this._syncExportColumnsWithSchema(this._requiredColumns);
         if (!this._requiredColumns.includes(this._bulkCol)) {
           this._bulkCol = this._requiredColumns[0] || 'ID';
         }
-        this._logAction('SCHEMA_DEL_COL', `Column [${colToRemove}]`, 'Removed column from active planning model', colToRemove, 'DELETED');
         this._validateRows();
         this._notify(`Column '${colToRemove}' removed.`, 'info');
       });
     });
 
-    // Eventos del Motor de Reglas de Validación
     const toggleInlineRuleBtn = shadow.getElementById('toggleInlineRuleBtn');
     if (toggleInlineRuleBtn) {
       toggleInlineRuleBtn.addEventListener('click', () => {
@@ -468,15 +672,23 @@ class ExcelUploaderPro extends HTMLElement {
     }
 
     const ruleColSel = shadow.getElementById('ruleColSel');
+    const ruleSeveritySel = shadow.getElementById('ruleSeveritySel');
+    const ruleSemaphoreSel = shadow.getElementById('ruleSemaphoreSel');
     const ruleTypeSel = shadow.getElementById('ruleTypeSel');
     const ruleParamInp = shadow.getElementById('ruleParamInp');
     const ruleMinInp = shadow.getElementById('ruleMinInp');
     const ruleMaxInp = shadow.getElementById('ruleMaxInp');
+    const ruleAutoFixInp = shadow.getElementById('ruleAutoFixInp');
+    const ruleScopeFilesInp = shadow.getElementById('ruleScopeFilesInp');
+    const ruleStartDateInp = shadow.getElementById('ruleStartDateInp');
+    const ruleEndDateInp = shadow.getElementById('ruleEndDateInp');
     const ruleDescInp = shadow.getElementById('ruleDescInp');
     const saveNewRuleBtn = shadow.getElementById('saveNewRuleBtn');
     const resetDefaultRulesBtn = shadow.getElementById('resetDefaultRulesBtn');
 
     if (ruleColSel) ruleColSel.addEventListener('change', (e) => { this._newRuleForm.col = e.target.value; });
+    if (ruleSeveritySel) ruleSeveritySel.addEventListener('change', (e) => { this._newRuleForm.severity = e.target.value; });
+    if (ruleSemaphoreSel) ruleSemaphoreSel.addEventListener('change', (e) => { this._newRuleForm.semaphore = e.target.value; });
     if (ruleTypeSel) {
       ruleTypeSel.addEventListener('change', (e) => {
         this._newRuleForm.type = e.target.value;
@@ -486,24 +698,50 @@ class ExcelUploaderPro extends HTMLElement {
     if (ruleParamInp) ruleParamInp.addEventListener('input', (e) => { this._newRuleForm.param = e.target.value; });
     if (ruleMinInp) ruleMinInp.addEventListener('input', (e) => { this._newRuleForm.min = e.target.value; });
     if (ruleMaxInp) ruleMaxInp.addEventListener('input', (e) => { this._newRuleForm.max = e.target.value; });
+    if (ruleAutoFixInp) ruleAutoFixInp.addEventListener('input', (e) => { this._newRuleForm.autoFix = e.target.value; });
+    if (ruleScopeFilesInp) ruleScopeFilesInp.addEventListener('input', (e) => { this._newRuleForm.scopeFiles = e.target.value; });
+    if (ruleStartDateInp) ruleStartDateInp.addEventListener('change', (e) => { this._newRuleForm.startDate = e.target.value; });
+    if (ruleEndDateInp) ruleEndDateInp.addEventListener('change', (e) => { this._newRuleForm.endDate = e.target.value; });
     if (ruleDescInp) ruleDescInp.addEventListener('input', (e) => { this._newRuleForm.desc = e.target.value; });
 
-    if (saveNewRuleBtn) {
-      saveNewRuleBtn.addEventListener('click', () => this._createNewValidationRule());
-    }
+    shadow.querySelectorAll('.assisted-snippet-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const preset = e.currentTarget.dataset.preset;
+        if (preset === 'capex_check') {
+          this._newRuleForm.col = this._requiredColumns.includes('CAPITALIZED') ? 'CAPITALIZED' : this._requiredColumns[0];
+          this._newRuleForm.severity = 'CHECK';
+          this._newRuleForm.semaphore = 'PURPLE';
+          this._newRuleForm.type = 'ASSISTED_CODE';
+          this._newRuleForm.param = "Number(row.H1 || 0) <= 50000 || String(value).toUpperCase() === 'Y'";
+          this._newRuleForm.autoFix = "'Y'";
+          this._newRuleForm.desc = 'Chequeo CAPEX: Si H1 > 50.000, CAPITALIZED debe ser Y';
+        } else if (preset === 'budget_prev') {
+          this._newRuleForm.col = this._requiredColumns.includes('H1') ? 'H1' : this._requiredColumns[0];
+          this._newRuleForm.severity = 'PREVENTIVE';
+          this._newRuleForm.semaphore = 'AMBER';
+          this._newRuleForm.type = 'ASSISTED_CODE';
+          this._newRuleForm.param = 'num >= 0 && num <= 100000';
+          this._newRuleForm.autoFix = 'num < 0 ? Math.abs(num) : 100000';
+          this._newRuleForm.desc = 'Alerta Preventiva: Importe H1 entre 0 y 100.000';
+        } else if (preset === 'cc_company_block') {
+          this._newRuleForm.col = this._requiredColumns.includes('COSTCENTER') ? 'COSTCENTER' : this._requiredColumns[0];
+          this._newRuleForm.severity = 'BLOCKING';
+          this._newRuleForm.semaphore = 'RED';
+          this._newRuleForm.type = 'ASSISTED_CODE';
+          this._newRuleForm.param = "row.COMPANY !== '1000' || String(value).startsWith('CC_')";
+          this._newRuleForm.autoFix = "'CC_' + String(value).trim()";
+          this._newRuleForm.desc = 'Bloqueante: Para Sociedad 1000 el Centro de Coste empieza por CC_';
+        }
+        this._render();
+      });
+    });
+
+    if (saveNewRuleBtn) saveNewRuleBtn.addEventListener('click', () => this._createNewValidationRule());
 
     if (resetDefaultRulesBtn) {
       resetDefaultRulesBtn.addEventListener('click', () => {
-        this._storageSet('sac_validation_rules_v1', null);
-        this._validationRules = [
-          { id: 'RULE-1', col: 'ID', type: 'UNIQUE', param: '', min: '', max: '', active: true, desc: 'No duplicate IDs allowed across consolidated sheets' },
-          { id: 'RULE-2', col: 'COMPANY', type: 'IN_LIST', param: '1000, 2000, 950', min: '', max: '', active: true, desc: 'Must match SAP Master Data Company Codes' },
-          { id: 'RULE-3', col: 'COSTCENTER', type: 'IN_LIST', param: 'CC_IT_01, CC_FIN_02, 12234566, 10180000', min: '', max: '', active: true, desc: 'Must match SAP Master Data Cost Centers' },
-          { id: 'RULE-4', col: 'H1', type: 'NUMERIC_RANGE', param: '', min: '0', max: '', active: true, desc: 'Planning amount H1 must be numeric (>= 0)' }
-        ];
-        this._saveRules();
-        this._validateRows();
-        this._notify('Default corporate validation rules restored.', 'info');
+        this._storageSet('sac_validation_rules_v3', null);
+        window.location.reload();
       });
     }
 
@@ -514,7 +752,6 @@ class ExcelUploaderPro extends HTMLElement {
         if (rule) {
           rule.active = e.currentTarget.checked;
           this._saveRules();
-          this._logAction('RULE_TOGGLED', `${rule.col} [${rule.type}]`, `Validation rule ${rule.active ? 'enabled' : 'disabled'}`, !rule.active, rule.active);
           this._validateRows();
           this._render();
         }
@@ -524,51 +761,27 @@ class ExcelUploaderPro extends HTMLElement {
     shadow.querySelectorAll('.delete-rule-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const rId = e.currentTarget.dataset.ruleId;
-        const rule = this._validationRules.find(r => r.id === rId);
         this._validationRules = this._validationRules.filter(r => r.id !== rId);
         this._saveRules();
-        if (rule) {
-          this._logAction('RULE_DELETED', `${rule.col} [${rule.type}]`, 'Deleted custom validation rule', rule.param || rule.type, 'DELETED');
-        }
         this._validateRows();
         this._notify('Validation rule removed.', 'info');
       });
     });
 
-    shadow.querySelectorAll('.remove-row-btn').forEach(btn => {
+    // Copiar regla a otro fichero o a todos los ficheros
+    shadow.querySelectorAll('.copy-rule-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        const origIdx = parseInt(e.currentTarget.dataset.origIdx, 10);
-        if (!isNaN(origIdx) && this._rows[origIdx]) {
-          const removed = this._rows[origIdx];
-          this._logAction('ROW_DELETED', `Row #${removed._rowNum} (ID: ${removed.ID || 'N/A'})`, `Deleted row from ${removed._sourceFile}`, String(removed.ID || 'Row'), 'DELETED');
-          this._rows.splice(origIdx, 1);
-          this._rows.forEach((r, idx) => { r._rowNum = idx + 2; });
-          this._validateRows();
-          this._render();
-        }
-      });
-    });
-
-    shadow.querySelectorAll('.dup-row-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const origIdx = parseInt(e.currentTarget.dataset.origIdx, 10);
-        if (!isNaN(origIdx) && this._rows[origIdx]) {
-          const source = this._rows[origIdx];
-          const oldId = source.ID || 'N/A';
-          const newId = oldId ? `${oldId}_COPY` : 'PLN_COPY';
-          const clone = {
-            ...source,
-            ID: newId,
-            _fileOwner: '__MANUAL__',
-            _isManual: true,
-            _editedCols: { ...(source._editedCols || {}) },
-            _errors: {}
-          };
-          this._rows.splice(origIdx + 1, 0, clone);
-          this._rows.forEach((r, idx) => { r._rowNum = idx + 2; });
-          this._logAction('ROW_CLONED', `Row #${source._rowNum}`, `Cloned planning row from ID '${oldId}'`, oldId, newId);
-          this._validateRows();
-          this._notify('Row duplicated. Verify the new ID.', 'info');
+        const rId = e.currentTarget.dataset.ruleId;
+        const targetFile = prompt('Introduce el nombre exacto del fichero destino o escribe "ALL" para aplicarlo a todos los excels:', 'ALL');
+        if (targetFile !== null) {
+          const rule = this._validationRules.find(r => r.id === rId);
+          if (rule) {
+            rule.scopeFiles = targetFile.trim().toUpperCase() === 'ALL' ? 'ALL' : targetFile.trim();
+            this._saveRules();
+            this._validateRows();
+            this._notify(`Rule scope updated to: ${rule.scopeFiles}`, 'success');
+            this._render();
+          }
         }
       });
     });
@@ -592,36 +805,16 @@ class ExcelUploaderPro extends HTMLElement {
     const applyBulkEmptyBtn = shadow.getElementById('applyBulkEmptyBtn');
     const applyBulkAllBtn = shadow.getElementById('applyBulkAllBtn');
 
-    if (bulkColSelect) {
-      bulkColSelect.addEventListener('change', (e) => { this._bulkCol = e.target.value; });
-    }
-    if (bulkValInput) {
-      bulkValInput.addEventListener('input', (e) => { this._bulkVal = e.target.value; });
-    }
-    if (applyBulkEmptyBtn) {
-      applyBulkEmptyBtn.addEventListener('click', () => this._applyBulkFill(true));
-    }
-    if (applyBulkAllBtn) {
-      applyBulkAllBtn.addEventListener('click', () => this._applyBulkFill(false));
-    }
+    if (bulkColSelect) bulkColSelect.addEventListener('change', (e) => { this._bulkCol = e.target.value; });
+    if (bulkValInput) bulkValInput.addEventListener('input', (e) => { this._bulkVal = e.target.value; });
+    if (applyBulkEmptyBtn) applyBulkEmptyBtn.addEventListener('click', () => this._applyBulkFill(true));
+    if (applyBulkAllBtn) applyBulkAllBtn.addEventListener('click', () => this._applyBulkFill(false));
 
     shadow.querySelectorAll('.file-comment-input').forEach(input => {
       input.addEventListener('input', (e) => {
         const idx = parseInt(e.target.dataset.index, 10);
         if (this._filesQueue[idx]) {
           this._filesQueue[idx].comment = e.target.value;
-        }
-      });
-      input.addEventListener('blur', (e) => {
-        const idx = parseInt(e.target.dataset.index, 10);
-        if (this._filesQueue[idx]) {
-          const prevLogged = this._filesQueue[idx]._lastLoggedComment || '';
-          const newComment = (this._filesQueue[idx].comment || '').trim();
-          this._filesQueue[idx].comment = newComment;
-          if (prevLogged !== newComment) {
-            this._filesQueue[idx]._lastLoggedComment = newComment;
-            this._logAction('FILE_COMMENT', this._filesQueue[idx].file.name, 'Updated business traceability comment', prevLogged || '(Empty)', newComment || '(Empty)');
-          }
         }
       });
     });
@@ -631,8 +824,6 @@ class ExcelUploaderPro extends HTMLElement {
         const idx = parseInt(e.currentTarget.dataset.index, 10);
         const removedFile = this._filesQueue[idx];
         if (removedFile) {
-          const fileName = removedFile.file.name;
-          this._logAction('FILE_REMOVED', fileName, 'Removed workbook and its sheets from consolidation queue', fileName, 'REMOVED');
           this._filesQueue.splice(idx, 1);
           this._syncRowsFromActiveSheets();
         }
@@ -668,13 +859,6 @@ class ExcelUploaderPro extends HTMLElement {
           if (oldVal !== newVal) {
             row[colName] = newVal;
             this._recordCellModification(row, colName, oldVal, newVal);
-            this._logAction(
-              'CELL_EDIT',
-              `Row #${row._rowNum} [${colName}]`,
-              `Inline value modification in ${row._sourceFile}`,
-              oldVal || '(Blank)',
-              newVal || '(Blank)'
-            );
             this._validateRows();
             this._render();
           }
@@ -691,6 +875,9 @@ class ExcelUploaderPro extends HTMLElement {
     shadow.querySelectorAll('.audit-row-link').forEach(rowEl => {
       rowEl.addEventListener('click', (e) => {
         this._selectedAuditId = e.currentTarget.dataset.loadId;
+        const rec = this._history.find(h => h.id === this._selectedAuditId);
+        const availCols = (rec && rec.columns) || this._requiredColumns;
+        this._syncExportColumnsWithSchema(availCols);
         this._auditDetailSubTab = 'dataTab';
         this._auditSearchQuery = '';
         this._render();
@@ -710,8 +897,87 @@ class ExcelUploaderPro extends HTMLElement {
       clearHistoryBtn.addEventListener('click', () => {
         this._history = [];
         this._selectedAuditId = null;
-        this._storageSet('sac_audit_history_v2', null);
+        this._storageSet('sac_audit_history_v3', null);
         this._notify('Audit history cleared.', 'info');
+      });
+    }
+
+    const toggleAuditExportCfgBtn = shadow.getElementById('toggleAuditExportCfgBtn');
+    if (toggleAuditExportCfgBtn) {
+      toggleAuditExportCfgBtn.addEventListener('click', () => {
+        this._auditExportConfig.open = !this._auditExportConfig.open;
+        const rec = this._selectedAuditId ? this._history.find(h => h.id === this._selectedAuditId) : null;
+        const availCols = (rec && rec.columns) || this._requiredColumns;
+        this._syncExportColumnsWithSchema(availCols);
+        this._render();
+      });
+    }
+
+    const auditNumColsInp = shadow.getElementById('auditNumColsInp');
+    if (auditNumColsInp) {
+      auditNumColsInp.addEventListener('change', (e) => {
+        const rec = this._selectedAuditId ? this._history.find(h => h.id === this._selectedAuditId) : null;
+        const availCols = (rec && rec.columns) || this._requiredColumns;
+        const count = Math.max(1, Math.min(availCols.length, parseInt(e.target.value, 10) || availCols.length));
+        this._auditExportConfig.numCols = count;
+        this._auditExportConfig.selectedCols = availCols.slice(0, count);
+        this._render();
+      });
+    }
+
+    shadow.querySelectorAll('.audit-exp-col-chk').forEach(chk => {
+      chk.addEventListener('change', (e) => {
+        const col = e.currentTarget.dataset.col;
+        const rec = this._selectedAuditId ? this._history.find(h => h.id === this._selectedAuditId) : null;
+        const availCols = (rec && rec.columns) || this._requiredColumns;
+        if (e.currentTarget.checked) {
+          if (!this._auditExportConfig.selectedCols.includes(col)) {
+            this._auditExportConfig.selectedCols.push(col);
+          }
+        } else {
+          if (this._auditExportConfig.selectedCols.length <= 1) {
+            this._notify('At least 1 column must be selected for download.', 'error');
+            e.currentTarget.checked = true;
+            return;
+          }
+          this._auditExportConfig.selectedCols = this._auditExportConfig.selectedCols.filter(c => c !== col);
+        }
+        this._auditExportConfig.selectedCols = availCols.filter(c => this._auditExportConfig.selectedCols.includes(c));
+        this._auditExportConfig.numCols = this._auditExportConfig.selectedCols.length;
+        this._render();
+      });
+    });
+
+    const auditIncCommentsChk = shadow.getElementById('auditIncCommentsChk');
+    if (auditIncCommentsChk) {
+      auditIncCommentsChk.addEventListener('change', (e) => {
+        this._auditExportConfig.includeComments = e.currentTarget.checked;
+      });
+    }
+
+    const auditIncDetailChk = shadow.getElementById('auditIncDetailChk');
+    if (auditIncDetailChk) {
+      auditIncDetailChk.addEventListener('change', (e) => {
+        this._auditExportConfig.includeAuditDetail = e.currentTarget.checked;
+      });
+    }
+
+    const auditExpFormatSel = shadow.getElementById('auditExpFormatSel');
+    if (auditExpFormatSel) {
+      auditExpFormatSel.addEventListener('change', (e) => {
+        this._auditExportConfig.format = e.target.value;
+      });
+    }
+
+    const runConfiguredAuditDownloadBtn = shadow.getElementById('runConfiguredAuditDownloadBtn');
+    if (runConfiguredAuditDownloadBtn) {
+      runConfiguredAuditDownloadBtn.addEventListener('click', () => {
+        if (this._selectedAuditId) {
+          const rec = this._history.find(h => h.id === this._selectedAuditId);
+          if (rec) this._downloadConfiguredAuditReport([rec], `${rec.id}_Custom_Audit_Report`);
+        } else {
+          this._downloadConfiguredAuditReport(this._history, 'Global_Audit_Monitor_Report');
+        }
       });
     }
 
@@ -736,14 +1002,6 @@ class ExcelUploaderPro extends HTMLElement {
       });
     }
 
-    const exportAuditExcelBtn = shadow.getElementById('exportAuditExcelBtn');
-    if (exportAuditExcelBtn) {
-      exportAuditExcelBtn.addEventListener('click', () => {
-        const rec = this._history.find(h => h.id === this._selectedAuditId);
-        if (rec) this._exportAuditRecordExcel(rec);
-      });
-    }
-
     const exportAuditJsonBtn = shadow.getElementById('exportAuditJsonBtn');
     if (exportAuditJsonBtn) {
       exportAuditJsonBtn.addEventListener('click', () => {
@@ -754,38 +1012,40 @@ class ExcelUploaderPro extends HTMLElement {
 
     if (finishBtn) {
       finishBtn.addEventListener('click', () => {
-        const errorsCount = this._rows.filter(r => Object.keys(r._errors).length > 0).length;
-        if (errorsCount > 0) {
-          this._notify(`Cannot consolidate: ${errorsCount} row(s) still contain errors.`, 'error');
+        const stats = this._getAlertStats();
+        if (stats.blockingRows > 0) {
+          this._notify(`🛑 Cannot synchronize: ${stats.blockingRows} row(s) have BLOCKING alerts.`, 'error');
+          return;
+        }
+        if ((stats.preventiveRows > 0 || stats.checkRows > 0) && !this._acknowledgeNonBlocking) {
+          this._notify(`⚠️ Please confirm review of Preventive and Check alerts before synchronizing.`, 'error');
           return;
         }
         if (this._rows.length === 0) {
-          this._notify('No active data rows to load. Select at least one sheet or add rows.', 'error');
+          this._notify('No active data rows to load.', 'error');
           return;
         }
 
         const loadId = 'LOAD-' + Math.floor(10000 + Math.random() * 90000);
         const fileSummary = this._filesQueue.length > 0
-          ? this._filesQueue.map(f => {
-              const activeSheets = (f.sheets || []).filter(s => s.selected).map(s => s.name).join(', ');
-              return `${f.file.name} [Sheets: ${activeSheets || 'None'}] (${f.comment || 'No comment'})`;
-            }).join('; ')
-          : 'Manual Planning Entry';
+          ? this._filesQueue.map(f => `${f.file.name} [Strategy: ${this._loadStrategy}]`).join('; ')
+          : `Manual Planning [Strategy: ${this._loadStrategy}]`;
 
         const filesMetadata = this._filesQueue.map(f => ({
           name: f.file.name,
+          strategy: this._loadStrategy,
           sizeKB: Math.max(1, Math.round(f.file.size / 1024)),
           sheets: (f.sheets || []).filter(s => s.selected).length,
-          totalSheets: (f.sheets || []).length,
-          selectedSheetNames: (f.sheets || []).filter(s => s.selected).map(s => s.name),
           rows: (f.sheets || []).filter(s => s.selected).reduce((acc, s) => acc + s.rows.length, 0),
-          comment: f.comment || 'No business comment provided'
+          comment: f.comment || 'No comment'
         }));
 
         const snapshotRows = this._rows.map(r => {
           const copy = {
             _rowNum: r._rowNum,
             _sourceFile: r._sourceFile,
+            _fileOwner: r._fileOwner || '',
+            _loadStrategy: this._loadStrategy,
             _isManual: !!r._isManual,
             _editedCols: { ...(r._editedCols || {}) }
           };
@@ -794,25 +1054,21 @@ class ExcelUploaderPro extends HTMLElement {
         });
 
         const cleanPayloadArray = this._rows.map(r => {
-          const clean = {};
+          const clean = { _loadStrategy: this._loadStrategy };
           this._requiredColumns.forEach(c => { clean[c] = r[c] ?? ''; });
           return clean;
         });
 
-        const manualEditsCount = this._currentSessionLogs.filter(
-          l => l.type === 'CELL_EDIT' || l.type === 'BULK_FILL' || l.type === 'ROW_ADDED' || l.type === 'ROW_CLONED' || l.type === 'ROW_DELETED'
-        ).length;
-
         const auditRecord = {
           id: loadId,
           user: this._currentUser,
+          loadStrategy: this._loadStrategy,
           file: fileSummary,
           filesDetails: filesMetadata,
           columns: [...this._requiredColumns],
           rows: this._rows.length,
-          editsCount: manualEditsCount,
           timestamp: new Date().toLocaleString(),
-          status: 'Synchronized',
+          status: stats.preventiveRows > 0 || stats.checkRows > 0 ? `${this._loadStrategy} (Approved Alerts)` : `${this._loadStrategy} Success`,
           snapshotRows,
           changeLog: [...this._currentSessionLogs],
           payloadJson: JSON.stringify(cleanPayloadArray, null, 2)
@@ -831,56 +1087,66 @@ class ExcelUploaderPro extends HTMLElement {
         this._filesQueue = [];
         this._rows = [];
         this._currentSessionLogs = [];
+        this._acknowledgeNonBlocking = false;
         this._activeTab = 'monitorTab';
         this._selectedAuditId = loadId;
+        this._syncExportColumnsWithSchema(auditRecord.columns);
         this._auditDetailSubTab = 'dataTab';
-        this._notify(`Load ${loadId} synchronized! Inspecting full audit trail.`, 'success');
+        this._notify(`Load ${loadId} (${this._loadStrategy}) synchronized successfully!`, 'success');
       });
     }
   }
 
   _createNewValidationRule() {
     const col = this._newRuleForm.col || this._requiredColumns[0] || 'ID';
+    const severity = this._newRuleForm.severity || 'BLOCKING';
+    const semaphore = this._newRuleForm.semaphore || 'RED';
     const type = this._newRuleForm.type || 'IN_LIST';
     const param = (this._newRuleForm.param || '').trim();
     const min = (this._newRuleForm.min || '').trim();
     const max = (this._newRuleForm.max || '').trim();
+    const autoFix = (this._newRuleForm.autoFix || '').trim();
+    const scopeFiles = (this._newRuleForm.scopeFiles || 'ALL').trim();
+    const startDate = (this._newRuleForm.startDate || '').trim();
+    const endDate = (this._newRuleForm.endDate || '').trim();
     let desc = (this._newRuleForm.desc || '').trim();
 
-    if ((type === 'IN_LIST' || type === 'STARTS_WITH' || type === 'REGEX') && !param) {
-      this._notify('Please specify the validation parameter / allowed values.', 'error');
+    if ((type === 'IN_LIST' || type === 'STARTS_WITH' || type === 'REGEX' || type === 'ASSISTED_CODE') && !param) {
+      this._notify('Please specify validation parameter or assisted code formula.', 'error');
       return;
     }
 
     if (!desc) {
-      if (type === 'IN_LIST') desc = `${col} must be in list: ${param}`;
-      if (type === 'NUMERIC_RANGE') desc = `${col} must be numeric ${min !== '' ? '>= ' + min : ''} ${max !== '' ? '<= ' + max : ''}`.trim();
-      if (type === 'STARTS_WITH') desc = `${col} must start with '${param}'`;
-      if (type === 'REGEX') desc = `${col} must match pattern ${param}`;
-      if (type === 'UNIQUE') desc = `${col} must contain unique values (no duplicates)`;
+      desc = `${col} rule [${type}]`;
     }
 
     const newRule = {
       id: 'RULE-' + Math.floor(1000 + Math.random() * 9000),
       col,
+      severity,
+      semaphore,
       type,
       param,
       min,
       max,
+      autoFix,
+      scopeFiles,
+      startDate,
+      endDate,
       active: true,
       desc
     };
 
     this._validationRules.push(newRule);
     this._saveRules();
-    this._logAction('RULE_CREATED', `${col} [${type}]`, desc, '', param || `${min}..${max}` || type);
     this._newRuleForm.param = '';
     this._newRuleForm.min = '';
     this._newRuleForm.max = '';
+    this._newRuleForm.autoFix = '';
     this._newRuleForm.desc = '';
     this._showInlineRuleCreator = false;
     this._validateRows();
-    this._notify(`Validation rule created for column '${col}'.`, 'success');
+    this._notify(`Rule created for column '${col}' (Scope: ${scopeFiles}).`, 'success');
   }
 
   _applyBulkFill(onlyEmpty) {
@@ -905,22 +1171,13 @@ class ExcelUploaderPro extends HTMLElement {
         }
       }
     });
-    if (updated > 0) {
-      this._logAction(
-        'BULK_FILL',
-        `Column [${col}] (${updated} rows)`,
-        onlyEmpty ? 'Bulk filled empty cells' : 'Bulk overwrote visible cells',
-        onlyEmpty ? '(Empty cells)' : '(Multiple values)',
-        val
-      );
-    }
     this._validateRows();
     this._notify(`Bulk updated ${updated} row(s) in column '${col}'.`, 'success');
   }
 
   async _handleFilesSelection(fileList) {
     if (typeof XLSX === 'undefined') {
-      this._notify('Excel engine is still loading, please wait a second...', 'error');
+      this._notify('Excel engine is still loading...', 'error');
       return;
     }
 
@@ -938,14 +1195,13 @@ class ExcelUploaderPro extends HTMLElement {
           ext,
           comment: '',
           _lastLoggedComment: '',
-          sheets: [], // [{ name, selected, rows: [] }]
+          sheets: [],
           sheetCount: 0,
           rowCount: 0,
           parsed: false
         };
         this._filesQueue.push(queueItem);
         newItemsToParse.push(queueItem);
-        this._logAction('FILE_UPLOAD', newFile.name, `File loaded (${Math.max(1, Math.round(newFile.size / 1024))} KB, Format: ${ext})`, '', 'QUEUED');
       }
     }
 
@@ -960,15 +1216,8 @@ class ExcelUploaderPro extends HTMLElement {
 
   async _reparseAllFilesWithNewConfig() {
     if (this._filesQueue.length === 0) return;
-    this._logAction(
-      'PARSE_CONFIG_CHANGED',
-      `Format: ${this._parseConfig.format}, Delimiter: ${this._parseConfig.delimiter === '\t' ? 'TAB' : this._parseConfig.delimiter}`,
-      `Re-parsing workbooks with Header Row #${this._parseConfig.headerRow} and Number Format ${this._parseConfig.numberFormat}`,
-      '',
-      'REPARSED'
-    );
     await this._parseFilesInQueue(this._filesQueue);
-    this._notify('All files re-parsed with the new format & delimiter settings.', 'success');
+    this._notify('All files re-parsed with new settings.', 'success');
   }
 
   _readFileAsArrayBuffer(file) {
@@ -989,7 +1238,6 @@ class ExcelUploaderPro extends HTMLElement {
     });
   }
 
-  // Parser determinista para ficheros CSV / TXT con soporte explícito de Tabulador (\t), Punto y Coma (;), Coma (,) o Pipe (|)
   _parseDelimitedTextToAOA(text, delimiterSetting) {
     let sep = delimiterSetting;
     const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim() !== '');
@@ -1029,7 +1277,7 @@ class ExcelUploaderPro extends HTMLElement {
 
   async _parseFilesInQueue(itemsToParse) {
     this._isLoading = true;
-    this._loadingText = 'Parsing sheets, formats & delimiters...';
+    this._loadingText = 'Parsing sheets & data...';
     this._render();
 
     let detectedHeaders = [...this._headers];
@@ -1063,7 +1311,9 @@ class ExcelUploaderPro extends HTMLElement {
                 _sheetOwner: sheetName,
                 _isManual: false,
                 _editedCols: {},
-                _errors: {}
+                _checkedRules: {},
+                _errors: {},
+                _alerts: {}
               };
               currentHeaders.forEach((h, i) => {
                 obj[h] = this._normalizeCellValue(row[i]);
@@ -1106,7 +1356,9 @@ class ExcelUploaderPro extends HTMLElement {
                   _sheetOwner: sheetName,
                   _isManual: false,
                   _editedCols: {},
-                  _errors: {}
+                  _checkedRules: {},
+                  _errors: {},
+                  _alerts: {}
                 };
                 currentHeaders.forEach((h, i) => {
                   obj[h] = this._normalizeCellValue(row[i]);
@@ -1149,10 +1401,16 @@ class ExcelUploaderPro extends HTMLElement {
     this._render();
   }
 
+  _pushAlert(row, col, alertObj) {
+    if (!row._alerts[col]) row._alerts[col] = [];
+    row._alerts[col].push(alertObj);
+    row._errors[col] = `[${alertObj.severity}] ${alertObj.msg}`;
+  }
+
   _validateRows() {
     const activeRules = this._validationRules.filter(r => r.active);
+    const now = new Date();
 
-    // Pre-calcular conteos para reglas de tipo UNIQUE
     const uniqueCols = activeRules.filter(r => r.type === 'UNIQUE').map(r => r.col);
     const valueCountsPerCol = {};
     uniqueCols.forEach(col => {
@@ -1165,56 +1423,152 @@ class ExcelUploaderPro extends HTMLElement {
 
     this._rows.forEach(row => {
       row._errors = {};
+      row._alerts = {};
+      if (!row._checkedRules) row._checkedRules = {};
 
-      // 1. Campos obligatorios del esquema
       this._requiredColumns.forEach(col => {
         if (row[col] === undefined || String(row[col]).trim() === '') {
-          row._errors[col] = 'Mandatory field';
+          this._pushAlert(row, col, {
+            ruleId: 'SYS-MANDATORY',
+            severity: 'BLOCKING',
+            semaphore: 'RED',
+            msg: 'Mandatory field',
+            autoFix: ''
+          });
         }
       });
 
-      // 2. Evaluación dinámica de todas las reglas creadas por el usuario
       activeRules.forEach(rule => {
         const col = rule.col;
         if (!this._requiredColumns.includes(col)) return;
+
+        // Validar alcance por fichero (scopeFiles)
+        const scope = (rule.scopeFiles || 'ALL').trim().toUpperCase();
+        if (scope !== 'ALL') {
+          const owner = String(row._fileOwner || '').trim().toLowerCase();
+          const matchTarget = scope.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+          if (!matchTarget.includes(owner)) {
+            return; // La regla no aplica a este fichero
+          }
+        }
+
+        // Validar carácter temporal (startDate / endDate)
+        if (rule.startDate) {
+          const start = new Date(rule.startDate);
+          if (!isNaN(start.getTime()) && now < start) return;
+        }
+        if (rule.endDate) {
+          const end = new Date(rule.endDate);
+          if (!isNaN(end.getTime()) && now > end) return;
+        }
+
         const rawVal = String(row[col] ?? '').trim();
-        if (!rawVal) return; // Si está vacío, ya salta Mandatory field
+        if (!rawVal && rule.type !== 'ASSISTED_CODE') return;
+
+        const severity = rule.severity || 'BLOCKING';
+        const semaphore = rule.semaphore || (severity === 'BLOCKING' ? 'RED' : (severity === 'PREVENTIVE' ? 'AMBER' : (severity === 'CHECK' ? 'PURPLE' : 'BLUE')));
+        const checkKey = `${col}__${rule.id}`;
+        if ((severity === 'CHECK' || severity === 'PREVENTIVE') && row._checkedRules[checkKey]) {
+          return;
+        }
+
+        let failed = false;
+        let failMsg = rule.desc || 'Validation failed';
 
         if (rule.type === 'UNIQUE') {
-          if (valueCountsPerCol[col] && valueCountsPerCol[col][rawVal] > 1) {
-            row._errors[col] = 'Duplicate value';
+          if (rawVal && valueCountsPerCol[col] && valueCountsPerCol[col][rawVal] > 1) {
+            failed = true;
+            failMsg = 'Duplicate value not allowed';
           }
         } else if (rule.type === 'IN_LIST') {
           const allowed = rule.param.split(',').map(s => s.trim()).filter(Boolean);
           if (allowed.length > 0 && !allowed.includes(rawVal)) {
-            row._errors[col] = `Allowed: ${allowed.join(', ')}`;
+            failed = true;
+            failMsg = `Allowed: ${allowed.join(', ')}`;
           }
         } else if (rule.type === 'NUMERIC_RANGE') {
           const num = Number(rawVal);
           if (isNaN(num)) {
-            row._errors[col] = 'Must be numeric';
+            failed = true;
+            failMsg = 'Must be numeric';
           } else {
             if (rule.min !== '' && !isNaN(Number(rule.min)) && num < Number(rule.min)) {
-              row._errors[col] = `Min allowed: ${rule.min}`;
+              failed = true;
+              failMsg = `Min threshold: ${rule.min}`;
             }
             if (rule.max !== '' && !isNaN(Number(rule.max)) && num > Number(rule.max)) {
-              row._errors[col] = `Max allowed: ${rule.max}`;
+              failed = true;
+              failMsg = `Max threshold: ${rule.max}`;
             }
           }
         } else if (rule.type === 'STARTS_WITH') {
           if (!rawVal.toUpperCase().startsWith(rule.param.toUpperCase())) {
-            row._errors[col] = `Must start with '${rule.param}'`;
+            failed = true;
+            failMsg = `Must start with '${rule.param}'`;
           }
         } else if (rule.type === 'REGEX') {
           try {
             const re = new RegExp(rule.param);
             if (!re.test(rawVal)) {
-              row._errors[col] = `Invalid format (${rule.param})`;
+              failed = true;
+              failMsg = `Invalid pattern (${rule.param})`;
             }
           } catch (e) {}
+        } else if (rule.type === 'ASSISTED_CODE') {
+          try {
+            const isValid = Boolean(this._evalAssistedCode(rule.param, row, col));
+            if (!isValid) {
+              failed = true;
+              failMsg = rule.desc || `Formula failed: ${rule.param}`;
+            }
+          } catch (e) {
+            failed = true;
+            failMsg = `Code syntax error: ${e.message}`;
+          }
+        }
+
+        if (failed) {
+          this._pushAlert(row, col, {
+            ruleId: rule.id,
+            severity,
+            semaphore,
+            msg: failMsg,
+            autoFix: rule.autoFix || ''
+          });
         }
       });
     });
+  }
+
+  _getRowSeverities(row) {
+    const set = new Set();
+    Object.values(row._alerts || {}).forEach(arr => {
+      (arr || []).forEach(a => set.add(a.severity));
+    });
+    return set;
+  }
+
+  _getAlertStats() {
+    let blockingRows = 0;
+    let preventiveRows = 0;
+    let checkRows = 0;
+    let infoRows = 0;
+    let fixableCells = 0;
+
+    this._rows.forEach(r => {
+      const sevs = this._getRowSeverities(r);
+      if (sevs.has('BLOCKING')) blockingRows++;
+      if (sevs.has('PREVENTIVE')) preventiveRows++;
+      if (sevs.has('CHECK')) checkRows++;
+      if (sevs.has('INFO')) infoRows++;
+
+      Object.values(r._alerts || {}).forEach(arr => {
+        if ((arr || []).some(a => a.autoFix)) fixableCells++;
+      });
+    });
+
+    const cleanRows = this._rows.filter(r => this._getRowSeverities(r).size === 0).length;
+    return { blockingRows, preventiveRows, checkRows, infoRows, cleanRows, fixableCells };
   }
 
   _downloadTemplate() {
@@ -1224,7 +1578,8 @@ class ExcelUploaderPro extends HTMLElement {
       if (col === 'COMPANY') return '1000';
       if (col === 'COSTCENTER') return 'CC_IT_01';
       if (col === 'H1') return '25000';
-      return 'SAMPLE';
+      if (col === 'CAPITALIZED') return 'Y';
+      return 'SAMPLE_DESC';
     });
     const ws = XLSX.utils.aoa_to_sheet([this._requiredColumns, sampleRow]);
     const wb = XLSX.utils.book_new();
@@ -1247,29 +1602,109 @@ class ExcelUploaderPro extends HTMLElement {
     this._notify('Consolidated data exported to Excel.', 'success');
   }
 
-  _exportAuditRecordExcel(rec) {
-    if (typeof XLSX === 'undefined' || !rec || !rec.snapshotRows) return;
-    const cols = rec.columns || this._requiredColumns;
-    const header = ['ROW_NUM', 'SOURCE_WORKBOOK_SHEET', 'ORIGIN_TYPE', ...cols];
-    const data = rec.snapshotRows.map(r => [
-      r._rowNum,
-      r._sourceFile,
-      r._isManual ? 'MANUAL / CLONED' : (Object.keys(r._editedCols || {}).length > 0 ? 'EDITED IN WIDGET' : 'ORIGINAL EXCEL'),
-      ...cols.map(c => r[c] ?? '')
-    ]);
-    const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Committed_Snapshot');
-
-    if (rec.changeLog && rec.changeLog.length > 0) {
-      const logHeader = ['TIME', 'ACTION_TYPE', 'TARGET', 'DESCRIPTION', 'OLD_VALUE', 'NEW_VALUE'];
-      const logData = rec.changeLog.map(l => [l.time, l.type, l.target, l.detail, l.oldVal, l.newVal]);
-      const wsLog = XLSX.utils.aoa_to_sheet([logHeader, ...logData]);
-      XLSX.utils.book_append_sheet(wb, wsLog, 'Audit_Change_Log');
+  _downloadConfiguredAuditReport(recordsList, filePrefix) {
+    if (!recordsList || recordsList.length === 0) {
+      this._notify('No audit records available to download.', 'error');
+      return;
     }
 
-    XLSX.writeFile(wb, `${rec.id}_SAC_Audit_Snapshot.xlsx`);
-    this._notify(`Audit snapshot ${rec.id} exported to Excel.`, 'success');
+    const cfg = this._auditExportConfig;
+    const chosenCols = cfg.selectedCols && cfg.selectedCols.length > 0
+      ? cfg.selectedCols
+      : this._requiredColumns.slice(0, cfg.numCols || this._requiredColumns.length);
+
+    const baseHeaders = ['LOAD_ID', 'LOAD_STRATEGY', 'TIMESTAMP', 'SAP_USER', 'ROW_NUM', 'SOURCE_WORKBOOK_SHEET'];
+    if (cfg.includeComments) baseHeaders.push('BUSINESS_COMMENTS');
+    if (cfg.includeAuditDetail) baseHeaders.push('AUDIT_TRACEABILITY_STATE', 'CELL_MODIFICATION_HISTORY');
+    const finalHeaders = [...baseHeaders, ...chosenCols];
+
+    const dataRows = [];
+    const allChangeLogs = [];
+
+    recordsList.forEach(rec => {
+      const snap = rec.snapshotRows || [];
+      snap.forEach(r => {
+        const editedCols = r._editedCols || {};
+        const editSummary = Object.keys(editedCols)
+          .map(c => `${c}: '${editedCols[c].from}' -> '${editedCols[c].to}'`)
+          .join(' | ');
+        const stateLabel = r._isManual
+          ? 'NEW / CLONED IN WIDGET'
+          : (Object.keys(editedCols).length > 0 ? `EDITED (${Object.keys(editedCols).length} cols)` : 'ORIGINAL EXCEL');
+
+        const rowArr = [
+          rec.id,
+          rec.loadStrategy || 'FULL',
+          rec.timestamp,
+          rec.user,
+          r._rowNum,
+          r._sourceFile
+        ];
+
+        if (cfg.includeComments) rowArr.push(r._fileComment || rec.file || 'No comment');
+        if (cfg.includeAuditDetail) rowArr.push(stateLabel, editSummary || 'No changes');
+
+        chosenCols.forEach(col => { rowArr.push(r[col] ?? ''); });
+        dataRows.push(rowArr);
+      });
+
+      if (cfg.includeAuditDetail && rec.changeLog) {
+        rec.changeLog.forEach(l => {
+          allChangeLogs.push([rec.id, rec.loadStrategy || 'FULL', rec.timestamp, rec.user, l.time, l.type, l.target, l.detail, l.oldVal, l.newVal]);
+        });
+      }
+    });
+
+    if (cfg.format === 'CSV' || typeof XLSX === 'undefined') {
+      const escapeCsv = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      let csvContent = finalHeaders.map(escapeCsv).join(',') + '\n';
+      dataRows.forEach(r => { csvContent += r.map(escapeCsv).join(',') + '\n'; });
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${filePrefix}_${chosenCols.length}Cols.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      this._notify('Audit report downloaded as CSV.', 'success');
+      return;
+    }
+
+    const wb = XLSX.utils.book_new();
+    const wsData = XLSX.utils.aoa_to_sheet([finalHeaders, ...dataRows]);
+    XLSX.utils.book_append_sheet(wb, wsData, 'Audit_Snapshot_Data');
+
+    if (cfg.includeComments) {
+      const filesHeader = ['LOAD_ID', 'LOAD_STRATEGY', 'TIMESTAMP', 'WORKBOOK_NAME', 'SIZE_KB', 'SELECTED_SHEETS', 'COMMITTED_ROWS', 'BUSINESS_COMMENT'];
+      const filesRows = [];
+      recordsList.forEach(rec => {
+        (rec.filesDetails || []).forEach(f => {
+          filesRows.push([
+            rec.id,
+            rec.strategy || rec.loadStrategy || 'FULL',
+            rec.timestamp,
+            f.name,
+            f.sizeKB || 1,
+            (f.selectedSheetNames || []).join(', '),
+            f.rows,
+            f.comment || 'No comment'
+          ]);
+        });
+      });
+      if (filesRows.length > 0) {
+        const wsFiles = XLSX.utils.aoa_to_sheet([filesHeader, ...filesRows]);
+        XLSX.utils.book_append_sheet(wb, wsFiles, 'Workbooks_&_Comments');
+      }
+    }
+
+    if (cfg.includeAuditDetail && allChangeLogs.length > 0) {
+      const logHeader = ['LOAD_ID', 'LOAD_STRATEGY', 'LOAD_DATE', 'SAP_USER', 'EVENT_TIME', 'ACTION_TYPE', 'TARGET', 'DESCRIPTION', 'PREVIOUS_VALUE', 'NEW_VALUE'];
+      const wsLog = XLSX.utils.aoa_to_sheet([logHeader, ...allChangeLogs]);
+      XLSX.utils.book_append_sheet(wb, wsLog, 'Audit_Activity_Log');
+    }
+
+    XLSX.writeFile(wb, `${filePrefix}_${chosenCols.length}Cols.xlsx`);
+    this._notify('Configurable Audit Report exported successfully.', 'success');
   }
 
   _exportAuditRecordJson(rec) {
@@ -1278,26 +1713,29 @@ class ExcelUploaderPro extends HTMLElement {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${rec.id}_BTP_Audit_Certificate.json`;
+    a.download = `${rec.id}_Audit_Certificate.json`;
     a.click();
     URL.revokeObjectURL(url);
     this._notify(`Audit certificate ${rec.id} downloaded.`, 'success');
   }
 
   _exportErrorLog() {
-    const errorRows = this._rows.filter(r => Object.keys(r._errors).length > 0);
-    if (errorRows.length === 0) return;
-    let csv = 'SourceFile,Row,ID,Column,Error Description\n';
-    errorRows.forEach(r => {
-      Object.keys(r._errors).forEach(col => {
-        csv += `"${this._esc(r._sourceFile)}",${r._rowNum},"${this._esc(r.ID || '')}","${col}","${this._esc(r._errors[col])}"\n`;
+    let csv = 'SourceFile,Row,ID,Column,Alert Severity,Semaphore,Rule ID,Alert Description\n';
+    let count = 0;
+    this._rows.forEach(r => {
+      Object.keys(r._alerts || {}).forEach(col => {
+        (r._alerts[col] || []).forEach(a => {
+          count++;
+          csv += `"${this._esc(r._sourceFile)}",${r._rowNum},"${this._esc(r.ID || '')}","${col}","${a.severity}","${a.semaphore}","${a.ruleId}","${this._esc(a.msg)}"\n`;
+        });
       });
     });
+    if (count === 0) return;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'SAC_Validation_Error_Log.csv';
+    a.download = 'SAC_Validation_Alerts_Log.csv';
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -1307,9 +1745,11 @@ class ExcelUploaderPro extends HTMLElement {
     return this._rows
       .map((row, origIdx) => ({ row, origIdx }))
       .filter(({ row }) => {
-        const hasErr = Object.keys(row._errors).length > 0;
-        if (this._issueFilter === 'correct' && hasErr) return false;
-        if (this._issueFilter === 'errors' && !hasErr) return false;
+        const sevs = this._getRowSeverities(row);
+        if (this._issueFilter === 'correct' && sevs.size > 0) return false;
+        if (['BLOCKING', 'PREVENTIVE', 'CHECK', 'INFO'].includes(this._issueFilter) && !sevs.has(this._issueFilter)) {
+          return false;
+        }
         if (q) {
           const matchSource = String(row._sourceFile ?? '').toLowerCase().includes(q);
           const matchCols = this._requiredColumns.some(col =>
@@ -1321,56 +1761,229 @@ class ExcelUploaderPro extends HTMLElement {
       });
   }
 
+  _renderSemaphoreDot(sem) {
+    let bg = '#107E3E'; // Green
+    if (sem === 'RED') bg = '#BB0000';
+    else if (sem === 'AMBER') bg = '#E9730C';
+    else if (sem === 'PURPLE') bg = '#6D28D9';
+    else if (sem === 'BLUE') bg = '#0070F2';
+    return `<span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${bg}; margin-right:4px; box-shadow:0 0 4px ${bg};" title="Semaphore: ${sem}"></span>`;
+  }
+
+  _renderSeverityBadge(sev, sem) {
+    const dot = this._renderSemaphoreDot(sem);
+    if (sev === 'BLOCKING') return `<span class="sev-badge sev-blocking">${dot} Bloqueante</span>`;
+    if (sev === 'PREVENTIVE') return `<span class="sev-badge sev-preventive">${dot} Preventiva</span>`;
+    if (sev === 'CHECK') return `<span class="sev-badge sev-check">${dot} Chequeo</span>`;
+    return `<span class="sev-badge sev-info">${dot} Informativa</span>`;
+  }
+
+  _renderHelpModal() {
+    if (!this._showHelpModal) return '';
+    return `
+      <div class="help-modal-overlay">
+        <div class="help-modal-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #D9E0E6; padding-bottom:12px; margin-bottom:14px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="background:#0070F2; color:#FFF; width:28px; height:28px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-weight:800; font-size:15px;">?</span>
+              <div>
+                <h3 style="margin:0; color:#1D2D3E; font-size:16px;">Guía de Uso — Excel Planning Uploader Pro</h3>
+                <span style="font-size:11px; color:#556B82;">Consolidación Full/Delta, Pestañas, Reglas con Alcance Temporal, Semáforos y Audit Monitor</span>
+              </div>
+            </div>
+            <button class="btn" id="closeHelpModalBtn" type="button">✕ Cerrar Ayuda</button>
+          </div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; max-height:420px; overflow:auto; padding-right:4px;">
+            <div class="help-step-box">
+              <div class="help-step-title">1️⃣ Carga Full vs. Delta & Formatos</div>
+              <p style="margin:4px 0 0 0; font-size:12px; color:#32363A; line-height:1.45;">
+                Selecciona la estrategia de carga (<strong>FULL</strong> para reemplazo total o <strong>DELTA</strong> para ajustes incrementales). Arrastra múltiples Excel/CSV, configura tabuladores y decimales europeos.
+              </p>
+            </div>
+
+            <div class="help-step-box">
+              <div class="help-step-title">2️⃣ Selector de Pestañas y Comentarios</div>
+              <p style="margin:4px 0 0 0; font-size:12px; color:#32363A; line-height:1.45;">
+                En el Paso 2 marca qué pestañas (sheets) exactas de cada workbook consolidar, añade comentarios de negocio y gestiona el esquema de columnas.
+              </p>
+            </div>
+
+            <div class="help-step-box">
+              <div class="help-step-title">3️⃣ Reglas con Semáforos, Alcance Temporal y Auto-Fix</div>
+              <p style="margin:4px 0 0 0; font-size:12px; color:#32363A; line-height:1.45;">
+                Crea reglas configurando un color semafórico (🟢🟡🔴🟣), aplícalas a ficheros específicos (<code>ALL</code> o nombre de fichero) o dales un carácter temporal (fechas inicio/fin). Utiliza <strong>Código Asistido</strong> y <strong>✨ Auto-Fix</strong>.
+              </p>
+            </div>
+
+            <div class="help-step-box">
+              <div class="help-step-title">4️⃣ Audit Monitor y Descarga a Medida</div>
+              <p style="margin:4px 0 0 0; font-size:12px; color:#32363A; line-height:1.45;">
+                Haz clic en cualquier carga del <strong>Audit Monitor</strong> para ver instantáneas y cambios. Usa el botón <strong>⚙️ Configure & Download Audit</strong> para seleccionar el número exacto de columnas, comentarios y detalle de auditoría a exportar.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  _renderAuditExportConfigurator(availableCols, isSingleRecord = false) {
+    if (!this._auditExportConfig.open) return '';
+    const cfg = this._auditExportConfig;
+    return `
+      <div style="background:#F0F6FF; border:1px solid #0070F2; border-radius:8px; padding:14px 16px; margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+          <div style="font-weight:800; color:#005CB9; font-size:13px;">
+            ⚙️ Configurar Descarga de Auditoría ${isSingleRecord ? `(Carga ${this._esc(this._selectedAuditId)})` : '(Historial Global)'}
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <div>
+              <label style="font-size:10px; font-weight:700; color:#556B82; margin-right:4px;">NÚMERO DE COLUMNAS (1 - ${availableCols.length}):</label>
+              <input type="number" id="auditNumColsInp" class="input-std" style="width:58px; font-weight:700;" min="1" max="${availableCols.length}" value="${cfg.numCols}" />
+            </div>
+            <div>
+              <label style="font-size:10px; font-weight:700; color:#556B82; margin-right:4px;">FORMATO:</label>
+              <select id="auditExpFormatSel" class="input-std">
+                <option value="XLSX" ${cfg.format === 'XLSX' ? 'selected' : ''}>Excel Workbook (.xlsx)</option>
+                <option value="CSV" ${cfg.format === 'CSV' ? 'selected' : ''}>CSV Flat File (.csv)</option>
+              </select>
+            </div>
+            <button class="btn btn-success" id="runConfiguredAuditDownloadBtn" type="button">
+              📥 Descargar Informe Configurado (${cfg.selectedCols.length} cols)
+            </button>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center; padding-top:8px; border-top:1px dashed #B3D4FF; margin-bottom:10px;">
+          <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:#1D2D3E; cursor:pointer;">
+            <input type="checkbox" id="auditIncCommentsChk" ${cfg.includeComments ? 'checked' : ''} style="cursor:pointer; width:15px; height:15px;" />
+            <span>💬 Incorporar Comentarios de Negocio y Metadatos de Ficheros</span>
+          </label>
+          <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:#1D2D3E; cursor:pointer;">
+            <input type="checkbox" id="auditIncDetailChk" ${cfg.includeAuditDetail ? 'checked' : ''} style="cursor:pointer; width:15px; height:15px;" />
+            <span>🛠️ Incorporar Detalle de Auditoría (Estado de Trazabilidad, Valores Previos y Log de Cambios)</span>
+          </label>
+        </div>
+
+        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
+          <span style="font-size:11px; font-weight:700; color:#556B82; margin-right:4px;">Columnas seleccionadas (${cfg.selectedCols.length}/${availableCols.length}):</span>
+          ${availableCols.map(col => {
+            const isChecked = cfg.selectedCols.includes(col);
+            return `
+              <label class="sheet-pill-chk ${isChecked ? 'sheet-active' : ''}">
+                <input type="checkbox" class="audit-exp-col-chk" data-col="${this._esc(col)}" ${isChecked ? 'checked' : ''} style="margin:0; cursor:pointer;" />
+                <span>${this._esc(col)}</span>
+              </label>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
   _renderRuleCreatorForm() {
     const t = this._newRuleForm.type;
+    const sev = this._newRuleForm.severity;
+    const sem = this._newRuleForm.semaphore;
     return `
-      <div style="background:#F8FAFC; border:1px solid #B3D4FF; border-radius:8px; padding:14px; margin-top:10px;">
-        <div style="font-weight:700; color:#005CB9; margin-bottom:10px; font-size:12px;">➕ Create New Column Validation Rule</div>
-        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;">
+      <div style="background:#F8FAFC; border:1px solid #B3D4FF; border-radius:8px; padding:16px; margin-top:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+          <div style="font-weight:800; color:#005CB9; font-size:13px;">➕ Create Validation Rule, Semaphore, Scope & Assisted Code</div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+            <span style="font-size:11px; font-weight:700; color:#556B82;">💻 Templates:</span>
+            <button class="icon-btn assisted-snippet-btn" data-preset="cc_company_block" type="button">🛑 Sociedad/CeCo</button>
+            <button class="icon-btn assisted-snippet-btn" data-preset="budget_prev" type="button">⚠️ Presupuesto</button>
+            <button class="icon-btn assisted-snippet-btn" data-preset="capex_check" type="button">🔎 CAPEX</button>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-bottom:10px;">
           <div>
-            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">TARGET COLUMN</label>
-            <select id="ruleColSel" class="input-std">
+            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">COLUMN</label>
+            <select id="ruleColSel" class="input-std" style="width:100%;">
               ${this._requiredColumns.map(c => `<option value="${this._esc(c)}" ${this._newRuleForm.col === c ? 'selected' : ''}>${this._esc(c)}</option>`).join('')}
             </select>
           </div>
+
           <div>
-            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">RULE TYPE</label>
-            <select id="ruleTypeSel" class="input-std">
-              <option value="IN_LIST" ${t === 'IN_LIST' ? 'selected' : ''}>Allowed List / Master Data (IN_LIST)</option>
-              <option value="NUMERIC_RANGE" ${t === 'NUMERIC_RANGE' ? 'selected' : ''}>Numeric & Min/Max Range</option>
-              <option value="STARTS_WITH" ${t === 'STARTS_WITH' ? 'selected' : ''}>Starts With Prefix</option>
-              <option value="REGEX" ${t === 'REGEX' ? 'selected' : ''}>Custom Regex Pattern</option>
-              <option value="UNIQUE" ${t === 'UNIQUE' ? 'selected' : ''}>Unique Values (No Duplicates)</option>
+            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">SEVERITY</label>
+            <select id="ruleSeveritySel" class="input-std" style="width:100%; font-weight:700;">
+              <option value="BLOCKING" ${sev === 'BLOCKING' ? 'selected' : ''}>🛑 Bloqueante</option>
+              <option value="PREVENTIVE" ${sev === 'PREVENTIVE' ? 'selected' : ''}>⚠️ Preventiva</option>
+              <option value="CHECK" ${sev === 'CHECK' ? 'selected' : ''}>🔎 Chequeo</option>
+              <option value="INFO" ${sev === 'INFO' ? 'selected' : ''}>ℹ️ Informativa</option>
             </select>
           </div>
 
-          ${t === 'IN_LIST' || t === 'STARTS_WITH' || t === 'REGEX' ? `
-            <div style="flex:1; min-width:200px;">
-              <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">
-                ${t === 'IN_LIST' ? 'ALLOWED VALUES (COMMA SEPARATED)' : (t === 'STARTS_WITH' ? 'REQUIRED PREFIX (E.G. PLN_)' : 'REGEX PATTERN (E.G. ^[A-Z0-9]+$)')}
-              </label>
-              <input type="text" id="ruleParamInp" class="input-std" style="width:100%; box-sizing:border-box;" placeholder="${t === 'IN_LIST' ? 'e.g. 1000, 2000, 3000' : (t === 'STARTS_WITH' ? 'e.g. CC_' : 'e.g. ^[0-9]{4}$')}" value="${this._esc(this._newRuleForm.param)}" />
+          <div>
+            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">🚦 SEMAPHORE</label>
+            <select id="ruleSemaphoreSel" class="input-std" style="width:100%; font-weight:700;">
+              <option value="RED" ${sem === 'RED' ? 'selected' : ''}>🔴 Rojo (Red)</option>
+              <option value="AMBER" ${sem === 'AMBER' ? 'selected' : ''}>🟡 Ámbar (Amber)</option>
+              <option value="PURPLE" ${sem === 'PURPLE' ? 'selected' : ''}>🟣 Púrpura (Purple)</option>
+              <option value="BLUE" ${sem === 'BLUE' ? 'selected' : ''}>🔵 Azul (Blue)</option>
+            </select>
+          </div>
+
+          <div>
+            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">LOGIC TYPE</label>
+            <select id="ruleTypeSel" class="input-std" style="width:100%;">
+              <option value="IN_LIST" ${t === 'IN_LIST' ? 'selected' : ''}>Master Data List</option>
+              <option value="NUMERIC_RANGE" ${t === 'NUMERIC_RANGE' ? 'selected' : ''}>Numeric Range</option>
+              <option value="STARTS_WITH" ${t === 'STARTS_WITH' ? 'selected' : ''}>Starts With Prefix</option>
+              <option value="REGEX" ${t === 'REGEX' ? 'selected' : ''}>Regex Pattern</option>
+              <option value="UNIQUE" ${t === 'UNIQUE' ? 'selected' : ''}>Unique (No Dupes)</option>
+              <option value="ASSISTED_CODE" ${t === 'ASSISTED_CODE' ? 'selected' : ''}>💻 Assisted Code</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:10px;">
+          ${t === 'IN_LIST' || t === 'STARTS_WITH' || t === 'REGEX' || t === 'ASSISTED_CODE' ? `
+            <div style="flex:2; min-width:220px;">
+              <label style="display:block; font-size:10px; font-weight:700; color:#005CB9; margin-bottom:3px;">PARAMETER / FORMULA</label>
+              <input type="text" id="ruleParamInp" class="input-std" style="width:100%; box-sizing:border-box;" placeholder="e.g. 1000, 2000 or JS expression" value="${this._esc(this._newRuleForm.param)}" />
             </div>
           ` : ''}
 
           ${t === 'NUMERIC_RANGE' ? `
             <div>
-              <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">MIN VALUE (OPTIONAL)</label>
-              <input type="number" id="ruleMinInp" class="input-std" style="width:110px;" placeholder="e.g. 0" value="${this._esc(this._newRuleForm.min)}" />
+              <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">MIN</label>
+              <input type="number" id="ruleMinInp" class="input-std" style="width:90px;" placeholder="0" value="${this._esc(this._newRuleForm.min)}" />
             </div>
             <div>
-              <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">MAX VALUE (OPTIONAL)</label>
-              <input type="number" id="ruleMaxInp" class="input-std" style="width:110px;" placeholder="e.g. 999999" value="${this._esc(this._newRuleForm.max)}" />
+              <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">MAX</label>
+              <input type="number" id="ruleMaxInp" class="input-std" style="width:90px;" placeholder="100000" value="${this._esc(this._newRuleForm.max)}" />
             </div>
           ` : ''}
 
-          <div style="flex:1; min-width:180px;">
-            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">CUSTOM MESSAGE / DESCRIPTION</label>
-            <input type="text" id="ruleDescInp" class="input-std" style="width:100%; box-sizing:border-box;" placeholder="Optional description..." value="${this._esc(this._newRuleForm.desc)}" />
+          <div style="flex:1; min-width:170px;">
+            <label style="display:block; font-size:10px; font-weight:700; color:#107E3E; margin-bottom:3px;">✨ AUTO-FIX CODE</label>
+            <input type="text" id="ruleAutoFixInp" class="input-std" style="width:100%; box-sizing:border-box; font-family:monospace;" placeholder="e.g. '1000'" value="${this._esc(this._newRuleForm.autoFix)}" />
           </div>
+        </div>
 
+        <!-- ALCANCE Y CARÁCTER TEMPORAL -->
+        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; padding-top:8px; border-top:1px dashed #B3D4FF;">
+          <div style="flex:1; min-width:180px;">
+            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">SCOPE (FILE NAME OR 'ALL')</label>
+            <input type="text" id="ruleScopeFilesInp" class="input-std" style="width:100%; box-sizing:border-box;" placeholder="ALL or file1.xlsx, file2.xlsx" value="${this._esc(this._newRuleForm.scopeFiles || 'ALL')}" />
+          </div>
           <div>
-            <button class="btn" id="saveNewRuleBtn" type="button">+ Save & Apply Rule</button>
+            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">TEMPORAL START DATE</label>
+            <input type="date" id="ruleStartDateInp" class="input-std" value="${this._esc(this._newRuleForm.startDate)}" />
+          </div>
+          <div>
+            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">TEMPORAL END DATE</label>
+            <input type="date" id="ruleEndDateInp" class="input-std" value="${this._esc(this._newRuleForm.endDate)}" />
+          </div>
+          <div style="flex:1; min-width:180px;">
+            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">DESCRIPTION</label>
+            <input type="text" id="ruleDescInp" class="input-std" style="width:100%; box-sizing:border-box;" placeholder="Rule description..." value="${this._esc(this._newRuleForm.desc)}" />
+          </div>
+          <div>
+            <button class="btn" id="saveNewRuleBtn" type="button">+ Save Rule</button>
           </div>
         </div>
       </div>
@@ -1378,14 +1991,15 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   _renderValidationRulesTab() {
+    const activeRulesCount = this._validationRules.filter(r => r.active).length;
     return `
       <div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
           <div>
-            <h3 style="margin:0; color:#1D2D3E;">⚙️ Corporate Validation Rules & Master Data Engine</h3>
-            <p style="margin:4px 0 0 0; color:#556B82; font-size:12px;">Create, toggle, or remove real-time validation rules applied across all consolidated Excel sheets.</p>
+            <h3 style="margin:0; color:#1D2D3E;">⚙️ Validation Rules, Semaphores, Scope & Temporal Validity</h3>
+            <p style="margin:4px 0 0 0; color:#556B82; font-size:12px;">Manage rule application scope (ALL or specific workbooks), date validity windows, semaphore indicators and auto-fixes.</p>
           </div>
-          <button class="btn btn-ghost" id="resetDefaultRulesBtn" type="button">↺ Restore Default Corporate Rules</button>
+          <button class="btn btn-ghost" id="resetDefaultRulesBtn" type="button">↺ Restore Default Rules</button>
         </div>
 
         ${this._renderRuleCreatorForm()}
@@ -1394,12 +2008,15 @@ class ExcelUploaderPro extends HTMLElement {
           <table>
             <thead>
               <tr>
-                <th style="width:60px; text-align:center;">Active</th>
-                <th style="width:130px;">Column</th>
-                <th style="width:150px;">Rule Type</th>
-                <th>Validation Parameters / Master Data</th>
-                <th>Business Description</th>
-                <th style="width:80px; text-align:center;">Action</th>
+                <th style="width:40px; text-align:center;">On</th>
+                <th style="width:100px;">Column</th>
+                <th style="width:120px;">Semaphore</th>
+                <th style="width:120px;">Severity</th>
+                <th style="width:120px;">Scope</th>
+                <th style="width:140px;">Temporal Validity</th>
+                <th>Logic & Assisted Code</th>
+                <th style="width:60px; text-align:center;">Copy</th>
+                <th style="width:60px; text-align:center;">Del</th>
               </tr>
             </thead>
             <tbody>
@@ -1409,19 +2026,24 @@ class ExcelUploaderPro extends HTMLElement {
                     <input type="checkbox" class="toggle-rule-chk" data-rule-id="${this._esc(r.id)}" ${r.active ? 'checked' : ''} style="cursor:pointer; width:15px; height:15px;" />
                   </td>
                   <td><span class="col-pill">${this._esc(r.col)}</span></td>
-                  <td><strong style="color:#1D2D3E; font-size:11px;">${this._esc(r.type)}</strong></td>
-                  <td style="font-family:monospace; font-size:11px; color:#005CB9; font-weight:700;">
-                    ${r.type === 'NUMERIC_RANGE'
-                      ? `Min: ${r.min !== '' ? this._esc(r.min) : '-∞'} | Max: ${r.max !== '' ? this._esc(r.max) : '+∞'}`
-                      : (r.param ? this._esc(r.param) : 'All rows in table')}
+                  <td>${this._renderSemaphoreDot(r.semaphore || 'RED')} <strong style="font-size:11px;">${this._esc(r.semaphore || 'RED')}</strong></td>
+                  <td>${this._renderSeverityBadge(r.severity || 'BLOCKING', r.semaphore || 'RED')}</td>
+                  <td><code style="background:#F0F6FF; color:#005CB9; padding:2px 6px; border-radius:4px; font-size:11px;">${this._esc(r.scopeFiles || 'ALL')}</code></td>
+                  <td style="font-size:10px; color:#556B82;">
+                    ${r.startDate || r.endDate ? `${r.startDate || 'Any'} → ${r.endDate || 'Any'}` : 'Permanent'}
                   </td>
-                  <td style="color:#556B82;">${this._esc(r.desc)}</td>
+                  <td style="font-family:monospace; font-size:11px; color:#1D2D3E;">
+                    <strong>${this._esc(r.type)}</strong>: ${this._esc(r.param || r.desc)}
+                  </td>
+                  <td style="text-align:center;">
+                    <button class="icon-btn copy-rule-btn" data-rule-id="${this._esc(r.id)}" type="button" title="Copiar / Asignar alcance">📋</button>
+                  </td>
                   <td style="text-align:center;">
                     <button class="icon-btn icon-btn-del delete-rule-btn" data-rule-id="${this._esc(r.id)}" type="button" title="Delete rule">✕</button>
                   </td>
                 </tr>
               `).join('') : `
-                <tr><td colspan="6" style="text-align:center; padding:28px; color:#556B82;">No custom validation rules configured. Use the form above to add one.</td></tr>
+                <tr><td colspan="9" style="text-align:center; padding:28px; color:#556B82;">No validation rules configured.</td></tr>
               `}
             </tbody>
           </table>
@@ -1499,24 +2121,28 @@ class ExcelUploaderPro extends HTMLElement {
           <div class="audit-detail-view">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
               <div style="display:flex; align-items:center; gap:10px;">
-                <button class="btn btn-ghost" id="backToAuditListBtn" type="button">← Back to Audit Log</button>
+                <button class="btn btn-ghost" id="backToAuditListBtn" type="button">← Back to Audit Monitor</button>
                 <div>
-                  <div style="font-size:11px; color:#556B82; font-weight:600;">BTP Audit Monitor  /  Execution Drill-Down</div>
+                  <div style="font-size:11px; color:#556B82; font-weight:600;">Audit Monitor  /  Execution Drill-Down</div>
                   <div style="font-size:16px; font-weight:800; color:#1D2D3E;">Load ID: ${this._esc(rec.id)} <span style="background:#E6F9EC; color:#107E3E; padding:3px 10px; border-radius:12px; font-size:11px; margin-left:6px;">✓ ${this._esc(rec.status)}</span></div>
                 </div>
               </div>
               <div style="display:flex; gap:8px;">
-                <button class="btn btn-ghost" id="exportAuditExcelBtn" type="button">📥 Download Snapshot (.xlsx)</button>
+                <button class="btn" id="toggleAuditExportCfgBtn" type="button">
+                  ⚙️ ${this._auditExportConfig.open ? 'Close Export Config' : 'Configure & Download Audit'}
+                </button>
                 <button class="btn btn-ghost" id="exportAuditJsonBtn" type="button">📜 Audit Certificate (.json)</button>
               </div>
             </div>
 
-            <div class="metrics-bar">
-              <div class="metric-box"><div class="metric-title">Executed By</div><div class="metric-val" style="font-size:13px;">${this._esc(rec.user)}</div></div>
+            ${this._renderAuditExportConfigurator(cols, true)}
+
+            <div class="metrics-bar" style="grid-template-columns: repeat(5, 1fr);">
+              <div class="metric-box"><div class="metric-title">Strategy</div><div class="metric-val" style="font-size:13px; color:#0064D9;">${this._esc(rec.loadStrategy || 'FULL')}</div></div>
               <div class="metric-box"><div class="metric-title">Timestamp</div><div class="metric-val" style="font-size:13px;">${this._esc(rec.timestamp)}</div></div>
               <div class="metric-box kpi-ok"><div class="metric-title">Committed Rows</div><div class="metric-val" style="color:#107E3E;">${rec.rows}</div></div>
-              <div class="metric-box"><div class="metric-title">Rows Modified / Added</div><div class="metric-val" style="color:#0064D9;">${modifiedRowsCount}</div></div>
-              <div class="metric-box"><div class="metric-title">Tracked User Actions</div><div class="metric-val">${changeLog.length} events</div></div>
+              <div class="metric-box"><div class="metric-title">Rows Modified</div><div class="metric-val" style="color:#0064D9;">${modifiedRowsCount}</div></div>
+              <div class="metric-box"><div class="metric-title">Tracked Actions</div><div class="metric-val">${changeLog.length} events</div></div>
             </div>
 
             <div class="subtabs-bar">
@@ -1524,10 +2150,10 @@ class ExcelUploaderPro extends HTMLElement {
                 📊 Consolidated Data Snapshot (${snapshotRows.length})
               </button>
               <button class="audit-subtab ${this._auditDetailSubTab === 'changesTab' ? 'active' : ''}" data-subtab="changesTab" type="button">
-                🛠️ User Modifications & Activity Log (${changeLog.length})
+                🛠️ User Edits, Auto-Fixes & Checks (${changeLog.length})
               </button>
               <button class="audit-subtab ${this._auditDetailSubTab === 'filesTab' ? 'active' : ''}" data-subtab="filesTab" type="button">
-                📁 Source Workbooks & BTP Payload (${filesDetails.length})
+                📁 Workbooks & SAC Payload (${filesDetails.length})
               </button>
             </div>
 
@@ -1536,10 +2162,6 @@ class ExcelUploaderPro extends HTMLElement {
                 <div style="display:flex; align-items:center; gap:8px;">
                   <span style="font-weight:700; font-size:12px;">🔍 Inspect Committed Rows:</span>
                   <input type="text" id="auditSearchInput" class="input-std" style="width:240px;" placeholder="Search ID, cost center, sheet..." value="${this._esc(this._auditSearchQuery)}" />
-                </div>
-                <div style="display:flex; gap:12px; font-size:11px; font-weight:600; color:#556B82;">
-                  <span><span style="display:inline-block; width:10px; height:10px; background:#FFF8E6; border:1px solid #F59E0B; border-radius:2px; margin-right:4px;"></span>✎ Edited in Widget</span>
-                  <span><span style="display:inline-block; width:10px; height:10px; background:#EBF5FF; border:1px solid #0070F2; border-radius:2px; margin-right:4px;"></span>★ Added / Cloned Row</span>
                 </div>
               </div>
 
@@ -1550,6 +2172,7 @@ class ExcelUploaderPro extends HTMLElement {
                       <th style="width:32px;">#</th>
                       <th style="width:120px;">Traceability State</th>
                       <th>Source Workbook & Sheet</th>
+                      <th>Business Comment</th>
                       ${cols.map(c => `<th>${this._esc(c)}</th>`).join('')}
                     </tr>
                   </thead>
@@ -1568,6 +2191,7 @@ class ExcelUploaderPro extends HTMLElement {
                                 : `<span style="background:#F0F3F6; color:#556B82; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">Original Excel</span>`)}
                           </td>
                           <td style="font-size:11px; color:#0064D9; font-weight:700;">${this._esc(r._sourceFile)}</td>
+                          <td style="font-size:11px; color:#556B82;">${this._esc(r._fileComment || 'No comment')}</td>
                           ${cols.map(col => {
                             const editInfo = editedCols[col];
                             return `
@@ -1580,7 +2204,7 @@ class ExcelUploaderPro extends HTMLElement {
                         </tr>
                       `;
                     }).join('') : `
-                      <tr><td colspan="${cols.length + 3}" style="text-align:center; padding:24px; color:#556B82;">No rows match the search filter.</td></tr>
+                      <tr><td colspan="${cols.length + 4}" style="text-align:center; padding:24px; color:#556B82;">No rows match the search filter.</td></tr>
                     `}
                   </tbody>
                 </table>
@@ -1603,9 +2227,9 @@ class ExcelUploaderPro extends HTMLElement {
                   <tbody>
                     ${changeLog.length > 0 ? changeLog.map(log => {
                       let badgeStyle = 'background:#EBF5FF; color:#005CB9;';
-                      if (log.type === 'CELL_EDIT' || log.type === 'BULK_FILL') badgeStyle = 'background:#FFF8E6; color:#B45309;';
-                      if (log.type === 'ROW_DELETED' || log.type === 'FILE_REMOVED' || log.type === 'SCHEMA_DEL_COL' || log.type === 'SHEET_DISABLED') badgeStyle = 'background:#FEEAEA; color:#BB0000;';
-                      if (log.type === 'ROW_ADDED' || log.type === 'ROW_CLONED' || log.type === 'SHEET_ENABLED') badgeStyle = 'background:#E6F9EC; color:#107E3E;';
+                      if (['CELL_EDIT', 'BULK_FILL', 'AUTO_FIX_CODE', 'BULK_AUTO_FIX'].includes(log.type)) badgeStyle = 'background:#FFF8E6; color:#B45309;';
+                      if (['ROW_DELETED', 'FILE_REMOVED', 'SCHEMA_DEL_COL', 'SHEET_DISABLED'].includes(log.type)) badgeStyle = 'background:#FEEAEA; color:#BB0000;';
+                      if (['ROW_ADDED', 'ROW_CLONED', 'SHEET_ENABLED', 'CHECK_VERIFIED'].includes(log.type)) badgeStyle = 'background:#E6F9EC; color:#107E3E;';
                       return `
                         <tr>
                           <td style="font-size:11px; color:#556B82; font-weight:600;">${this._esc(log.time)}</td>
@@ -1633,7 +2257,7 @@ class ExcelUploaderPro extends HTMLElement {
                       <div>
                         <div style="font-weight:700; color:#0064D9;">📄 ${this._esc(f.name)} <span style="font-weight:400; color:#556B82;">(${f.sizeKB || 1} KB)</span></div>
                         <div style="font-size:11px; color:#556B82; margin-top:2px;">
-                          ${f.sheets} of ${f.totalSheets || f.sheets} sheet(s) selected (${this._esc((f.selectedSheetNames || []).join(', '))}) • ${f.rows} rows committed
+                          Strategy: <strong>${this._esc(f.strategy || rec.loadStrategy || 'FULL')}</strong> • ${f.sheets} of ${f.totalSheets || f.sheets} sheet(s) selected • ${f.rows} rows
                         </div>
                         <div style="font-size:12px; color:#1D2D3E; margin-top:6px; background:#F8FAFC; padding:6px 10px; border-radius:6px; border-left:3px solid #0070F2;">
                           💬 <strong>Business Comment:</strong> ${this._esc(f.comment)}
@@ -1655,25 +2279,35 @@ class ExcelUploaderPro extends HTMLElement {
     }
 
     return `
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
         <div>
-          <h3 style="margin:0; color:#1D2D3E;">BTP Consolidation & Audit Monitor</h3>
-          <p style="margin:4px 0 0 0; color:#556B82; font-size:12px;">Click on any execution row below to inspect its committed rows, cell-by-cell modifications, and source workbooks.</p>
+          <h3 style="margin:0; color:#1D2D3E;">Audit Monitor</h3>
+          <p style="margin:4px 0 0 0; color:#556B82; font-size:12px;">Click on any execution row below to inspect committed rows, load strategy (Full/Delta), edits, and source workbooks, or configure custom exports.</p>
         </div>
-        ${this._history.length > 0 ? `<button class="btn btn-danger" id="clearHistoryBtn" type="button" style="font-size:11px; padding:6px 12px;">🗑️ Clear History</button>` : ''}
+        <div style="display:flex; gap:8px;">
+          ${this._history.length > 0 ? `
+            <button class="btn" id="toggleAuditExportCfgBtn" type="button" style="font-size:11px; padding:6px 12px;">
+              ⚙️ ${this._auditExportConfig.open ? 'Close Export Config' : 'Configure & Download Audit'}
+            </button>
+            <button class="btn btn-danger" id="clearHistoryBtn" type="button" style="font-size:11px; padding:6px 12px;">🗑️ Clear History</button>
+          ` : ''}
+        </div>
       </div>
+
+      ${this._renderAuditExportConfigurator(this._requiredColumns, false)}
 
       <div style="border: 1px solid #D9E0E6; border-radius: 8px; overflow:hidden; background:#FFFFFF; box-shadow: 0 2px 6px rgba(0,0,0,0.02);">
         <table>
           <thead>
             <tr>
               <th>Load ID</th>
+              <th>Strategy</th>
               <th>SAP User</th>
-              <th>Workbooks, Selected Sheets & Comments</th>
-              <th>Committed Rows</th>
-              <th>User Edits</th>
+              <th>Workbooks & Comments</th>
+              <th>Rows</th>
+              <th>Edits</th>
               <th>Timestamp</th>
-              <th>BTP Status</th>
+              <th>Status</th>
               <th style="text-align:right;">Inspection</th>
             </tr>
           </thead>
@@ -1681,12 +2315,13 @@ class ExcelUploaderPro extends HTMLElement {
             ${this._history.length > 0 ? this._history.map(h => `
               <tr class="audit-row-link" data-load-id="${this._esc(h.id)}" style="cursor:pointer;">
                 <td><strong style="color:#0064D9; text-decoration:underline;">${this._esc(h.id)}</strong></td>
+                <td><span style="background:#EBF5FF; color:#005CB9; padding:2px 8px; border-radius:10px; font-weight:700; font-size:11px;">${this._esc(h.loadStrategy || 'FULL')}</span></td>
                 <td>${this._esc(h.user)}</td>
                 <td>${this._esc(h.file)}</td>
                 <td><strong>${h.rows}</strong> rows</td>
                 <td>
                   ${(h.editsCount || 0) > 0
-                    ? `<span style="background:#FFF8E6; color:#B45309; border:1px solid #FCD34D; padding:2px 8px; border-radius:10px; font-weight:700; font-size:11px;">✎ ${h.editsCount} change(s)</span>`
+                    ? `<span style="background:#FFF8E6; color:#B45309; border:1px solid #FCD34D; padding:2px 8px; border-radius:10px; font-weight:700; font-size:11px;">✎ ${h.editsCount} action(s)</span>`
                     : `<span style="color:#556B82; font-size:11px;">Direct (0 edits)</span>`}
                 </td>
                 <td>${this._esc(h.timestamp)}</td>
@@ -1696,7 +2331,7 @@ class ExcelUploaderPro extends HTMLElement {
                 </td>
               </tr>
             `).join('') : `
-              <tr><td colspan="8" style="text-align:center; padding:36px; color:#556B82;">No planning loads registered yet. Complete an upload in the Wizard to inspect its full audit trail here.</td></tr>
+              <tr><td colspan="9" style="text-align:center; padding:36px; color:#556B82;">No planning loads registered yet. Complete an upload in the Wizard to inspect its full audit trail here.</td></tr>
             `}
           </tbody>
         </table>
@@ -1706,9 +2341,8 @@ class ExcelUploaderPro extends HTMLElement {
 
   _render() {
     const totalRows = this._rows.length;
-    const errorRows = this._rows.filter(r => Object.keys(r._errors).length > 0).length;
-    const validRows = totalRows - errorRows;
-    const validPercent = totalRows > 0 ? Math.round((validRows / totalRows) * 100) : 100;
+    const stats = this._getAlertStats();
+    const validPercent = totalRows > 0 ? Math.round(((totalRows - stats.blockingRows) / totalRows) * 100) : 100;
     const filteredRows = this._getFilteredRows();
     const activeRulesCount = this._validationRules.filter(r => r.active).length;
 
@@ -1757,6 +2391,40 @@ class ExcelUploaderPro extends HTMLElement {
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        .help-modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(19, 35, 55, 0.62);
+          backdrop-filter: blur(2px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 250;
+          padding: 20px;
+        }
+        .help-modal-card {
+          background: #FFFFFF;
+          border: 1px solid #D9E0E6;
+          border-top: 4px solid #0070F2;
+          border-radius: 12px;
+          max-width: 820px;
+          width: 100%;
+          padding: 20px 24px;
+          box-shadow: 0 16px 40px rgba(0,0,0,0.22);
+        }
+        .help-step-box {
+          background: #F8FAFC;
+          border: 1px solid #D9E0E6;
+          border-left: 4px solid #0070F2;
+          border-radius: 8px;
+          padding: 12px 14px;
+        }
+        .help-step-title {
+          font-weight: 800;
+          color: #005CB9;
+          font-size: 13px;
+        }
+
         .sap-header {
           display: flex;
           align-items: center;
@@ -1766,32 +2434,11 @@ class ExcelUploaderPro extends HTMLElement {
           padding: 12px 24px;
           border-bottom: 3px solid #0070F2;
         }
-        .sap-brand {
-          display: flex;
-          align-items: center;
-          gap: 14px;
-        }
-        .sap-logo-img {
-          height: 28px;
-          width: auto;
-          display: block;
-          filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
-        }
-        .sap-title-wrap {
-          display: flex;
-          flex-direction: column;
-        }
-        .sap-title {
-          font-size: 15px;
-          font-weight: 700;
-          letter-spacing: -0.2px;
-          color: #FFFFFF;
-        }
-        .sap-subtitle {
-          font-size: 11px;
-          color: #A9B8C8;
-          font-weight: 500;
-        }
+        .sap-brand { display: flex; align-items: center; gap: 14px; }
+        .sap-logo-img { height: 28px; width: auto; display: block; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25)); }
+        .sap-title-wrap { display: flex; flex-direction: column; }
+        .sap-title { font-size: 15px; font-weight: 700; letter-spacing: -0.2px; color: #FFFFFF; }
+        .sap-subtitle { font-size: 11px; color: #A9B8C8; font-weight: 500; }
         .sap-badge-env {
           background: rgba(0, 184, 241, 0.16);
           border: 1px solid rgba(0, 184, 241, 0.45);
@@ -1801,6 +2448,21 @@ class ExcelUploaderPro extends HTMLElement {
           font-size: 11px;
           font-weight: 600;
         }
+        .help-icon-btn {
+          background: rgba(255, 255, 255, 0.14);
+          border: 1px solid rgba(255, 255, 255, 0.35);
+          color: #FFFFFF;
+          padding: 5px 12px;
+          border-radius: 20px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          transition: all 0.15s;
+        }
+        .help-icon-btn:hover { background: #0070F2; border-color: #74D8FF; }
 
         .toast-banner {
           display: flex;
@@ -1838,10 +2500,7 @@ class ExcelUploaderPro extends HTMLElement {
           background: linear-gradient(180deg, transparent 0%, rgba(0,112,242,0.04) 100%);
         }
 
-        .tab-content {
-          padding: 24px;
-          background: #F5F6F7;
-        }
+        .tab-content { padding: 24px; background: #F5F6F7; }
 
         .subtabs-bar {
           display: flex;
@@ -1859,18 +2518,8 @@ class ExcelUploaderPro extends HTMLElement {
           font-weight: 700;
           font-size: 12px;
           cursor: pointer;
-          transition: all 0.15s;
         }
-        .audit-subtab:hover {
-          border-color: #0070F2;
-          color: #0070F2;
-        }
-        .audit-subtab.active {
-          background: #0070F2;
-          color: #FFFFFF;
-          border-color: #0070F2;
-          box-shadow: 0 2px 6px rgba(0, 112, 242, 0.2);
-        }
+        .audit-subtab.active { background: #0070F2; color: #FFFFFF; border-color: #0070F2; }
 
         .wizard-steps {
           display: grid;
@@ -1889,19 +2538,9 @@ class ExcelUploaderPro extends HTMLElement {
           cursor: pointer;
           transition: all 0.2s ease;
         }
-        .step-item:hover {
-          border-color: #0070F2;
-          transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(0, 112, 242, 0.08);
-        }
-        .step-item.active {
-          border-color: #0070F2;
-          background: #F0F6FF;
-          box-shadow: 0 2px 8px rgba(0, 112, 242, 0.12);
-        }
-        .step-item.completed {
-          border-color: #107E3E;
-        }
+        .step-item:hover { border-color: #0070F2; transform: translateY(-1px); }
+        .step-item.active { border-color: #0070F2; background: #F0F6FF; }
+        .step-item.completed { border-color: #107E3E; }
         .step-num {
           width: 26px;
           height: 26px;
@@ -1913,26 +2552,11 @@ class ExcelUploaderPro extends HTMLElement {
           justify-content: center;
           font-size: 12px;
           font-weight: 700;
-          flex-shrink: 0;
         }
-        .step-item.active .step-num {
-          background: #0070F2;
-          color: #FFFFFF;
-          box-shadow: 0 0 0 3px rgba(0, 112, 242, 0.2);
-        }
-        .step-item.completed .step-num {
-          background: #107E3E;
-          color: #FFFFFF;
-        }
-        .step-label-title {
-          font-weight: 700;
-          font-size: 12px;
-          color: #1D2D3E;
-        }
-        .step-label-sub {
-          font-size: 11px;
-          color: #556B82;
-        }
+        .step-item.active .step-num { background: #0070F2; color: #FFFFFF; }
+        .step-item.completed .step-num { background: #107E3E; color: #FFFFFF; }
+        .step-label-title { font-weight: 700; font-size: 12px; color: #1D2D3E; }
+        .step-label-sub { font-size: 11px; color: #556B82; }
 
         .btn {
           padding: 8px 16px;
@@ -1948,25 +2572,13 @@ class ExcelUploaderPro extends HTMLElement {
           align-items: center;
           gap: 6px;
         }
-        .btn:hover { background: #005CB9; border-color: #005CB9; }
-        .btn-ghost {
-          background: #FFFFFF;
-          color: #0064D9;
-          border-color: #BCC8D4;
-        }
-        .btn-ghost:hover {
-          background: #F0F6FF;
-          border-color: #0070F2;
-        }
-        .btn-danger {
-          background: #FFFFFF;
-          color: #BB0000;
-          border-color: #F5C6C6;
-        }
-        .btn-danger:hover {
-          background: #FEEAEA;
-          border-color: #BB0000;
-        }
+        .btn:hover { background: #005CB9; }
+        .btn-ghost { background: #FFFFFF; color: #0064D9; border-color: #BCC8D4; }
+        .btn-ghost:hover { background: #F0F6FF; border-color: #0070F2; }
+        .btn-danger { background: #FFFFFF; color: #BB0000; border-color: #F5C6C6; }
+        .btn-danger:hover { background: #FEEAEA; border-color: #BB0000; }
+        .btn-success { background: #107E3E; border-color: #107E3E; color: #FFFFFF; }
+        .btn-success:hover { background: #0C6230; }
 
         .drop-zone {
           border: 2px dashed #0070F2;
@@ -1978,14 +2590,8 @@ class ExcelUploaderPro extends HTMLElement {
           flex-direction: column;
           align-items: center;
           gap: 12px;
-          transition: all 0.2s ease;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.02);
         }
-        .drop-zone.drag-active {
-          background: #F0F6FF;
-          border-color: #005CB9;
-          transform: scale(1.005);
-        }
+        .drop-zone.drag-active { background: #F0F6FF; border-color: #005CB9; }
         .upload-icon-circle {
           width: 54px;
           height: 54px;
@@ -1996,7 +2602,6 @@ class ExcelUploaderPro extends HTMLElement {
           align-items: center;
           justify-content: center;
           font-size: 24px;
-          margin-bottom: 4px;
         }
         .file-label-btn {
           padding: 9px 20px;
@@ -2006,41 +2611,28 @@ class ExcelUploaderPro extends HTMLElement {
           font-size: 13px;
           border-radius: 6px;
           cursor: pointer;
-          box-shadow: 0 2px 6px rgba(0, 112, 242, 0.25);
-          transition: background 0.2s;
           display: inline-block;
         }
-        .file-label-btn:hover { background: #005CB9; }
 
         .metrics-bar {
           display: grid;
-          grid-template-columns: repeat(5, 1fr);
-          gap: 12px;
+          grid-template-columns: repeat(6, 1fr);
+          gap: 10px;
           margin-bottom: 14px;
         }
         .metric-box {
           background: #FFFFFF;
           border: 1px solid #D9E0E6;
           border-left: 4px solid #0070F2;
-          padding: 12px 14px;
+          padding: 10px 12px;
           border-radius: 8px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.02);
         }
         .metric-box.kpi-ok { border-left-color: #107E3E; }
         .metric-box.kpi-err { border-left-color: #BB0000; }
-        .metric-title {
-          font-size: 10px;
-          color: #556B82;
-          margin-bottom: 4px;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.4px;
-        }
-        .metric-val {
-          font-size: 18px;
-          font-weight: 800;
-          color: #1D2D3E;
-        }
+        .metric-box.kpi-prev { border-left-color: #E9730C; }
+        .metric-box.kpi-chk { border-left-color: #6D28D9; }
+        .metric-title { font-size: 10px; color: #556B82; margin-bottom: 4px; font-weight: 700; text-transform: uppercase; }
+        .metric-val { font-size: 17px; font-weight: 800; color: #1D2D3E; }
 
         .dist-bar {
           display: flex;
@@ -2051,11 +2643,7 @@ class ExcelUploaderPro extends HTMLElement {
           margin-bottom: 16px;
           border: 1px solid #D9E0E6;
         }
-        .dist-ok {
-          background: linear-gradient(90deg, #107E3E, #16A34A);
-          height: 100%;
-          transition: width 0.35s ease;
-        }
+        .dist-ok { background: linear-gradient(90deg, #107E3E, #16A34A); height: 100%; transition: width 0.35s ease; }
 
         .toolbar-box {
           background: #FFFFFF;
@@ -2076,12 +2664,8 @@ class ExcelUploaderPro extends HTMLElement {
           font-size: 12px;
           color: #1D2D3E;
           outline: none;
-          transition: border 0.15s;
         }
-        .input-std:focus {
-          border-color: #0070F2;
-          box-shadow: 0 0 0 2px rgba(0, 112, 242, 0.15);
-        }
+        .input-std:focus { border-color: #0070F2; box-shadow: 0 0 0 2px rgba(0, 112, 242, 0.15); }
 
         .chips-row {
           display: flex;
@@ -2091,9 +2675,9 @@ class ExcelUploaderPro extends HTMLElement {
           align-items: center;
           justify-content: space-between;
         }
-        .chips-left { display: flex; gap: 6px; align-items: center; }
+        .chips-left { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
         .chip {
-          padding: 5px 14px;
+          padding: 5px 12px;
           border-radius: 16px;
           font-size: 11px;
           font-weight: 700;
@@ -2101,12 +2685,74 @@ class ExcelUploaderPro extends HTMLElement {
           border: 1px solid #D9E0E6;
           background: #FFFFFF;
           color: #32363A;
-          transition: all 0.15s;
         }
-        .chip:hover { border-color: #0070F2; }
         .chip-all.active-chip { background: #1D2D3E; color: #FFFFFF; border-color: #1D2D3E; }
         .chip-ok.active-chip { background: #107E3E; color: #FFFFFF; border-color: #107E3E; }
         .chip-err.active-chip { background: #BB0000; color: #FFFFFF; border-color: #BB0000; }
+        .chip-prev.active-chip { background: #E9730C; color: #FFFFFF; border-color: #E9730C; }
+        .chip-chk.active-chip { background: #6D28D9; color: #FFFFFF; border-color: #6D28D9; }
+        .chip-info.active-chip { background: #0070F2; color: #FFFFFF; border-color: #0070F2; }
+
+        .sev-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 3px 8px;
+          border-radius: 12px;
+          font-size: 10px;
+          font-weight: 800;
+        }
+        .sev-blocking { background: #FEEAEA; color: #BB0000; border: 1px solid #F5C6C6; }
+        .sev-preventive { background: #FFF4E5; color: #B45309; border: 1px solid #FCD34D; }
+        .sev-check { background: #F5F3FF; color: #6D28D9; border: 1px solid #DDD6FE; }
+        .sev-info { background: #EBF5FF; color: #005CB9; border: 1px solid #B3D4FF; }
+
+        td.cell-sev-BLOCKING { background: #FFF2F2; border-left: 3px solid #BB0000; }
+        td.cell-sev-PREVENTIVE { background: #FFFBEB; border-left: 3px solid #E9730C; }
+        td.cell-sev-CHECK { background: #FAF5FF; border-left: 3px solid #6D28D9; }
+        td.cell-sev-INFO { background: #F0F7FF; border-left: 3px solid #0070F2; }
+
+        .alert-line {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 6px;
+          margin-top: 3px;
+          padding: 2px 5px;
+          border-radius: 4px;
+          font-size: 10px;
+          font-weight: 700;
+        }
+        .alert-line-BLOCKING { color: #BB0000; background: rgba(187,0,0,0.06); }
+        .alert-line-PREVENTIVE { color: #B45309; background: rgba(233,115,12,0.08); }
+        .alert-line-CHECK { color: #6D28D9; background: rgba(109,40,217,0.08); }
+        .alert-line-INFO { color: #005CB9; background: rgba(0,112,242,0.08); }
+
+        .mini-fix-btn {
+          border: 1px solid #107E3E;
+          background: #E6F9EC;
+          color: #107E3E;
+          font-size: 9px;
+          font-weight: 800;
+          padding: 1px 5px;
+          border-radius: 4px;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .mini-fix-btn:hover { background: #107E3E; color: #FFFFFF; }
+
+        .mini-chk-btn {
+          border: 1px solid #6D28D9;
+          background: #F5F3FF;
+          color: #6D28D9;
+          font-size: 9px;
+          font-weight: 800;
+          padding: 1px 5px;
+          border-radius: 4px;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .mini-chk-btn:hover { background: #6D28D9; color: #FFFFFF; }
 
         .tbl-wrap {
           max-height: 360px;
@@ -2114,14 +2760,8 @@ class ExcelUploaderPro extends HTMLElement {
           border: 1px solid #D9E0E6;
           border-radius: 8px;
           background: #FFFFFF;
-          box-shadow: 0 2px 6px rgba(0,0,0,0.02);
         }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 12px;
-          text-align: left;
-        }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
         th {
           background: #F0F3F6;
           padding: 10px 12px;
@@ -2133,50 +2773,21 @@ class ExcelUploaderPro extends HTMLElement {
           white-space: nowrap;
           z-index: 5;
         }
-        tbody tr:hover { background: #F0F6FF; }
-        td {
-          padding: 8px 12px;
-          border-bottom: 1px solid #EDF0F2;
-          vertical-align: top;
-        }
-        td.cell-error { background: #FFF2F2; }
+        tbody tr:hover { background: #F8FAFC; }
+        td { padding: 8px 10px; border-bottom: 1px solid #EDF0F2; vertical-align: top; }
         .editable-cell {
           outline: none;
           border: 1px solid transparent;
           border-bottom: 1px dashed #0070F2;
           display: inline-block;
           min-width: 65px;
-          padding: 3px 6px;
+          padding: 2px 5px;
           border-radius: 4px;
-          transition: all 0.15s;
         }
-        .editable-cell:hover {
-          background: #F0F6FF;
-          border-color: #B3D1FF;
-        }
-        .editable-cell:focus {
-          background: #FFFFFF;
-          border: 1px solid #0070F2;
-          box-shadow: 0 0 0 2px rgba(0, 112, 242, 0.2);
-        }
+        .editable-cell:focus { background: #FFFFFF; border: 1px solid #0070F2; }
 
-        .th-content {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 6px;
-        }
-        .remove-col-btn {
-          background: none;
-          border: none;
-          color: #BB0000;
-          font-weight: 700;
-          cursor: pointer;
-          font-size: 11px;
-          padding: 1px 4px;
-          border-radius: 3px;
-        }
-        .remove-col-btn:hover { background: #FEEAEA; }
+        .th-content { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+        .remove-col-btn { background: none; border: none; color: #BB0000; font-weight: 700; cursor: pointer; font-size: 11px; }
 
         .row-actions { display: flex; gap: 4px; justify-content: center; }
         .icon-btn {
@@ -2187,18 +2798,19 @@ class ExcelUploaderPro extends HTMLElement {
           font-size: 11px;
           padding: 3px 7px;
           font-weight: 700;
-          transition: all 0.15s;
         }
         .icon-btn:hover { border-color: #0070F2; color: #0070F2; background: #F0F6FF; }
         .icon-btn-del { border-color: #F5C6C6; color: #BB0000; background: #FEEAEA; }
-        .icon-btn-del:hover { background: #FCD5D5; }
 
         .wizard-footer {
           display: flex;
           justify-content: space-between;
+          align-items: center;
           margin-top: 20px;
           border-top: 1px solid #D9E0E6;
           padding-top: 16px;
+          flex-wrap: wrap;
+          gap: 10px;
         }
         .file-card-item {
           background: #FFFFFF;
@@ -2219,14 +2831,8 @@ class ExcelUploaderPro extends HTMLElement {
           cursor: pointer;
           border: 1px solid #BCC8D4;
           background: #F8FAFC;
-          color: #32363A;
-          user-select: none;
         }
-        .sheet-pill-chk.sheet-active {
-          background: #EBF5FF;
-          border-color: #0070F2;
-          color: #005CB9;
-        }
+        .sheet-pill-chk.sheet-active { background: #EBF5FF; border-color: #0070F2; color: #005CB9; }
         .col-pill {
           display: inline-flex;
           align-items: center;
@@ -2249,15 +2855,23 @@ class ExcelUploaderPro extends HTMLElement {
           </div>
         ` : ''}
 
+        ${this._renderHelpModal()}
+
         <div class="sap-header">
           <div class="sap-brand">
             <img class="sap-logo-img" src="${this._sapLogoUri}" alt="SAP Logo" />
             <div class="sap-title-wrap">
               <div class="sap-title">Excel Planning Uploader Pro</div>
-              <div class="sap-subtitle">Multi-Workbook, Sheet Selector & Custom Validation Rules Engine</div>
+              <div class="sap-subtitle">Multi-Sheet Consolidation, Alert Semaphores & Full/Delta Engine</div>
             </div>
           </div>
-          <div class="sap-badge-env">SAP Analytics Cloud • BTP</div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span class="sap-badge-env">SAP Analytics Cloud</span>
+            <button class="help-icon-btn" id="toggleHelpBtn" type="button" title="Cómo funciona este widget">
+              <span style="background:#0070F2; color:#FFF; width:18px; height:18px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:900;">?</span>
+              <span>Help</span>
+            </button>
+          </div>
         </div>
 
         ${this._toast ? `
@@ -2268,8 +2882,8 @@ class ExcelUploaderPro extends HTMLElement {
 
         <div class="nav-tabs">
           <div class="nav-tab ${this._activeTab === 'uploaderTab' ? 'active' : ''}" data-target="uploaderTab">Planning Upload Wizard</div>
-          <div class="nav-tab ${this._activeTab === 'rulesTab' ? 'active' : ''}" data-target="rulesTab">⚙️ Validation Rules (${activeRulesCount})</div>
-          <div class="nav-tab ${this._activeTab === 'monitorTab' ? 'active' : ''}" data-target="monitorTab">BTP Audit Monitor (${this._history.length})</div>
+          <div class="nav-tab ${this._activeTab === 'rulesTab' ? 'active' : ''}" data-target="rulesTab">⚙️ Validation Rules & Assisted Code (${activeRulesCount})</div>
+          <div class="nav-tab ${this._activeTab === 'monitorTab' ? 'active' : ''}" data-target="monitorTab">Audit Monitor (${this._history.length})</div>
         </div>
 
         <div id="uploaderTab" class="tab-content" style="display:${this._activeTab === 'uploaderTab' ? 'block' : 'none'};">
@@ -2277,37 +2891,50 @@ class ExcelUploaderPro extends HTMLElement {
             <div class="step-item ${this._step === 1 ? 'active' : (this._filesQueue.length > 0 ? 'completed' : '')}" data-step="1">
               <div class="step-num">${this._filesQueue.length > 0 && this._step > 1 ? '✓' : '1'}</div>
               <div>
-                <div class="step-label-title">Select Files & Format</div>
-                <div class="step-label-sub">Multi-Excel, CSV & Tabulador</div>
+                <div class="step-label-title">Full/Delta & Files</div>
+                <div class="step-label-sub">Strategy, multi-Excel & CSV</div>
               </div>
             </div>
             <div class="step-item ${this._step === 2 ? 'active' : (this._step > 2 ? 'completed' : '')}" data-step="2">
               <div class="step-num">${this._step > 2 ? '✓' : '2'}</div>
               <div>
-                <div class="step-label-title">Sheets & Validation Rules</div>
-                <div class="step-label-sub">Pick tabs, columns & rules</div>
+                <div class="step-label-title">Sheets & Semaphores</div>
+                <div class="step-label-sub">Tabs, scope & rules</div>
               </div>
             </div>
             <div class="step-item ${this._step === 3 ? 'active' : ''}" data-step="3">
               <div class="step-num">3</div>
               <div>
-                <div class="step-label-title">Interactive Grid & Sync</div>
-                <div class="step-label-sub">Inline edits, bulk fill & load</div>
+                <div class="step-label-title">Grid & Auto-Fix</div>
+                <div class="step-label-sub">Resolution & SAC sync</div>
               </div>
             </div>
           </div>
 
           ${this._step === 1 ? `
+            <div class="toolbar-box" style="background:#EBF5FF; border:1px solid #B3D4FF; margin-bottom:14px;">
+              <div style="display:flex; align-items:center; gap:12px; width:100%; justify-content:space-between; flex-wrap:wrap;">
+                <div>
+                  <strong style="color:#005CB9; font-size:13px;">🔄 Planning Load Strategy:</strong>
+                  <div style="font-size:11px; color:#556B82;">Choose whether this upload replaces current model data or applies incremental delta changes.</div>
+                </div>
+                <select id="loadStrategySel" class="input-std" style="font-weight:800; font-size:13px; color:#005CB9; padding:8px 12px;">
+                  <option value="FULL" ${this._loadStrategy === 'FULL' ? 'selected' : ''}>FULL LOAD (Replace / Complete Model)</option>
+                  <option value="DELTA" ${this._loadStrategy === 'DELTA' ? 'selected' : ''}>DELTA LOAD (Incremental / Adjustments)</option>
+                </select>
+              </div>
+            </div>
+
             ${this._renderFormatConfigBar(false)}
             <div class="drop-zone" id="dropZone">
               <div class="upload-icon-circle">☁️</div>
-              <h3 style="margin:0; color:#1D2D3E; font-size:16px;">Drag & drop two or more Excel / CSV files here</h3>
+              <h3 style="margin:0; color:#1D2D3E; font-size:16px;">Drag & drop your planning files here</h3>
               <p style="margin:0; color:#556B82; font-size:12px; max-width:560px;">
-                Select multiple files simultaneously or add them incrementally. You will be able to choose which sheets (pestañas) to consolidate in the next step (.xlsx, .xls, .xlsm, .csv, .txt).
+                Support for multiple workbooks, sheets, CSV and text files with configurable delimiters.
               </p>
               <div style="margin-top:8px;">
                 <label class="file-label-btn" for="fileInput">
-                  📂 Browse & Select Multiple Files
+                  📂 Browse & Select Files
                 </label>
                 <input type="file" id="fileInput" multiple accept=".xlsx, .xls, .xlsm, .csv, .txt" ${!this._xlsxReady ? 'disabled' : ''} style="display:none;" />
               </div>
@@ -2325,12 +2952,12 @@ class ExcelUploaderPro extends HTMLElement {
 
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
                 <div>
-                  <h3 style="margin:0; color:#1D2D3E;">Loaded Workbooks & Sheet Selector (${this._filesQueue.length} file(s))</h3>
-                  <span style="font-size:11px; color:#556B82;">Check or uncheck the sheets (pestañas) inside each Excel file that you want to include in the consolidation:</span>
+                  <h3 style="margin:0; color:#1D2D3E;">Loaded Workbooks & Sheet Selector (${this._filesQueue.length} file(s)) — Strategy: <span style="color:#005CB9;">${this._loadStrategy}</span></h3>
+                  <span style="font-size:11px; color:#556B82;">Check or uncheck the sheets inside each file to consolidate:</span>
                 </div>
                 <div style="display:flex; gap:8px;">
                   <label class="btn" for="fileInput" style="cursor:pointer;">
-                    + Add More Excel / CSV Files
+                    + Add More Files
                     <input type="file" id="fileInput" multiple accept=".xlsx, .xls, .xlsm, .csv, .txt" style="display:none;" />
                   </label>
                   ${this._filesQueue.length > 0 ? `
@@ -2361,19 +2988,18 @@ class ExcelUploaderPro extends HTMLElement {
                         </div>
                       </div>
 
-                      <!-- SELECTOR DE PESTAÑAS (SHEETS) DEL EXCEL -->
                       <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #D9E0E6; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                         <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-                          <span style="font-size:11px; font-weight:700; color:#1D2D3E; margin-right:4px;">📑 Excel Sheets:</span>
+                          <span style="font-size:11px; font-weight:700; color:#1D2D3E; margin-right:4px;">📑 Sheets:</span>
                           ${(item.sheets || []).map((sh, sIdx) => `
                             <label class="sheet-pill-chk ${sh.selected ? 'sheet-active' : ''}">
-                              <input type="checkbox" class="sheet-toggle-chk" data-fidx="${fIdx}" data-sidx="${sIdx}" ${sh.selected ? 'checked' : ''} style="margin:0; cursor:pointer;" />
+                              <input type="checkbox" class="sheet-toggle-chk" data-fidx="${fidx || fIdx}" data-sidx="${sIdx}" ${sh.selected ? 'checked' : ''} style="margin:0; cursor:pointer;" />
                               <span>${this._esc(sh.name)} <strong>(${sh.rows.length})</strong></span>
                             </label>
                           `).join('')}
                         </div>
                         <div style="display:flex; gap:4px;">
-                          <button class="icon-btn select-all-sheets-btn" data-fidx="${fIdx}" data-mode="all" type="button">Select All Tabs</button>
+                          <button class="icon-btn select-all-sheets-btn" data-fidx="${fIdx}" data-mode="all" type="button">Select All</button>
                           <button class="icon-btn select-all-sheets-btn" data-fidx="${fIdx}" data-mode="none" type="button">None</button>
                         </div>
                       </div>
@@ -2382,7 +3008,6 @@ class ExcelUploaderPro extends HTMLElement {
                 }).join('')}
               </div>
 
-              <!-- ESQUEMA DE COLUMNAS Y REGLAS DE VALIDACIÓN EN PASO 2 -->
               <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px;">
                 <div style="background:#FFFFFF; border:1px solid #D9E0E6; border-radius:8px; padding:16px;">
                   <div style="font-weight:700; color:#1D2D3E; margin-bottom:10px;">Active Model Columns (Required Schema):</div>
@@ -2408,7 +3033,7 @@ class ExcelUploaderPro extends HTMLElement {
 
                 <div style="background:#FFFFFF; border:1px solid #D9E0E6; border-radius:8px; padding:16px;">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <div style="font-weight:700; color:#1D2D3E;">⚙️ Active Validation Rules (${activeRulesCount}):</div>
+                    <div style="font-weight:700; color:#1D2D3E;">⚙️ Active Rules & Semaphores (${activeRulesCount}):</div>
                     <div style="display:flex; gap:6px;">
                       <button class="btn btn-ghost" id="toggleInlineRuleBtn" type="button" style="padding:4px 10px; font-size:11px;">
                         ${this._showInlineRuleCreator ? 'Close Form' : '+ New Rule'}
@@ -2420,9 +3045,10 @@ class ExcelUploaderPro extends HTMLElement {
                   </div>
                   <div style="display:flex; flex-wrap:wrap; gap:6px;">
                     ${this._validationRules.map(r => `
-                      <span style="display:inline-flex; align-items:center; gap:6px; background:${r.active ? '#E6F9EC' : '#F0F3F6'}; color:${r.active ? '#107E3E' : '#556B82'}; border:1px solid ${r.active ? '#A7F3D0' : '#D9E0E6'}; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600;">
+                      <span style="display:inline-flex; align-items:center; gap:6px; background:#F8FAFC; border:1px solid #D9E0E6; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:600;">
                         <input type="checkbox" class="toggle-rule-chk" data-rule-id="${this._esc(r.id)}" ${r.active ? 'checked' : ''} style="margin:0; cursor:pointer;" />
-                        <strong>${this._esc(r.col)}</strong>: ${this._esc(r.type)} ${r.param ? `(${this._esc(r.param)})` : ''}
+                        ${this._renderSemaphoreDot(r.semaphore || 'RED')}
+                        <strong>${this._esc(r.col)}</strong>: ${this._esc(r.type)}
                         <button class="remove-col-btn delete-rule-btn" data-rule-id="${this._esc(r.id)}" title="Delete rule">✕</button>
                       </span>
                     `).join('')}
@@ -2433,19 +3059,20 @@ class ExcelUploaderPro extends HTMLElement {
               ${this._showInlineRuleCreator ? this._renderRuleCreatorForm() : ''}
             </div>
             <div class="wizard-footer">
-              <button class="btn btn-ghost" id="prevStepBtn" type="button">← Back to Upload</button>
-              <button class="btn" id="nextStep3Btn" type="button">Validate & Edit ${totalRows} Consolidated Rows →</button>
+              <button class="btn btn-ghost" id="prevStepBtn" type="button">← Back</button>
+              <button class="btn" id="nextStep3Btn" type="button">Validate & Edit ${totalRows} Rows →</button>
             </div>
           ` : ''}
 
           ${this._step === 3 ? `
             <div>
               <div class="metrics-bar">
-                <div class="metric-box"><div class="metric-title">Workbooks</div><div class="metric-val">${this._filesQueue.length}</div></div>
-                <div class="metric-box"><div class="metric-title">Total Rows</div><div class="metric-val">${totalRows}</div></div>
-                <div class="metric-box kpi-ok"><div class="metric-title">Valid Rows</div><div class="metric-val" style="color:#107E3E;">${validRows}</div></div>
-                <div class="metric-box kpi-err"><div class="metric-title">With Errors</div><div class="metric-val" style="color:#BB0000;">${errorRows}</div></div>
-                <div class="metric-box ${errorRows > 0 ? 'kpi-err' : 'kpi-ok'}"><div class="metric-title">Readiness</div><div class="metric-val" style="font-size:14px; color:${errorRows > 0 ? '#BB0000' : '#107E3E'}">${validPercent}% (${errorRows > 0 ? 'Fix Errors' : 'Ready'})</div></div>
+                <div class="metric-box"><div class="metric-title">Strategy</div><div class="metric-val" style="font-size:14px; color:#0064D9;">${this._loadStrategy}</div></div>
+                <div class="metric-box kpi-ok"><div class="metric-title">Clean Rows</div><div class="metric-val" style="color:#107E3E;">${stats.cleanRows}</div></div>
+                <div class="metric-box kpi-err"><div class="metric-title">🛑 Bloqueantes</div><div class="metric-val" style="color:#BB0000;">${stats.blockingRows}</div></div>
+                <div class="metric-box kpi-prev"><div class="metric-title">⚠️ Preventivas</div><div class="metric-val" style="color:#E9730C;">${stats.preventiveRows}</div></div>
+                <div class="metric-box kpi-chk"><div class="metric-title">🔎 Chequeos</div><div class="metric-val" style="color:#6D28D9;">${stats.checkRows}</div></div>
+                <div class="metric-box"><div class="metric-title">ℹ️ Informativas</div><div class="metric-val" style="color:#0070F2;">${stats.infoRows}</div></div>
               </div>
 
               <div class="dist-bar">
@@ -2455,7 +3082,7 @@ class ExcelUploaderPro extends HTMLElement {
               <div class="toolbar-box">
                 <div style="display:flex; align-items:center; gap:8px;">
                   <span style="font-weight:700; font-size:12px;">🔍 Quick Search:</span>
-                  <input type="text" id="searchInput" class="input-std" style="width:200px;" placeholder="Filter by ID, text, sheet..." value="${this._esc(this._searchQuery)}" />
+                  <input type="text" id="searchInput" class="input-std" style="width:190px;" placeholder="Filter by ID, text, sheet..." value="${this._esc(this._searchQuery)}" />
                 </div>
 
                 <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
@@ -2463,7 +3090,7 @@ class ExcelUploaderPro extends HTMLElement {
                   <select id="bulkColSelect" class="input-std">
                     ${this._requiredColumns.map(c => `<option value="${this._esc(c)}" ${this._bulkCol === c ? 'selected' : ''}>${this._esc(c)}</option>`).join('')}
                   </select>
-                  <input type="text" id="bulkValInput" class="input-std" style="width:120px;" placeholder="Value (e.g. 1000)" value="${this._esc(this._bulkVal)}" />
+                  <input type="text" id="bulkValInput" class="input-std" style="width:110px;" placeholder="Value (e.g. 1000)" value="${this._esc(this._bulkVal)}" />
                   <button class="btn btn-ghost" id="applyBulkEmptyBtn" type="button" style="padding:5px 10px; font-size:11px;">Fill Empty</button>
                   <button class="btn btn-ghost" id="applyBulkAllBtn" type="button" style="padding:5px 10px; font-size:11px;">Overwrite Visible</button>
                 </div>
@@ -2482,16 +3109,26 @@ class ExcelUploaderPro extends HTMLElement {
 
               <div class="chips-row">
                 <div class="chips-left">
-                  <div class="chip chip-all ${this._issueFilter === 'all' ? 'active-chip' : ''}" data-filter="all">All Rows (${totalRows})</div>
-                  <div class="chip chip-ok ${this._issueFilter === 'correct' ? 'active-chip' : ''}" data-filter="correct">Valid (${validRows})</div>
-                  <div class="chip chip-err ${this._issueFilter === 'errors' ? 'active-chip' : ''}" data-filter="errors">With Errors (${errorRows})</div>
+                  <div class="chip chip-all ${this._issueFilter === 'all' ? 'active-chip' : ''}" data-filter="all">All (${totalRows})</div>
+                  <div class="chip chip-ok ${this._issueFilter === 'correct' ? 'active-chip' : ''}" data-filter="correct">Clean (${stats.cleanRows})</div>
+                  <div class="chip chip-err ${this._issueFilter === 'BLOCKING' ? 'active-chip' : ''}" data-filter="BLOCKING">🛑 Bloqueantes (${stats.blockingRows})</div>
+                  <div class="chip chip-prev ${this._issueFilter === 'PREVENTIVE' ? 'active-chip' : ''}" data-filter="PREVENTIVE">⚠️ Preventivas (${stats.preventiveRows})</div>
+                  <div class="chip chip-chk ${this._issueFilter === 'CHECK' ? 'active-chip' : ''}" data-filter="CHECK">🔎 Chequeos (${stats.checkRows})</div>
+                  <div class="chip chip-info ${this._issueFilter === 'INFO' ? 'active-chip' : ''}" data-filter="INFO">ℹ️ Info (${stats.infoRows})</div>
                 </div>
                 <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                  ${stats.fixableCells > 0 ? `
+                    <button class="btn btn-success" id="autoFixAllBtn" type="button" style="font-size:11px; padding:6px 12px;">
+                      ✨ Auto-Fix All (${stats.fixableCells})
+                    </button>
+                  ` : ''}
                   <button class="btn btn-ghost" id="addRowBtn" type="button" style="font-size:11px; padding:6px 12px;">+ Add Row</button>
                   <button class="btn btn-ghost" id="openAddColBtn" type="button" style="font-size:11px; padding:6px 12px;">+ Add Column</button>
-                  <button class="btn btn-ghost" id="toggleInlineRuleBtn" type="button" style="font-size:11px; padding:6px 12px;">⚙️ + Validation Rule</button>
-                  <button class="btn btn-ghost" id="exportCleanBtn" type="button" style="font-size:11px; padding:6px 12px;">📤 Export Excel (.xlsx)</button>
-                  ${errorRows > 0 ? `<button class="btn btn-danger" id="downloadLogBtn" type="button" style="font-size:11px; padding:6px 12px;">📥 Error Log (.csv)</button>` : ''}
+                  <button class="btn btn-ghost" id="toggleInlineRuleBtn" type="button" style="font-size:11px; padding:6px 12px;">⚙️ + Rule / Code</button>
+                  <button class="btn btn-ghost" id="exportCleanBtn" type="button" style="font-size:11px; padding:6px 12px;">📤 Export (.xlsx)</button>
+                  ${(stats.blockingRows + stats.preventiveRows + stats.checkRows + stats.infoRows) > 0 ? `
+                    <button class="btn btn-danger" id="downloadLogBtn" type="button" style="font-size:11px; padding:6px 12px;">📥 Alerts Log (.csv)</button>
+                  ` : ''}
                 </div>
               </div>
 
@@ -2524,13 +3161,30 @@ class ExcelUploaderPro extends HTMLElement {
                         </td>
                         <td style="font-size:11px; color:#0064D9; font-weight:700;">${this._esc(row._sourceFile)}</td>
                         ${this._requiredColumns.map(col => {
-                          const err = row._errors[col];
+                          const cellAlerts = (row._alerts && row._alerts[col]) || [];
                           const editedInfo = row._editedCols && row._editedCols[col];
+                          let topSev = '';
+                          if (cellAlerts.some(a => a.severity === 'BLOCKING')) topSev = 'BLOCKING';
+                          else if (cellAlerts.some(a => a.severity === 'PREVENTIVE')) topSev = 'PREVENTIVE';
+                          else if (cellAlerts.some(a => a.severity === 'CHECK')) topSev = 'CHECK';
+                          else if (cellAlerts.some(a => a.severity === 'INFO')) topSev = 'INFO';
+
                           return `
-                            <td class="${err ? 'cell-error' : ''}" style="${!err && editedInfo ? 'background:#FFFBEB;' : ''}">
+                            <td class="${topSev ? 'cell-sev-' + topSev : ''}" style="${!topSev && editedInfo ? 'background:#FFFBEB;' : ''}">
                               <span class="editable-cell" contenteditable="true" data-orig-idx="${origIdx}" data-col="${this._esc(col)}">${this._esc(row[col] ?? '')}</span>
-                              ${err ? `<span style="display:block; font-size:10px; color:#BB0000; font-weight:700; margin-top:2px;">⚠️ ${this._esc(err)}</span>` : ''}
-                              ${!err && editedInfo ? `<span style="display:block; font-size:9px; color:#B45309; font-weight:600;">✎ Edited (was: ${this._esc(editedInfo.from || 'Blank')})</span>` : ''}
+                              ${cellAlerts.map(a => {
+                                const dotHtml = this._renderSemaphoreDot(a.semaphore);
+                                return `
+                                  <div class="alert-line alert-line-${a.severity}">
+                                    <span>${dotHtml} ${this._esc(a.msg)}</span>
+                                    <span style="display:inline-flex; gap:3px;">
+                                      ${a.autoFix ? `<button class="mini-fix-btn cell-autofix-btn" data-orig-idx="${origIdx}" data-col="${this._esc(col)}" data-rule-id="${this._esc(a.ruleId)}" type="button" title="Auto-Fix">✨ Fix</button>` : ''}
+                                      ${(a.severity === 'CHECK' || a.severity === 'PREVENTIVE') ? `<button class="mini-chk-btn cell-check-ok-btn" data-orig-idx="${origIdx}" data-col="${this._esc(col)}" data-rule-id="${this._esc(a.ruleId)}" type="button" title="Approve">✓ OK</button>` : ''}
+                                    </span>
+                                  </div>
+                                `;
+                              }).join('')}
+                              ${cellAlerts.length === 0 && editedInfo ? `<span style="display:block; font-size:9px; color:#B45309; font-weight:600; margin-top:2px;">✎ Edited (was: ${this._esc(editedInfo.from || 'Blank')})</span>` : ''}
                             </td>
                           `;
                         }).join('')}
@@ -2542,9 +3196,17 @@ class ExcelUploaderPro extends HTMLElement {
             </div>
             <div class="wizard-footer">
               <button class="btn btn-ghost" id="prevStepBtn" type="button">← Back</button>
-              <div style="display:flex; gap:10px;">
+              <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+                ${stats.blockingRows === 0 && (stats.preventiveRows > 0 || stats.checkRows > 0) ? `
+                  <label style="display:flex; align-items:center; gap:6px; background:#FFF8E6; border:1px solid #FCD34D; color:#B45309; padding:6px 12px; border-radius:6px; font-size:11px; font-weight:700; cursor:pointer;">
+                    <input type="checkbox" id="ackNonBlockingChk" ${this._acknowledgeNonBlocking ? 'checked' : ''} style="margin:0; cursor:pointer;" />
+                    <span>Confirm review of ${stats.preventiveRows} preventive and ${stats.checkRows} check alerts</span>
+                  </label>
+                ` : ''}
                 <button class="btn btn-ghost" id="exitBtn" type="button">Reset Queue</button>
-                <button class="btn" id="finishBtn" type="button" ${errorRows > 0 ? 'style="opacity:0.55;"' : ''}>🚀 Consolidate & Synchronize with SAC</button>
+                <button class="btn" id="finishBtn" type="button" ${stats.blockingRows > 0 ? 'style="opacity:0.55;"' : ''}>
+                  🚀 Consolidate & Synchronize with SAC (${this._loadStrategy})
+                </button>
               </div>
             </div>
           ` : ''}
