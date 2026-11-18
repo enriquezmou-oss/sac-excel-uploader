@@ -1,4 +1,3 @@
-// Carga dinámica segura de SheetJS
 if (typeof XLSX === 'undefined') {
   var script = document.createElement('script');
   script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
@@ -10,102 +9,105 @@ class ExcelUploaderPro extends HTMLElement {
   constructor() {
     super();
     this._shadow = this.attachShadow({ mode: 'open' });
-    this._state = 'idle'; // idle | parsing | reviewing | done
-    this._activeTab = 'upload';
     this._rows = [];
     this._headers = [];
-    this._structErrors = [];
-    this._file = null;
-    this._validatedDataJson = '[]';
-    this._expectedSheetName = 'Sheet1';
-    this._requiredColumns = 'ID,DESCRIPTION,H1,COMPANY,COSTCENTER,ASSET_CLASS,CAPITALIZED';
-    this._uniqueKeyColumns = 'ID';
-    this._numericColumns = '';
-    this._customRules = [
-      { name: 'Empresa válida', column: 'COMPANY', operator: '=', value: '1000', severity: 'error' },
-      { name: 'ID no vacío', column: 'ID', operator: 'no-vacío', value: '', severity: 'error' }
-    ];
-    this._history = [];
+    this._fileName = 'No file chosen';
+    this._sheetName = 'Sheet1';
+    this._searchQuery = '';
+    this._showPreview = true;
+    this._requiredColumns = ['ID', 'DESCRIPTION', 'H1', 'COMPANY', 'COSTCENTER', 'ASSET_CLASS', 'CAPITALIZED'];
     this._render();
   }
 
   connectedCallback() {
-    this._setupEventListeners();
+    this._setupListeners();
   }
 
-  // Getters y Setters para propiedades expuestas en SAC
-  set expectedSheetName(v) { this._expectedSheetName = v; }
-  get expectedSheetName() { return this._expectedSheetName; }
+  _setupListeners() {
+    const fileInput = this._shadow.getElementById('fileInput');
+    const uploadBtn = this._shadow.getElementById('uploadBtn');
+    const clearBtn = this._shadow.getElementById('clearBtn');
+    const searchInput = this._shadow.getElementById('searchInput');
+    const downloadTemplateBtn = this._shadow.getElementById('downloadTemplateBtn');
+    const downloadErrorLogBtn = this._shadow.getElementById('downloadErrorLogBtn');
+    const togglePreviewBtn = this._shadow.getElementById('togglePreviewBtn');
 
-  set requiredColumns(v) { this._requiredColumns = v; this._validateStructure(); this._render(); }
-  get requiredColumns() { return this._requiredColumns; }
+    if (uploadBtn && fileInput) {
+      uploadBtn.addEventListener('click', () => fileInput.click());
+    }
 
-  set uniqueKeyColumns(v) { this._uniqueKeyColumns = v; }
-  get uniqueKeyColumns() { return this._uniqueKeyColumns; }
-
-  set numericColumns(v) { this._numericColumns = v; }
-  get numericColumns() { return this._numericColumns; }
-
-  get validatedDataJson() { return this._validatedDataJson; }
-
-  _setupEventListeners() {
-    const dz = this._shadow.getElementById('dropZone');
-    const fi = this._shadow.getElementById('fileInput');
-    if (!dz || !fi) return;
-
-    dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('dragover'); });
-    dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
-    dz.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dz.classList.remove('dragover');
-      if (e.dataTransfer.files.length) this._processFile(e.dataTransfer.files[0]);
-    });
-
-    dz.addEventListener('click', () => fi.click());
-    fi.addEventListener('change', (e) => {
-      if (e.target.files.length) this._processFile(e.target.files[0]);
-    });
-
-    // Gestión de pestañas
-    this._shadow.querySelectorAll('.wgt-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        if (tab.classList.contains('disabled')) return;
-        this._activeTab = tab.dataset.tab;
-        this._render();
+    if (fileInput) {
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length) {
+          this._fileName = e.target.files[0].name;
+          this._processFile(e.target.files[0]);
+        }
       });
-    });
+    }
 
-    // Botón añadir regla
-    const addRuleBtn = this._shadow.getElementById('addRuleBtn');
-    if (addRuleBtn) {
-      addRuleBtn.addEventListener('click', () => {
-        const cols = this._requiredColumns ? this._requiredColumns.split(',').map(c => c.trim()) : [];
-        this._customRules.push({ name: 'Regla personalizada', column: cols[0] || 'ID', operator: 'no-vacío', value: '', severity: 'error' });
-        this._validateStructure();
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        this._rows = [];
+        this._headers = [];
+        this._fileName = 'No file chosen';
+        this._sheetName = 'Sheet1';
         this._render();
       });
     }
 
-    // Eliminar regla
-    this._shadow.querySelectorAll('.rule-rm').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const idx = parseInt(e.target.dataset.idx, 10);
-        this._customRules.splice(idx, 1);
-        this._validateStructure();
-        this._render();
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        this._searchQuery = e.target.value.toLowerCase();
+        this._renderTableBody();
       });
+    }
+
+    if (downloadTemplateBtn) {
+      downloadTemplateBtn.addEventListener('click', () => this._downloadTemplate());
+    }
+
+    if (downloadErrorLogBtn) {
+      downloadErrorLogBtn.addEventListener('click', () => this._downloadErrorLog());
+    }
+
+    if (togglePreviewBtn) {
+      togglePreviewBtn.addEventListener('click', () => {
+        this._showPreview = !this._showPreview;
+        const body = this._shadow.getElementById('previewBody');
+        if (body) body.style.display = this._showPreview ? 'block' : 'none';
+      });
+    }
+  }
+
+  _downloadTemplate() {
+    if (typeof XLSX === 'undefined') return;
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([this._requiredColumns]);
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+    XLSX.writeFile(wb, 'Asset_Master_Template.xlsx');
+  }
+
+  _downloadErrorLog() {
+    const errors = this._rows.filter(r => r._errors && r._errors.length > 0);
+    if (errors.length === 0) {
+      alert('No hay errores para descargar.');
+      return;
+    }
+    let csv = 'Row,ID,Errors\n';
+    errors.forEach(r => {
+      csv += `${r._rowNum},${r.ID || ''},"${r._errors.join('; ')}"\n`;
     });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Validation_Error_Log.csv';
+    a.click();
   }
 
   _processFile(file) {
-    this._file = file;
-    this._state = 'parsing';
-    this._render();
-
     if (typeof XLSX === 'undefined') {
-      alert('La librería SheetJS está cargando. Por favor, inténtalo de nuevo en un segundo.');
-      this._state = 'idle';
-      this._render();
+      alert('SheetJS cargando, intenta de nuevo.');
       return;
     }
 
@@ -114,248 +116,210 @@ class ExcelUploaderPro extends HTMLElement {
       try {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = this._expectedSheetName || workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-
-        if (!worksheet) {
-          throw new Error(`No se encontró la pestaña "${sheetName}" en el libro de Excel.`);
-        }
-
+        this._sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[this._sheetName];
         const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        if (json.length === 0) throw new Error('El archivo Excel está vacío.');
+
+        if (json.length === 0) throw new Error('El archivo está vacío');
 
         this._headers = json[0].map(h => String(h).trim());
-        this._rows = json.slice(1).map((row, idx) => {
-          const obj = { _rowNum: idx + 2, _errors: [] };
+        const rawRows = json.slice(1).map((row, idx) => {
+          const obj = { _rowNum: idx + 2, _errors: {} };
           this._headers.forEach((h, i) => {
             obj[h] = row[i] !== undefined ? row[i] : '';
           });
           return obj;
-        }).filter(row => Object.values(row).some(v => v !== ''));
+        }).filter(r => Object.values(r).some(v => v !== '' && v !== '_rowNum' && v !== '_errors'));
 
-        this._validateStructure();
-        this._state = 'reviewing';
-        this._activeTab = 'data';
-
-        const errCount = this._rows.filter(r => r._errors.length > 0).length;
-        this._history.unshift({
-          time: new Date().toLocaleTimeString(),
-          file: file.name,
-          rows: this._rows.length,
-          errors: errCount,
-          status: errCount > 0 ? 'Con incidencias' : 'Válido'
+        // Validaciones de negocio idénticas al diseño
+        const idCounts = {};
+        rawRows.forEach(r => {
+          const id = String(r.ID || '').trim();
+          if (id) idCounts[id] = (idCounts[id] || 0) + 1;
         });
 
-        // Preparar y emitir datos validados para SAC
-        this._validatedDataJson = JSON.stringify(this._rows.map(r => {
-          const clean = { ...r };
-          delete clean._rowNum;
-          delete clean._errors;
-          return clean;
-        }));
+        rawRows.forEach(row => {
+          row._errors = {};
+          // 1. Columnas obligatorias / celdas vacías
+          this._requiredColumns.forEach(col => {
+            if (row[col] === '' || row[col] === null || row[col] === undefined) {
+              row._errors[col] = 'Blank cell not allowed';
+            }
+          });
 
-        this.dispatchEvent(new CustomEvent('propertiesChanged', {
-          bubbles: true, composed: true,
-          detail: { properties: { validatedDataJson: this._validatedDataJson } }
-        }));
+          // 2. Duplicados en ID
+          const id = String(row.ID || '').trim();
+          if (id && idCounts[id] > 1) {
+            row._errors['ID'] = 'Duplicate value not allowed';
+          }
 
+          // 3. Validación de Cost Center (ejemplo: si no es numérico de 8 dígitos)
+          const cc = String(row.COSTCENTER || '').trim();
+          if (cc && !/^\d{8}$/.test(cc)) {
+            row._errors['COSTCENTER'] = 'Invalid Cost Center';
+          }
+        });
+
+        this._rows = rawRows;
         this._render();
       } catch (err) {
-        this._state = 'idle';
-        alert('Error al procesar el Excel: ' + err.message);
-        this._render();
+        alert('Error al procesar: ' + err.message);
       }
     };
     reader.readAsArrayBuffer(file);
   }
 
-  _validateStructure() {
-    this._structErrors = [];
-    const reqCols = this._requiredColumns ? this._requiredColumns.split(',').map(c => c.trim()).filter(Boolean) : [];
-    
-    reqCols.forEach(col => {
-      if (!this._headers.length || !this._headers.includes(col)) {
-        if (this._headers.length > 0) {
-          this._structErrors.push(`Falta la columna obligatoria: "${col}"`);
-        }
-      }
-    });
-
-    this._rows.forEach(row => {
-      row._errors = [];
-      // Validar obligatorias vacías
-      reqCols.forEach(col => {
-        if (row[col] === '' || row[col] === null || row[col] === undefined) {
-          row._errors.push(`Columna ${col} vacía`);
-        }
-      });
-
-      // Validar reglas personalizadas
-      this._customRules.forEach(rule => {
-        if (rule.column && row[rule.column] !== undefined) {
-          const val = String(row[rule.column]).trim();
-          if (rule.operator === 'no-vacío' && !val) {
-            row._errors.push(`Regla [${rule.name}]: ${rule.column} requerido`);
-          } else if (rule.operator === '=' && val !== rule.value) {
-            row._errors.push(`Regla [${rule.name}]: ${rule.column} debe ser ${rule.value}`);
-          }
-        }
-      });
-    });
-  }
-
-  _getReadableState() {
-    switch (this._state) {
-      case 'parsing':   return '⏳ Leyendo y validando fichero...';
-      case 'reviewing': return '👀 Pendiente de revisión';
-      case 'done':      return '✅ Importado con éxito';
-      case 'idle':
-      default:          return '⏸️ Esperando archivo Excel';
-    }
-  }
-
   _render() {
-    const hasData = this._rows.length > 0;
-    const errCount = this._rows.filter(r => r._errors.length > 0).length;
-    const okCount = this._rows.length - errCount;
-    const readableState = this._getReadableState();
-    const cols = this._requiredColumns ? this._requiredColumns.split(',').map(c => c.trim()) : [];
+    const rowsRead = this._rows.length;
+    const invalidRowsCount = this._rows.filter(r => Object.keys(r._errors).length > 0).length;
+    const validRowsCount = rowsRead - invalidRowsCount;
+    const isInvalid = invalidRowsCount > 0;
 
     this._shadow.innerHTML = `
       <style>
-        :host { display: block; font-family: "72", Arial, sans-serif; font-size: 13px; color: #1D2D3E; background: #F5F6F7; border: 1px solid #D1D7DD; border-radius: 4px; overflow: hidden; height: 100%; box-sizing: border-box; }
-        .wgt-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #fff; border-bottom: 1px solid #D1D7DD; }
-        .wgt-title { font-size: 15px; font-weight: 700; color: #1D2D3E; }
-        .wgt-status { font-size: 12px; padding: 4px 10px; border-radius: 12px; font-weight: 600; }
-        .wgt-status.idle { background: #EFF1F2; color: #6A6D70; }
-        .wgt-status.parsing { background: #E6F0FF; color: #0064D9; }
-        .wgt-status.reviewing { background: #FEF6E0; color: #A35200; }
-        .wgt-status.done { background: #E6F9EC; color: #107E3E; }
+        :host { display: block; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 13px; color: #333; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; padding: 16px; box-sizing: border-box; width: 100%; height: 100%; overflow: auto; }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .title-area h2 { margin: 0; font-size: 16px; font-weight: 700; color: #1e3a8a; }
+        .title-area p { margin: 2px 0 0; font-size: 11px; color: #6b7280; }
+        .top-actions { display: flex; gap: 8px; align-items: center; }
+        
+        .btn { padding: 6px 12px; font-size: 12px; font-weight: 600; border-radius: 4px; cursor: pointer; border: 1px solid #d1d5db; background: #fff; color: #374151; }
+        .btn:hover { background: #f9fafb; }
+        .btn-primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .badge-err { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; padding: 4px 10px; border-radius: 4px; font-weight: 600; font-size: 12px; }
+        .badge-ok { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; padding: 4px 10px; border-radius: 4px; font-weight: 600; font-size: 12px; }
 
-        .wgt-tabs { display: flex; background: #fff; border-bottom: 1px solid #D1D7DD; padding: 0 12px; }
-        .wgt-tab { padding: 8px 14px; font-size: 13px; font-weight: 600; color: #6A6D70; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-        .wgt-tab.active { color: #0070F2; border-bottom-color: #0070F2; }
-        .wgt-tab.disabled { color: #BCC3CA; pointer-events: none; }
+        .control-row { display: flex; justify-content: space-between; align-items: center; background: #f9fafb; padding: 12px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 16px; gap: 12px; }
+        .control-left { display: flex; gap: 8px; align-items: center; }
+        .file-box { border: 1px solid #d1d5db; background: #fff; padding: 4px 8px; border-radius: 4px; font-size: 12px; color: #374151; min-width: 180px; }
+        .search-box { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; width: 220px; }
 
-        .wgt-content { padding: 16px; background: #F5F6F7; height: calc(100% - 110px); overflow-y: auto; box-sizing: border-box; }
-        .wgt-pane { display: none; }
-        .wgt-pane.active { display: block; }
+        .metrics-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: #e5e7eb; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; margin-bottom: 16px; }
+        .metric-card { background: #fff; padding: 10px 14px; }
+        .metric-label { font-size: 11px; color: #6b7280; margin-bottom: 2px; }
+        .metric-val { font-size: 15px; font-weight: 700; color: #1f2937; }
 
-        .drop-zone { border: 2px dashed #89919A; border-radius: 8px; padding: 40px 24px; text-align: center; cursor: pointer; background: #fff; transition: all .2s; }
-        .drop-zone:hover { border-color: #0070F2; background: #EFF5FF; }
-        .drop-zone.dragover { border-color: #107E3E; background: #E6F9EC; }
-        .file-input { display: none; }
+        .progress-section { margin-bottom: 16px; }
+        .progress-header { display: flex; justify-content: space-between; font-size: 11px; color: #4b5563; margin-bottom: 4px; font-weight: 600; }
+        .progress-bar-bg { background: #e5e7eb; height: 6px; border-radius: 3px; overflow: hidden; }
+        .progress-bar-fill { background: #2563eb; height: 100%; width: ${rowsRead > 0 ? '100%' : '0%'}; }
 
-        .val-summary { display: flex; gap: 8px; margin-bottom: 12px; }
-        .val-chip { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 14px; font-size: 12px; font-weight: 700; border: 1px solid; }
-        .vc-ok { background: #E6F9EC; border-color: #AFD9B8; color: #0A6C2B; }
-        .vc-err { background: #FFEAEA; border-color: #F4ADAD; color: #9E0000; }
-        .val-dot { width: 8px; height: 8px; border-radius: 50%; }
-        .vc-ok .val-dot { background: #107E3E; }
-        .vc-err .val-dot { background: #BB0000; }
+        .preview-header-row { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; margin-bottom: 8px; font-weight: 700; color: #1f2937; }
+        
+        .tbl-container { overflow-x: auto; max-height: 280px; border: 1px solid #e5e7eb; border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
+        thead th { background: #f3f4f6; padding: 8px 10px; font-weight: 600; border-bottom: 1px solid #e5e7eb; color: #374151; position: sticky; top: 0; }
+        tbody td { padding: 8px 10px; border-bottom: 1px solid #f3f4f6; color: #1f2937; }
+        tbody tr:hover { background: #f9fafb; }
+        
+        td.cell-error { background: #fee2e2 !important; color: #991b1b; }
+        .err-msg { font-size: 10px; color: #991b1b; display: block; margin-top: 2px; font-weight: 600; }
 
-        .tbl-wrap { overflow: auto; border: 1px solid #D1D7DD; border-radius: 4px; background: #fff; max-height: 240px; }
-        table { width: 100%; border-collapse: collapse; font-size: 12px; }
-        thead th { position: sticky; top: 0; background: #F5F6F7; font-weight: 700; padding: 8px 10px; border-bottom: 1px solid #D1D7DD; text-align: left; }
-        tbody td { padding: 6px 10px; border-bottom: 1px solid #EDF0F2; }
-        tbody tr.row-err { background: #FFF5F5; }
-        td.cell-err { background: #FFEAEA; color: #9E0000; font-weight: 600; }
-
-        .rule-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #fff; border: 1px solid #D1D7DD; border-radius: 4px; margin-bottom: 8px; font-size: 12px; }
-        .rule-item input, .rule-item select { padding: 4px 6px; border: 1px solid #BCC8D4; border-radius: 4px; font-size: 12px; }
-        .rule-rm { margin-left: auto; background: none; border: none; color: #BB0000; font-weight: bold; cursor: pointer; font-size: 16px; }
-
-        .btn { padding: 6px 18px; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid #0070F2; background: #0070F2; color: #fff; }
-        .btn:hover { background: #0057C0; }
-        .btn-ghost { background: #fff; color: #0070F2; }
+        .footer-note { font-size: 11px; color: #6b7280; margin-top: 12px; }
       </style>
 
-      <div class="wgt-header">
-        <div class="wgt-title">Excel Planning Uploader Pro</div>
-        <div class="wgt-status ${this._state}">Estado: ${readableState}</div>
-      </div>
-
-      <div class="wgt-tabs">
-        <div class="wgt-tab ${this._activeTab === 'upload' ? 'active' : ''}" data-tab="upload">1. Carga</div>
-        <div class="wgt-tab ${this._activeTab === 'data' ? 'active' : ''} ${!hasData ? 'disabled' : ''}" data-tab="data">2. Datos (${this._rows.length})</div>
-        <div class="wgt-tab ${this._activeTab === 'rules' ? 'active' : ''}" data-tab="rules">3. Reglas (${this._customRules.length})</div>
-        <div class="wgt-tab ${this._activeTab === 'history' ? 'active' : ''}" data-tab="history">4. Historial</div>
-      </div>
-
-      <div class="wgt-content">
-        <!-- PESTAÑA 1: CARGA -->
-        <div class="wgt-pane ${this._activeTab === 'upload' ? 'active' : ''}">
-          <div class="drop-zone" id="dropZone">
-            <div style="font-size: 15px; font-weight: 600; margin-bottom: 6px;">Arrastra tu fichero Excel de planificación aquí</div>
-            <div style="font-size: 12px; color: #6A6D70; margin-bottom: 14px;">Columnas requeridas: ${this._requiredColumns}</div>
-            <button class="btn" type="button">Seleccionar archivo</button>
-            <input type="file" id="fileInput" class="file-input" accept=".xlsx, .xls" />
-          </div>
+      <div class="top-bar">
+        <div class="title-area">
+          <h2>Excel Asset Upload</h2>
+          <p>Upload and validate Excel file</p>
         </div>
-
-        <!-- PESTAÑA 2: DATOS Y VALIDACIONES -->
-        <div class="wgt-pane ${this._activeTab === 'data' ? 'active' : ''}">
-          ${this._structErrors.length > 0 ? `<div style="background: #FFEAEA; color: #9E0000; padding: 10px; border-radius: 4px; margin-bottom: 12px; font-size: 12px;"><strong>Avisos de Estructura:</strong><br/>${this._structErrors.join('<br/>')}</div>` : ''}
-          
-          <div class="val-summary">
-            <div class="val-chip vc-ok"><span class="val-dot"></span> Válidas: ${okCount}</div>
-            <div class="val-chip vc-err"><span class="val-dot"></span> Con incidencias: ${errCount}</div>
-          </div>
-
-          <div class="tbl-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th style="width: 40px;">#</th>
-                  ${this._headers.map(h => `<th>${h}</th>`).join('')}
-                </tr>
-              </thead>
-              <tbody>
-                ${this._rows.map((r) => `
-                  <tr class="${r._errors.length > 0 ? 'row-err' : ''}">
-                    <td style="color: #89919A; font-size: 11px;">${r._rowNum}</td>
-                    ${this._headers.map(h => `<td class="${r._errors.some(e => e.includes(h)) ? 'cell-err' : ''}" title="${r._errors.join(', ')}">${r[h]}</td>`).join('')}
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- PESTAÑA 3: REGLAS -->
-        <div class="wgt-pane ${this._activeTab === 'rules' ? 'active' : ''}">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <strong style="font-size: 12px;">Reglas de validación activas</strong>
-            <button class="btn btn-ghost" id="addRuleBtn" type="button" style="font-size: 11px; padding: 4px 10px;">+ Añadir regla</button>
-          </div>
-          <div>
-            ${this._customRules.map((rule, idx) => `
-              <div class="rule-item">
-                <input type="text" value="${rule.name}" style="width: 110px;" disabled />
-                <select disabled><option>${rule.column}</option></select>
-                <select disabled><option>${rule.operator}</option></select>
-                <input type="text" value="${rule.value}" placeholder="Valor" style="width: 60px;" disabled />
-                <button class="rule-rm" data-idx="${idx}" type="button" title="Eliminar regla">×</button>
-              </div>
-            `).join('')}
-            ${this._customRules.length === 0 ? '<div style="text-align: center; color: #89919A; padding: 16px;">No hay reglas configuradas.</div>' : ''}
-          </div>
-        </div>
-
-        <!-- PESTAÑA 4: HISTORIAL -->
-        <div class="wgt-pane ${this._activeTab === 'history' ? 'active' : ''}">
-          ${this._history.length > 0 ? this._history.map(h => `
-            <div style="background: #fff; border: 1px solid #D1D7DD; border-radius: 4px; padding: 10px; margin-bottom: 6px; font-size: 12px; display: flex; justify-content: space-between; align-items: center;">
-              <div><strong>${h.file}</strong> (${h.rows} filas)</div>
-              <div style="color: ${h.errors > 0 ? '#BB0000' : '#107E3E'}; font-weight: bold;">${h.status}</div>
-              <div style="color: #89919A; font-size: 11px;">${h.time}</div>
-            </div>
-          `).join('') : '<div style="text-align: center; color: #89919A; padding: 24px;">No hay importaciones previas registradas.</div>'}
+        <div class="top-actions">
+          <button class="btn" id="downloadTemplateBtn" type="button">Download Template</button>
+          <div class="${isInvalid ? 'badge-err' : 'badge-ok'}">${isInvalid ? 'Validation Error' : 'Validation Valid'}</div>
+          <button class="btn" id="downloadErrorLogBtn" type="button">Download Error Log</button>
+          <button class="btn" id="togglePreviewBtn" type="button">Toggle Preview</button>
         </div>
       </div>
+
+      <div class="control-row">
+        <div class="control-left">
+          <button class="btn btn-primary" id="uploadBtn" type="button">Choose File</button>
+          <span class="file-box">${this._fileName}</span>
+          <button class="btn btn-primary" id="uploadExecBtn" style="display:none">Upload</button>
+          <button class="btn" id="clearBtn" type="button">Clear</button>
+        </div>
+        <div>
+          <input type="text" class="search-box" id="searchInput" placeholder="Search in preview..." value="${this._searchQuery}" />
+        </div>
+      </div>
+
+      <div style="font-size: 11px; color: #4b5563; margin-bottom: 8px; font-weight: 600;">
+        Required Columns: ${this._requiredColumns.join(', ')}
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric-card"><div class="metric-label">Rows Read</div><div class="metric-val">${rowsRead}</div></div>
+        <div class="metric-card"><div class="metric-label">Valid Rows</div><div class="metric-val">${validRowsCount}</div></div>
+        <div class="metric-card"><div class="metric-label">Invalid Rows</div><div class="metric-val">${invalidRowsCount}</div></div>
+        <div class="metric-card"><div class="metric-label">Sheet</div><div class="metric-val" style="font-size: 13px;">${this._sheetName}</div></div>
+        <div class="metric-card"><div class="metric-label">Columns</div><div class="metric-val">${this._headers.length || this._requiredColumns.length}</div></div>
+        <div class="metric-card"><div class="metric-label">Validation</div><div class="metric-val" style="font-size: 13px; color: ${isInvalid ? '#991b1b' : '#065f46'};">${isInvalid ? 'Invalid' : 'Valid'}</div></div>
+      </div>
+
+      <div class="progress-section">
+        <div class="progress-header"><span>Completed</span><span>100%</span></div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill"></div></div>
+      </div>
+
+      <div id="previewBody">
+        <div class="preview-header-row">
+          <span>Preview</span>
+          <span style="font-size: 11px; color: #6b7280; font-weight: normal;">${rowsRead} row(s) shown</span>
+        </div>
+        <div class="tbl-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 40px;">#</th>
+                ${this._requiredColumns.map(h => `<th>${h}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody id="tableBody">
+              <!-- Renderizado dinámico -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="footer-note">Supported template: Sheet1 with required business columns</div>
+      <input type="file" id="fileInput" style="display:none" accept=".xlsx, .xls, .xlsm" />
     `;
 
-    this._setupEventListeners();
+    this._setupListeners();
+    this._renderTableBody();
+  }
+
+  _renderTableBody() {
+    const tbody = this._shadow.getElementById('tableBody');
+    if (!tbody) return;
+
+    const filtered = this._rows.filter(r => {
+      if (!this._searchQuery) return true;
+      return Object.values(r).some(val => String(val).toLowerCase().includes(this._searchQuery));
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="${this._requiredColumns.length + 1}" style="text-align: center; padding: 24px; color: #9ca3af;">No records found. Upload an Excel file to preview data.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(r => {
+      return `
+        <tr>
+          <td style="color: #6b7280; font-size: 11px;">${r._rowNum}</td>
+          ${this._requiredColumns.map(col => {
+            const hasErr = r._errors && r._errors[col];
+            return `
+              <td class="${hasErr ? 'cell-error' : ''}">
+                ${r[col] !== undefined ? r[col] : ''}
+                ${hasErr ? `<span class="err-msg">${r._errors[col]}</span>` : ''}
+              </td>
+            `;
+          }).join('')}
+        </tr>
+      `;
+    }).join('');
   }
 }
 
