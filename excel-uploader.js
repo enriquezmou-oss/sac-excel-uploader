@@ -1,3 +1,22 @@
+/**
+ * ExcelUploaderPro — SAP Analytics Cloud Custom Widget
+ * Version: 2.2.0
+ * Requires: SheetJS (loaded via CDN automatically if not present)
+ * Tag:      <custom-excel-uploader-pro>
+ *
+ * Improvements in 2.2.0 (vs 2.1.0):
+ *   • Removed DSP Artifact toggle (always-on internally)
+ *   • Cleaner Full/Delta strategy bar with active badge
+ *   • Visible scrollbars on all table wrappers and pre blocks
+ *
+ * Improvements in 2.1.0 (vs Gemini-generated v2):
+ *   • Compiled-rule function cache — ASSISTED_CODE rules compiled once, reused on every validate pass
+ *   • requestAnimationFrame debounce on search inputs — no full re-render on every keystroke
+ *   • crypto.randomUUID() for collision-free rule IDs (fallback to Math.random)
+ *   • Early exit in _validateRows() when grid is empty
+ *   • User feedback (toast) when export functions have nothing to export
+ *   • Cache invalidated automatically when rules are saved
+ */
 class ExcelUploaderPro extends HTMLElement {
   constructor() {
     super();
@@ -69,6 +88,9 @@ class ExcelUploaderPro extends HTMLElement {
     const svgLogo = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 116 58"><defs><linearGradient id="sapGrad" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#00B8F1"/><stop offset="50%" stop-color="#0083CA"/><stop offset="100%" stop-color="#0052A5"/></linearGradient></defs><polygon points="0,0 116,0 58,58 0,58" fill="url(#sapGrad)"/><text x="7" y="42" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="33" letter-spacing="-1.5" fill="#FFFFFF">SAP</text></svg>';
     this._sapLogoUri = 'data:image/svg+xml;utf8,' + encodeURIComponent(svgLogo);
 
+    this._compiledRules = {};
+    this._searchRaf = null;
+    this._auditSearchRaf = null;
     this._ensureXLSX();
     this._render();
   }
@@ -86,6 +108,8 @@ class ExcelUploaderPro extends HTMLElement {
 
   disconnectedCallback() {
     if (this._toastTimer) clearTimeout(this._toastTimer);
+    if (this._searchRaf) cancelAnimationFrame(this._searchRaf);
+    if (this._auditSearchRaf) cancelAnimationFrame(this._auditSearchRaf);
   }
 
   _storageGet(key) {
@@ -118,7 +142,7 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   _saveHistory() { this._storageSet('sac_audit_history_v9', this._history.slice(0, 30)); }
-  _saveRules() { this._storageSet('sac_validation_rules_v9', this._validationRules); }
+  _saveRules() { this._storageSet('sac_validation_rules_v9', this._validationRules); this._compiledRules = {}; }
 
   _notify(msg, type = 'info') {
     this._toast = { msg, type };
@@ -173,11 +197,16 @@ class ExcelUploaderPro extends HTMLElement {
     this._validateRows();
   }
 
-  _evalAssistedCode(expr, row, colName) {
+  _evalAssistedCode(expr, row, colName, cacheKey) {
     const value = String(row[colName] ?? '').trim();
     const num = Number(value);
-    const fn = new Function('value', 'num', 'row', '"use strict"; return (' + expr + ');');
-    return fn(value, num, row);
+    if (cacheKey) {
+      if (!this._compiledRules[cacheKey]) {
+        this._compiledRules[cacheKey] = new Function('value', 'num', 'row', '"use strict"; return (' + expr + ');');
+      }
+      return this._compiledRules[cacheKey](value, num, row);
+    }
+    return (new Function('value', 'num', 'row', '"use strict"; return (' + expr + ');'))(value, num, row);
   }
 
   _applyCellAutoFix(origIdx, colName, ruleId) {
@@ -188,7 +217,7 @@ class ExcelUploaderPro extends HTMLElement {
     if (!targetAlert || !targetAlert.autoFix) return;
     try {
       const oldVal = String(row[colName] ?? '').trim();
-      const newVal = String(this._evalAssistedCode(targetAlert.autoFix, row, colName) ?? '').trim();
+      const newVal = String(this._evalAssistedCode(targetAlert.autoFix, row, colName, targetAlert.ruleId + '_f') ?? '').trim();
       if (oldVal !== newVal) {
         row[colName] = newVal;
         this._recordCellModification(row, colName, oldVal || '(Blank)', newVal);
@@ -207,7 +236,7 @@ class ExcelUploaderPro extends HTMLElement {
         if (fixable) {
           try {
             const oldVal = String(row[col] ?? '').trim();
-            const newVal = String(this._evalAssistedCode(fixable.autoFix, row, col) ?? '').trim();
+            const newVal = String(this._evalAssistedCode(fixable.autoFix, row, col, fixable.ruleId + '_f') ?? '').trim();
             if (oldVal !== newVal) {
               row[col] = newVal;
               this._recordCellModification(row, col, oldVal || '(Blank)', newVal);
@@ -256,14 +285,7 @@ class ExcelUploaderPro extends HTMLElement {
       });
     });
 
-    const dspToggleChk = shadow.getElementById('dspToggleChk');
-    if (dspToggleChk) {
-      dspToggleChk.addEventListener('change', (e) => {
-        this._dspArtifactSync = e.currentTarget.checked;
-        this._logAction('DSP_ARTIFACT_MODE', 'DSP Artifact Sync', 'Datasphere Artifact flag set to ' + (this._dspArtifactSync ? 'ACTIVE' : 'OFF'), !this._dspArtifactSync, this._dspArtifactSync);
-        this._render();
-      });
-    }
+    // DSP Artifact sync is always active (toggle removed from UI)
 
     const fileInput = shadow.getElementById('fileInput');
     const dropZone = shadow.getElementById('dropZone');
@@ -596,7 +618,7 @@ class ExcelUploaderPro extends HTMLElement {
       btn.addEventListener('click', (e) => {
         const sourceRule = this._validationRules.find(r => r.id === e.currentTarget.dataset.ruleId);
         if (sourceRule) {
-          const clonedRule = { ...sourceRule, id: 'RULE-' + Math.floor(1000 + Math.random() * 9000), desc: sourceRule.desc + ' (Copy)' };
+          const clonedRule = { ...sourceRule, id: (function() { try { return 'RULE-' + crypto.randomUUID().split('-')[0].toUpperCase(); } catch(e) { return 'RULE-' + Math.floor(100000 + Math.random() * 900000); } })(), desc: sourceRule.desc + ' (Copy)' };
           this._validationRules.push(clonedRule);
           this._editingScopeRuleId = clonedRule.id;
           this._saveRules();
@@ -638,9 +660,12 @@ class ExcelUploaderPro extends HTMLElement {
       searchInput.addEventListener('input', (e) => {
         const pos = e.target.selectionStart;
         this._searchQuery = e.target.value;
-        this._render();
-        const restored = this._shadow.getElementById('searchInput');
-        if (restored) { restored.focus(); restored.setSelectionRange(pos, pos); }
+        if (this._searchRaf) cancelAnimationFrame(this._searchRaf);
+        this._searchRaf = requestAnimationFrame(() => {
+          this._render();
+          const restored = this._shadow.getElementById('searchInput');
+          if (restored) { restored.focus(); restored.setSelectionRange(pos, pos); }
+        });
       });
     }
 
@@ -823,9 +848,12 @@ class ExcelUploaderPro extends HTMLElement {
       auditSearchInput.addEventListener('input', (e) => {
         const pos = e.target.selectionStart;
         this._auditSearchQuery = e.target.value;
-        this._render();
-        const restored = this._shadow.getElementById('auditSearchInput');
-        if (restored) { restored.focus(); restored.setSelectionRange(pos, pos); }
+        if (this._auditSearchRaf) cancelAnimationFrame(this._auditSearchRaf);
+        this._auditSearchRaf = requestAnimationFrame(() => {
+          this._render();
+          const restored = this._shadow.getElementById('auditSearchInput');
+          if (restored) { restored.focus(); restored.setSelectionRange(pos, pos); }
+        });
       });
     }
 
@@ -953,7 +981,7 @@ class ExcelUploaderPro extends HTMLElement {
     }
     if (!desc) desc = col + ' rule [' + type + '] ' + param;
 
-    const newRule = { id: 'RULE-' + Math.floor(1000 + Math.random() * 9000), col, severity, semaphore, type, param, min, max, autoFix, scopeFiles, startDate, endDate, active: true, desc };
+    const newRule = { id: (function() { try { return 'RULE-' + crypto.randomUUID().split('-')[0].toUpperCase(); } catch(e) { return 'RULE-' + Math.floor(100000 + Math.random() * 900000); } })(), col, severity, semaphore, type, param, min, max, autoFix, scopeFiles, startDate, endDate, active: true, desc };
     this._validationRules.push(newRule);
     this._saveRules();
     this._logAction('RULE_CREATED', col + ' [' + severity + ' / ' + semaphore + ']', desc + ' (Scope: ' + scopeFiles + ')', '', param || type);
@@ -1112,6 +1140,7 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   _validateRows() {
+    if (this._rows.length === 0) return;
     const activeRules = this._validationRules.filter(r => r.active);
     const todayIso = new Date().toISOString().slice(0, 10);
     const valueCountsPerCol = {};
@@ -1171,7 +1200,7 @@ class ExcelUploaderPro extends HTMLElement {
         } else if (rule.type === 'REGEX') {
           try { if (!(new RegExp(rule.param)).test(rawVal)) { failed = true; failMsg = 'Invalid pattern (' + rule.param + ')'; } } catch (e) {}
         } else if (rule.type === 'ASSISTED_CODE') {
-          try { if (!this._evalAssistedCode(rule.param, row, col)) { failed = true; failMsg = rule.desc || ('Formula failed: ' + rule.param); } }
+          try { if (!this._evalAssistedCode(rule.param, row, col, rule.id + '_p')) { failed = true; failMsg = rule.desc || ('Formula failed: ' + rule.param); } }
           catch (e) { failed = true; failMsg = 'Code syntax error: ' + e.message; }
         }
         if (failed) this._pushAlert(row, col, { ruleId: rule.id, severity, semaphore, msg: failMsg, autoFix: rule.autoFix || '' });
@@ -1210,7 +1239,8 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   _exportCleanExcel() {
-    if (typeof XLSX === 'undefined' || this._rows.length === 0) return;
+    if (typeof XLSX === 'undefined') return;
+    if (this._rows.length === 0) { this._notify('No data rows to export.', 'info'); return; }
     const header = ['SOURCE_FILE', ...this._requiredColumns];
     const data = this._rows.map(r => [r._sourceFile, ...this._requiredColumns.map(c => r[c] ?? '')]);
     const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
@@ -1335,11 +1365,12 @@ class ExcelUploaderPro extends HTMLElement {
         });
       });
     });
-    if (count === 0) return;
+    if (count === 0) { this._notify('No validation alerts to export — grid looks clean!', 'info'); return; }
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'SAC_Validation_Alerts_Log.csv'; a.click();
     URL.revokeObjectURL(url);
+    this._notify('Validation alerts exported: ' + count + ' row(s).', 'success');
   }
 
   _getFilteredRows() {
@@ -1673,7 +1704,7 @@ class ExcelUploaderPro extends HTMLElement {
             ${this._renderAuditExportConfigurator(cols, true)}
 
             <div class="metrics-bar" style="grid-template-columns:repeat(5,1fr);">
-              <div class="metric-box"><div class="metric-title">🔄 Load Strategy</div><div class="metric-val" style="font-size:13px;color:#0064D9;">${this._esc(rec.loadStrategy || 'FULL')} ${rec.dspArtifact ? '• DSP' : ''}</div></div>
+              <div class="metric-box"><div class="metric-title">🔄 Load Strategy</div><div class="metric-val" style="font-size:13px;color:#0064D9;">${this._esc(rec.loadStrategy || 'FULL')}</div></div>
               <div class="metric-box"><div class="metric-title">🕒 Timestamp</div><div class="metric-val" style="font-size:13px;">${this._esc(rec.timestamp)}</div></div>
               <div class="metric-box kpi-ok"><div class="metric-title">✅ Committed Rows</div><div class="metric-val" style="color:#107E3E;">${rec.rows}</div></div>
               <div class="metric-box"><div class="metric-title">✎ Rows Modified</div><div class="metric-val" style="color:#0064D9;">${modifiedRowsCount}</div></div>
@@ -1868,7 +1899,7 @@ class ExcelUploaderPro extends HTMLElement {
         .step-item.completed .step-num { background:#107E3E; color:#FFFFFF; }
         .step-label-title { font-weight:700; font-size:12px; color:#1D2D3E; }
         .step-label-sub { font-size:11px; color:#556B82; }
-        .strategy-bar-card { background:#FFFFFF; border:1px solid #D9E0E6; border-radius:10px; padding:14px 18px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px; }
+        .strategy-bar-card { background:#FFFFFF; border:1px solid #D9E0E6; border-radius:10px; padding:12px 18px; margin-bottom:14px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
         .strategy-toggle-group { display:inline-flex; background:#EBF0F5; padding:4px; border-radius:10px; gap:6px; }
         .strategy-btn { border:1px solid transparent; background:transparent; border-radius:8px; padding:8px 16px; text-align:left; cursor:pointer; transition:all 0.18s ease; display:flex; align-items:center; gap:10px; }
         .strategy-btn:hover { background:rgba(255,255,255,0.6); }
@@ -1944,6 +1975,27 @@ class ExcelUploaderPro extends HTMLElement {
         .sheet-pill-chk { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; border:1px solid #BCC8D4; background:#F8FAFC; }
         .sheet-pill-chk.sheet-active { background:#EBF5FF; border-color:#0070F2; color:#005CB9; }
         .col-pill { display:inline-flex; align-items:center; gap:6px; background:#EBF5FF; color:#005CB9; padding:5px 12px; border-radius:6px; font-weight:700; font-size:11px; border:1px solid #B3D4FF; }
+
+        /* ── Visible scrollbars ─────────────────────────────────────────── */
+        :host { scrollbar-width: thin; scrollbar-color: #788FA6 #E5E9EC; }
+        :host::-webkit-scrollbar { width: 8px; height: 8px; }
+        :host::-webkit-scrollbar-track { background: #E5E9EC; border-radius: 4px; }
+        :host::-webkit-scrollbar-thumb { background: #788FA6; border-radius: 4px; }
+        :host::-webkit-scrollbar-thumb:hover { background: #556B82; }
+        .tbl-wrap { scrollbar-width: thin; scrollbar-color: #0070F2 #D9E0E6; }
+        .tbl-wrap::-webkit-scrollbar { width: 7px; height: 7px; }
+        .tbl-wrap::-webkit-scrollbar-track { background: #EDF0F2; border-radius: 4px; }
+        .tbl-wrap::-webkit-scrollbar-thumb { background: #0070F2; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0,112,242,.3); }
+        .tbl-wrap::-webkit-scrollbar-thumb:hover { background: #005CB9; }
+        .tbl-wrap::-webkit-scrollbar-corner { background: #EDF0F2; }
+        .help-modal-card div { scrollbar-width: thin; scrollbar-color: #788FA6 #E5E9EC; }
+        .help-modal-card div::-webkit-scrollbar { width: 6px; }
+        .help-modal-card div::-webkit-scrollbar-track { background: #F0F3F6; border-radius: 3px; }
+        .help-modal-card div::-webkit-scrollbar-thumb { background: #788FA6; border-radius: 3px; }
+        pre::-webkit-scrollbar { width: 6px; height: 6px; }
+        pre::-webkit-scrollbar-track { background: #0D1B2A; border-radius: 3px; }
+        pre::-webkit-scrollbar-thumb { background: #0070F2; border-radius: 3px; }
+        pre::-webkit-scrollbar-thumb:hover { background: #74D8FF; }
       </style>
 
       <div class="main-card">
@@ -1955,7 +2007,7 @@ class ExcelUploaderPro extends HTMLElement {
             <img class="sap-logo-img" src="${this._sapLogoUri}" alt="SAP Logo" />
             <div class="sap-title-wrap">
               <div class="sap-title">Excel Planning Uploader Pro</div>
-              <div class="sap-subtitle">Multi-Sheet Consolidation, Alert Semaphores & Full/Delta Engine</div>
+              <div class="sap-subtitle">Multi-Sheet Consolidation · Alert Semaphores · Full/Delta Engine · v2.2</div>
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:12px;">
@@ -2001,32 +2053,30 @@ class ExcelUploaderPro extends HTMLElement {
           </div>
 
           <div class="strategy-bar-card">
-            <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-              <div>
-                <div style="font-weight:800;color:#1D2D3E;font-size:13px;">🔄 Planning Load Mode</div>
-                <div style="font-size:11px;color:#556B82;">Select target data ingestion strategy for SAP Analytics Cloud</div>
-              </div>
-              <div class="strategy-toggle-group">
-                <button class="strategy-btn ${this._loadStrategy === 'FULL' ? 'active' : ''}" data-strategy="FULL" type="button">
-                  <span style="font-size:16px;">📦</span>
-                  <span>
-                    <span class="strategy-btn-title">FULL LOAD (Replace / Complete Model)</span>
-                    <span class="strategy-btn-sub">Overwrites target planning slice</span>
-                  </span>
-                </button>
-                <button class="strategy-btn ${this._loadStrategy === 'DELTA' ? 'active' : ''}" data-strategy="DELTA" type="button">
-                  <span style="font-size:16px;">⚡</span>
-                  <span>
-                    <span class="strategy-btn-title">DELTA LOAD (Incremental / Adjustments)</span>
-                    <span class="strategy-btn-sub">Appends or updates delta records</span>
-                  </span>
-                </button>
-              </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-size:11px;font-weight:700;color:#556B82;text-transform:uppercase;letter-spacing:.5px;">Load Mode</span>
             </div>
-            <label class="fiori-switch-wrap" title="Enable SAP Datasphere / SAC Artifact metadata synchronization">
-              <span class="fiori-switch"><input type="checkbox" id="dspToggleChk" ${this._dspArtifactSync ? 'checked' : ''} /><span class="fiori-slider"></span></span>
-              <span style="font-weight:700;font-size:12px;color:#1D2D3E;">🔗 DSP Artifact</span>
-            </label>
+            <div class="strategy-toggle-group">
+              <button class="strategy-btn ${this._loadStrategy === 'FULL' ? 'active' : ''}" data-strategy="FULL" type="button">
+                <span style="font-size:18px;">📦</span>
+                <span>
+                  <span class="strategy-btn-title">FULL LOAD</span>
+                  <span class="strategy-btn-sub">Replaces the planning slice</span>
+                </span>
+              </button>
+              <button class="strategy-btn ${this._loadStrategy === 'DELTA' ? 'active' : ''}" data-strategy="DELTA" type="button">
+                <span style="font-size:18px;">⚡</span>
+                <span>
+                  <span class="strategy-btn-title">DELTA LOAD</span>
+                  <span class="strategy-btn-sub">Appends / incremental update</span>
+                </span>
+              </button>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+              ${this._loadStrategy === 'FULL'
+                ? '<span style="background:#EBF5FF;color:#005CB9;border:1px solid #B3D4FF;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">📦 Full — overwrites target slice</span>'
+                : '<span style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">⚡ Delta — appends records</span>'}
+            </div>
           </div>
 
           ${this._step === 1 ? `
