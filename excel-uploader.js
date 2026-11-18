@@ -10,7 +10,7 @@ class ExcelUploaderPro extends HTMLElement {
     super();
     this._shadow = this.attachShadow({ mode: 'open' });
     this._step = 1;
-    this._filesQueue = []; // [{ file: File, comment: string }]
+    this._filesQueue = [];
     this._rows = [];
     this._headers = [];
     this._currentUser = 'SAP User (Planning)';
@@ -31,7 +31,12 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   connectedCallback() {
-    this._bindEvents();
+    // Fix: Evitar double event binding eliminando el bind aquí (se encarga _render)
+  }
+
+  // Utilidad de escape contra XSS
+  _esc(v) {
+    return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
   _bindEvents() {
@@ -42,7 +47,6 @@ class ExcelUploaderPro extends HTMLElement {
       fileInput.addEventListener('change', (e) => {
         if (e.target.files.length) {
           this._handleFilesSelection(e.target.files);
-          // Reset input to allow selecting the same file again if needed
           e.target.value = '';
         }
       });
@@ -189,7 +193,6 @@ class ExcelUploaderPro extends HTMLElement {
 
     for (let i = 0; i < fileList.length; i++) {
       const newFile = fileList[i];
-      // Validar si el nombre del fichero ya existe en la cola
       const exists = this._filesQueue.some(item => item.file.name.toLowerCase() === newFile.name.toLowerCase());
       if (exists) {
         duplicateNames.push(newFile.name);
@@ -235,13 +238,13 @@ class ExcelUploaderPro extends HTMLElement {
           const data = new Uint8Array(e.target.result);
           const wb = XLSX.read(data, { type: 'array' });
           
-          // RECORRER TODAS LAS PESTAÑAS (SHEETS) DEL FICHERO EXCEL
           wb.SheetNames.forEach(sheetName => {
             const ws = wb.Sheets[sheetName];
             const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
             if (json.length > 0) {
-              const sheetHeaders = json[0].map(h => String(h).trim());
+              // Fix: Normalizar cabeceras a MAYÚSCULAS para evitar case-sensitivity
+              const sheetHeaders = json[0].map(h => String(h).trim().toUpperCase());
               if (!headersFound && sheetHeaders.length > 0) {
                 detectedHeaders = sheetHeaders;
                 headersFound = true;
@@ -251,7 +254,6 @@ class ExcelUploaderPro extends HTMLElement {
                 const sourceLabel = `${item.file.name} [${sheetName}]`;
                 const obj = { _rowNum: allCombinedRows.length + idx + 2, _sourceFile: sourceLabel, _errors: {} };
                 
-                // Mapear columnas según los cabeceros detectados
                 const currentHeaders = sheetHeaders.length > 0 ? sheetHeaders : detectedHeaders;
                 currentHeaders.forEach((h, i) => {
                   obj[h] = row[i] !== undefined ? row[i] : '';
@@ -271,6 +273,7 @@ class ExcelUploaderPro extends HTMLElement {
           this._headers = detectedHeaders.length > 0 ? detectedHeaders : this._requiredColumns;
           this._rows = allCombinedRows;
           this._validateRows();
+          this._step = 2; // Fix P1: Avanzar automáticamente de Step 1 a Step 2
           this._isLoading = false;
           this._render();
         }
@@ -321,7 +324,7 @@ class ExcelUploaderPro extends HTMLElement {
     let csv = 'SourceFile,Row,ID,Column,Error Description\n';
     errorRows.forEach(r => {
       Object.keys(r._errors).forEach(col => {
-        csv += `${r._sourceFile},${r._rowNum},${r.ID || ''},${col},"${r._errors[col]}"\n`;
+        csv += `${this._esc(r._sourceFile)},${r._rowNum},${this._esc(r.ID || '')},${col},"${this._esc(r._errors[col])}"\n`;
       });
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -330,6 +333,7 @@ class ExcelUploaderPro extends HTMLElement {
     a.href = url;
     a.download = 'MultiFile_Validation_Error_Log.csv';
     a.click();
+    URL.revokeObjectURL(url); // Fix P3: Evitar memory leak liberando el object URL
   }
 
   _render() {
@@ -349,7 +353,7 @@ class ExcelUploaderPro extends HTMLElement {
 
         .sap-header { display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, #18314f 0%, #29465b 100%); color: #FFFFFF; padding: 14px 22px; border-bottom: 3px solid #0070F2; }
         .sap-brand { display: flex; align-items: center; gap: 12px; }
-        .sap-logo-svg { width: 44px; height: 22px; display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.2)); }
+        .sap-logo-badge { background: #0070F2; color: #ffffff; font-weight: 800; font-size: 14px; letter-spacing: -0.5px; padding: 5px 10px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4); display: inline-flex; align-items: center; justify-content: center; }
         .sap-title { font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
 
         .nav-tabs { display: flex; background: #FFFFFF; border-bottom: 1px solid #d1d7dd; padding: 0 20px; }
@@ -372,7 +376,6 @@ class ExcelUploaderPro extends HTMLElement {
         .btn-danger { background: #FFF; color: #bb0000; border-color: #f5c6c6; }
         .btn-danger:hover { background: #feeaea; }
 
-        /* ZONA DE CARGA CON BOTÓN NATIVO VISIBLE Y ACCESIBLE */
         .drop-zone { border: 2px dashed #0070F2; border-radius: 10px; padding: 40px; text-align: center; background: #FFFFFF; box-shadow: 0 2px 8px rgba(0,0,0,0.02); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
         .file-input-native { margin-top: 8px; font-size: 13px; color: #1d2d3e; }
 
@@ -420,11 +423,8 @@ class ExcelUploaderPro extends HTMLElement {
 
         <div class="sap-header">
           <div class="sap-brand">
-            <svg class="sap-logo-svg" viewBox="0 0 100 48" xmlns="http://www.w3.org/2000/svg">
-              <path d="M0 0h100v48H0z" fill="#0070F2"/>
-              <path d="M28.2 35.8c-2.4 0-4.3-.6-5.8-1.7-1.5-1.1-2.2-2.7-2.2-4.9 0-1.8.6-3.2 1.9-4.2 1.3-1 3.2-1.7 5.7-2.1l4.4-.7c3-.5 5.2-1.4 6.7-2.6 1.5-1.2 2.3-2.9 2.3-5.2 0-3.1-1.3-5.5-3.8-7.2C35-0.6 31.5-1.4 27.2-1.4c-3.7 0-6.9.7-9.5 2.2l2.3 5.4c2.1-1.2 4.6-1.8 7.4-1.8 2 0 3.5.4 4.5 1.2 1 .8 1.5 1.9 1.5 3.3 0 1.5-.6 2.6-1.9 3.4-1.3.8-3.3 1.4-6 1.9l-4.2.7c-3.1.5-5.4 1.4-7 2.7-1.6 1.3-2.4 3.1-2.4 5.5 0 3 1.2 5.3 3.6 7 2.4 1.7 5.7 2.6 9.8 2.6 3.8 0 7.2-.7 10.2-2.2l-2.4-5.3c-2.4 1.3-5.2 2-8.5 2zm26.6-35h-7.6V35h7.6v-13h6.4l5.6 13h8.3l-6.5-14c3.9-1.2 6-3.9 6-8.1 0-4.2-2.5-7.1-7.5-8.7-1.9-.6-4.4-.9-7.5-.9H54.8v34.8zm7.6 6.3V14h5.2c2.2 0 3.7.4 4.5 1.2.8.8 1.2 1.9 1.2 3.3 0 1.4-.4 2.5-1.2 3.3-.8.8-2.3 1.2-4.5 1.2h-5.2zM79 35h7.6V1.5H79V35z" fill="#FFFFFF"/>
-            </svg>
-            <div class="sap-title">Excel Planning Uploader Pro (Multi-File)</div>
+            <div class="sap-logo-badge">SAP</div>
+            <div class="sap-title">Excel Planning Uploader Pro (Multi-File & Multi-Sheet)</div>
           </div>
           <div style="font-size: 11px; font-weight: 600; opacity: 0.9;">SAP Analytics Cloud BTP</div>
         </div>
@@ -457,9 +457,9 @@ class ExcelUploaderPro extends HTMLElement {
               <div style="margin-bottom:20px;">
                 ${this._filesQueue.map((item, idx) => `
                   <div class="file-card-item">
-                    <div class="file-info">📄 ${item.file.name}</div>
+                    <div class="file-info">📄 ${this._esc(item.file.name)}</div>
                     <div style="display:flex; align-items:center; gap:10px;">
-                      <input type="text" class="file-comment-input" data-index="${idx}" placeholder="Add comment/notes for this file..." value="${item.comment || ''}" />
+                      <input type="text" class="file-comment-input" data-index="${idx}" placeholder="Add comment/notes for this file..." value="${this._esc(item.comment || '')}" />
                       <button class="remove-file-btn" data-index="${idx}" type="button">Remove</button>
                     </div>
                   </div>
@@ -468,7 +468,7 @@ class ExcelUploaderPro extends HTMLElement {
 
               <p>Mandatory fields required by the unified model:</p>
               <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">
-                ${this._requiredColumns.map(c => `<span style="background:#e6f0ff; color:#0064d9; padding:5px 10px; border-radius:4px; font-weight:600; font-size:11px; border:1px solid #b3d1ff;">${c}</span>`).join('')}
+                ${this._requiredColumns.map(c => `<span style="background:#e6f0ff; color:#0064d9; padding:5px 10px; border-radius:4px; font-weight:600; font-size:11px; border:1px solid #b3d1ff;">${this._esc(c)}</span>`).join('')}
               </div>
               <button class="btn btn-ghost" id="addColumnBtn" type="button">+ Add new mandatory field</button>
             </div>
@@ -511,7 +511,7 @@ class ExcelUploaderPro extends HTMLElement {
                     <tr>
                       <th style="width:30px;">#</th>
                       <th>Source File & Sheet</th>
-                      ${this._requiredColumns.map(h => `<th>${h}</th>`).join('')}
+                      ${this._requiredColumns.map(h => `<th>${this._esc(h)}</th>`).join('')}
                     </tr>
                   </thead>
                   <tbody>
@@ -520,17 +520,17 @@ class ExcelUploaderPro extends HTMLElement {
                       if (this._issueFilter === 'correct' && hasErr) return false;
                       if (this._issueFilter === 'errors' && !hasErr) return false;
                       return true;
-                    }).map(r => {
+                    }).map((r, index) => {
                       return `
                         <tr>
                           <td style="color:#7a828a; font-size:11px;">${r._rowNum}</td>
-                          <td style="font-size:11px; color:#0064d9; font-weight:600;">${r._sourceFile}</td>
+                          <td style="font-size:11px; color:#0064d9; font-weight:600;">${this._esc(r._sourceFile)}</td>
                           ${this._requiredColumns.map(col => {
                             const err = r._errors[col];
                             return `
-                              <td class="${err ? 'cell-error' : ''}" title="${err || 'Correct'}">
-                                <span class="editable-cell" contenteditable="true" data-row="${r._rowNum - 2}" data-col="${col}">${r[col] !== undefined ? r[col] : ''}</span>
-                                ${err ? `<span style="display:block; font-size:10px; color:#bb0000; font-weight:700; margin-top:2px;">⚠️ ${err}</span>` : ''}
+                              <td class="${err ? 'cell-error' : ''}" title="${this._esc(err || 'Correct')}">
+                                <span class="editable-cell" contenteditable="true" data-row="${index}" data-col="${col}">${this._esc(r[col] !== undefined ? r[col] : '')}</span>
+                                ${err ? `<span style="display:block; font-size:10px; color:#bb0000; font-weight:700; margin-top:2px;">⚠️ ${this._esc(err)}</span>` : ''}
                               </td>
                             `;
                           }).join('')}
@@ -570,12 +570,12 @@ class ExcelUploaderPro extends HTMLElement {
               <tbody>
                 ${this._history.length > 0 ? this._history.map(h => `
                   <tr>
-                    <td><strong>${h.id}</strong></td>
-                    <td>${h.user}</td>
-                    <td>${h.file}</td>
+                    <td><strong>${this._esc(h.id)}</strong></td>
+                    <td>${this._esc(h.user)}</td>
+                    <td>${this._esc(h.file)}</td>
                     <td>${h.rows} rows</td>
-                    <td>${h.timestamp}</td>
-                    <td><span style="background:#e6f9ec; color:#107e3e; padding:3px 10px; border-radius:12px; font-weight:600; font-size:11px;">${h.status}</span></td>
+                    <td>${this._esc(h.timestamp)}</td>
+                    <td><span style="background:#e6f9ec; color:#107e3e; padding:3px 10px; border-radius:12px; font-weight:600; font-size:11px;">${this._esc(h.status)}</span></td>
                   </tr>
                 `).join('') : `
                   <tr><td colspan="6" style="text-align:center; padding:28px; color:#7a828a;">No loads registered in the audit monitor yet.</td></tr>
