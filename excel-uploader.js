@@ -3,7 +3,7 @@ class ExcelUploaderPro extends HTMLElement {
     super();
     this._shadow = this.attachShadow({ mode: 'open' });
     this._step = 1;
-    this._activeTab = 'uploaderTab'; // 'uploaderTab' | 'rulesTab' | 'monitorTab'
+    this._activeTab = 'uploaderTab';
     this._filesQueue = [];
     this._rows = [];
     this._headers = [];
@@ -13,14 +13,9 @@ class ExcelUploaderPro extends HTMLElement {
     this._xlsxReady = typeof XLSX !== 'undefined';
     this._showHelpModal = false;
 
-    this._loadStrategy = 'FULL'; // 'FULL' | 'DELTA'
+    this._loadStrategy = 'FULL';
     this._dspArtifactSync = true;
-    this._parseConfig = {
-      format: 'AUTO',
-      delimiter: 'AUTO',
-      numberFormat: 'STD',
-      headerRow: 1
-    };
+    this._parseConfig = { format: 'AUTO', delimiter: 'AUTO', numberFormat: 'STD', headerRow: 1 };
 
     const defaultCols = ['ID', 'DESCRIPTION', 'H1', 'COMPANY', 'COSTCENTER', 'ASSET_CLASS', 'CAPITALIZED'];
     const savedCols = this._storageGet('sac_required_cols');
@@ -35,7 +30,7 @@ class ExcelUploaderPro extends HTMLElement {
       format: 'XLSX'
     };
 
-    const savedRules = this._storageGet('sac_validation_rules_v7');
+    const savedRules = this._storageGet('sac_validation_rules_v9');
     this._validationRules = Array.isArray(savedRules) ? savedRules : this._getDefaultRules();
 
     this._newRuleForm = {
@@ -53,14 +48,13 @@ class ExcelUploaderPro extends HTMLElement {
       desc: ''
     };
 
-    const savedHistory = this._storageGet('sac_audit_history_v7');
+    const savedHistory = this._storageGet('sac_audit_history_v9');
     this._history = Array.isArray(savedHistory) ? savedHistory : [];
 
     this._currentSessionLogs = [];
     this._selectedAuditId = null;
     this._auditDetailSubTab = 'dataTab';
     this._auditSearchQuery = '';
-
     this._issueFilter = 'all';
     this._searchQuery = '';
     this._acknowledgeNonBlocking = false;
@@ -72,19 +66,8 @@ class ExcelUploaderPro extends HTMLElement {
     this._bulkCol = this._requiredColumns.includes('COMPANY') ? 'COMPANY' : (this._requiredColumns[0] || 'ID');
     this._bulkVal = '';
 
-    this._sapLogoUri = 'data:image/svg+xml;utf8,' + encodeURIComponent(`
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 116 58">
-        <defs>
-          <linearGradient id="sapGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="#00B8F1"/>
-            <stop offset="50%" stop-color="#0083CA"/>
-            <stop offset="100%" stop-color="#0052A5"/>
-          </linearGradient>
-        </defs>
-        <polygon points="0,0 116,0 58,58 0,58" fill="url(#sapGrad)"/>
-        <text x="7" y="42" font-family="Arial Black, Arial, Helvetica, sans-serif" font-weight="900" font-size="33" letter-spacing="-1.5" fill="#FFFFFF">SAP</text>
-      </svg>
-    `);
+    const svgLogo = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 116 58"><defs><linearGradient id="sapGrad" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#00B8F1"/><stop offset="50%" stop-color="#0083CA"/><stop offset="100%" stop-color="#0052A5"/></linearGradient></defs><polygon points="0,0 116,0 58,58 0,58" fill="url(#sapGrad)"/><text x="7" y="42" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="33" letter-spacing="-1.5" fill="#FFFFFF">SAP</text></svg>';
+    this._sapLogoUri = 'data:image/svg+xml;utf8,' + encodeURIComponent(svgLogo);
 
     this._ensureXLSX();
     this._render();
@@ -92,133 +75,29 @@ class ExcelUploaderPro extends HTMLElement {
 
   _getDefaultRules() {
     return [
-      {
-        id: 'RULE-1',
-        col: 'ID',
-        severity: 'BLOCKING',
-        semaphore: 'RED',
-        type: 'UNIQUE',
-        param: '',
-        min: '',
-        max: '',
-        autoFix: "value + '_' + row._rowNum",
-        scopeFiles: 'ALL',
-        startDate: '',
-        endDate: '',
-        active: true,
-        desc: 'No duplicate IDs allowed across consolidated sheets'
-      },
-      {
-        id: 'RULE-2',
-        col: 'COMPANY',
-        severity: 'BLOCKING',
-        semaphore: 'RED',
-        type: 'IN_LIST',
-        param: '1000, 2000, 950',
-        min: '',
-        max: '',
-        autoFix: "'1000'",
-        scopeFiles: 'ALL',
-        startDate: '',
-        endDate: '',
-        active: true,
-        desc: 'Must match SAP Master Data Company Codes'
-      },
-      {
-        id: 'RULE-3',
-        col: 'COSTCENTER',
-        severity: 'BLOCKING',
-        semaphore: 'RED',
-        type: 'IN_LIST',
-        param: 'CC_IT_01, CC_FIN_02, 12234566, 10180000',
-        min: '',
-        max: '',
-        autoFix: "'CC_IT_01'",
-        scopeFiles: 'ALL',
-        startDate: '',
-        endDate: '',
-        active: true,
-        desc: 'Must match SAP Master Data Cost Centers'
-      },
-      {
-        id: 'RULE-4',
-        col: 'H1',
-        severity: 'PREVENTIVE',
-        semaphore: 'AMBER',
-        type: 'NUMERIC_RANGE',
-        param: '',
-        min: '0',
-        max: '100000',
-        autoFix: 'num < 0 ? Math.abs(num) : 100000',
-        scopeFiles: 'ALL',
-        startDate: '',
-        endDate: '',
-        active: true,
-        desc: 'Preventive budget threshold: H1 between 0 and 100,000'
-      },
-      {
-        id: 'RULE-5',
-        col: 'CAPITALIZED',
-        severity: 'CHECK',
-        semaphore: 'PURPLE',
-        type: 'ASSISTED_CODE',
-        param: "Number(row.H1 || 0) <= 50000 || String(value).toUpperCase() === 'Y' || String(value).toUpperCase() === 'X'",
-        min: '',
-        max: '',
-        autoFix: "'Y'",
-        scopeFiles: 'ALL',
-        startDate: '',
-        endDate: '',
-        active: true,
-        desc: 'Check: If H1 > 50,000, asset should be marked as CAPITALIZED (Y/X)'
-      },
-      {
-        id: 'RULE-6',
-        col: 'DESCRIPTION',
-        severity: 'INFO',
-        semaphore: 'BLUE',
-        type: 'ASSISTED_CODE',
-        param: 'String(value).trim().length >= 5',
-        min: '',
-        max: '',
-        autoFix: "String(value).trim() + ' (PLANNING)'",
-        scopeFiles: 'ALL',
-        startDate: '',
-        endDate: '',
-        active: true,
-        desc: 'Info: Recommended descriptive text of at least 5 characters'
-      }
+      { id: 'RULE-1', col: 'ID', severity: 'BLOCKING', semaphore: 'RED', type: 'UNIQUE', param: '', min: '', max: '', autoFix: "value + '_' + row._rowNum", scopeFiles: 'ALL', startDate: '', endDate: '', active: true, desc: 'No duplicate IDs allowed across consolidated sheets' },
+      { id: 'RULE-2', col: 'COMPANY', severity: 'BLOCKING', semaphore: 'RED', type: 'IN_LIST', param: '1000, 2000, 950', min: '', max: '', autoFix: "'1000'", scopeFiles: 'ALL', startDate: '', endDate: '', active: true, desc: 'Must match SAP Master Data Company Codes' },
+      { id: 'RULE-3', col: 'COSTCENTER', severity: 'BLOCKING', semaphore: 'RED', type: 'IN_LIST', param: 'CC_IT_01, CC_FIN_02, 12234566, 10180000', min: '', max: '', autoFix: "'CC_IT_01'", scopeFiles: 'ALL', startDate: '', endDate: '', active: true, desc: 'Must match SAP Master Data Cost Centers' },
+      { id: 'RULE-4', col: 'H1', severity: 'PREVENTIVE', semaphore: 'AMBER', type: 'NUMERIC_RANGE', param: '', min: '0', max: '100000', autoFix: 'num < 0 ? Math.abs(num) : 100000', scopeFiles: 'ALL', startDate: '', endDate: '', active: true, desc: 'Preventive budget threshold: H1 between 0 and 100,000' },
+      { id: 'RULE-5', col: 'CAPITALIZED', severity: 'CHECK', semaphore: 'PURPLE', type: 'ASSISTED_CODE', param: "Number(row.H1 || 0) <= 50000 || String(value).toUpperCase() === 'Y' || String(value).toUpperCase() === 'X'", min: '', max: '', autoFix: "'Y'", scopeFiles: 'ALL', startDate: '', endDate: '', active: true, desc: 'Check: If H1 > 50,000, asset should be marked as CAPITALIZED (Y/X)' },
+      { id: 'RULE-6', col: 'DESCRIPTION', severity: 'INFO', semaphore: 'BLUE', type: 'ASSISTED_CODE', param: 'String(value).trim().length >= 5', min: '', max: '', autoFix: "String(value).trim() + ' (PLANNING)'", scopeFiles: 'ALL', startDate: '', endDate: '', active: true, desc: 'Info: Recommended descriptive text of at least 5 characters' }
     ];
   }
 
   disconnectedCallback() {
-    if (this._toastTimer) {
-      clearTimeout(this._toastTimer);
-      this._toastTimer = null;
-    }
+    if (this._toastTimer) clearTimeout(this._toastTimer);
   }
 
   _storageGet(key) {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) {
-      return null;
-    }
+    try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
   }
 
   _storageSet(key, val) {
-    try {
-      if (val === null) localStorage.removeItem(key);
-      else localStorage.setItem(key, JSON.stringify(val));
-    } catch (e) {}
+    try { if (val === null) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
   }
 
   _ensureXLSX() {
-    if (typeof XLSX !== 'undefined') {
-      this._xlsxReady = true;
-      return;
-    }
+    if (typeof XLSX !== 'undefined') { this._xlsxReady = true; return; }
     let script = document.querySelector('script[data-sac-xlsx]');
     if (!script) {
       script = document.createElement('script');
@@ -227,38 +106,19 @@ class ExcelUploaderPro extends HTMLElement {
       script.setAttribute('data-sac-xlsx', 'true');
       document.head.appendChild(script);
     }
-    script.addEventListener('load', () => {
-      this._xlsxReady = true;
-      this._render();
-    });
+    script.addEventListener('load', () => { this._xlsxReady = true; this._render(); });
   }
 
   _esc(v) {
-    return String(v ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   _logAction(type, target, detail, oldVal = '', newVal = '') {
-    this._currentSessionLogs.unshift({
-      time: new Date().toLocaleTimeString(),
-      type,
-      target,
-      detail,
-      oldVal: String(oldVal ?? ''),
-      newVal: String(newVal ?? '')
-    });
+    this._currentSessionLogs.unshift({ time: new Date().toLocaleTimeString(), type, target, detail, oldVal: String(oldVal ?? ''), newVal: String(newVal ?? '') });
   }
 
-  _saveHistory() {
-    this._storageSet('sac_audit_history_v7', this._history.slice(0, 30));
-  }
-
-  _saveRules() {
-    this._storageSet('sac_validation_rules_v7', this._validationRules);
-  }
+  _saveHistory() { this._storageSet('sac_audit_history_v9', this._history.slice(0, 30)); }
+  _saveRules() { this._storageSet('sac_validation_rules_v9', this._validationRules); }
 
   _notify(msg, type = 'info') {
     this._toast = { msg, type };
@@ -268,30 +128,20 @@ class ExcelUploaderPro extends HTMLElement {
       this._toast = null;
       const banner = this._shadow.querySelector('.toast-banner');
       if (banner) banner.remove();
-    }, 3800);
+    }, 3600);
   }
 
   _syncExportColumnsWithSchema(availableCols) {
     const validSelected = (this._auditExportConfig.selectedCols || []).filter(c => availableCols.includes(c));
-    if (validSelected.length === 0) {
-      this._auditExportConfig.selectedCols = [...availableCols];
-    } else {
-      this._auditExportConfig.selectedCols = validSelected;
-    }
+    this._auditExportConfig.selectedCols = validSelected.length > 0 ? validSelected : [...availableCols];
     this._auditExportConfig.numCols = this._auditExportConfig.selectedCols.length;
   }
 
   _recordCellModification(row, colName, oldVal, newVal) {
     if (!row._editedCols) row._editedCols = {};
-    const initialFrom = row._editedCols[colName] !== undefined
-      ? row._editedCols[colName].from
-      : oldVal;
-
-    if (initialFrom === newVal) {
-      delete row._editedCols[colName];
-    } else {
-      row._editedCols[colName] = { from: initialFrom, to: newVal };
-    }
+    const initialFrom = row._editedCols[colName] !== undefined ? row._editedCols[colName].from : oldVal;
+    if (initialFrom === newVal) delete row._editedCols[colName];
+    else row._editedCols[colName] = { from: initialFrom, to: newVal };
   }
 
   _normalizeCellValue(val) {
@@ -308,20 +158,16 @@ class ExcelUploaderPro extends HTMLElement {
   _syncRowsFromActiveSheets() {
     const manualRows = this._rows.filter(r => r._fileOwner === '__MANUAL__');
     const sheetRows = [];
-
     this._filesQueue.forEach(fileItem => {
       (fileItem.sheets || []).forEach(sh => {
         if (sh.selected) {
           sh.rows.forEach(r => {
-            this._requiredColumns.forEach(reqCol => {
-              if (r[reqCol] === undefined) r[reqCol] = '';
-            });
+            this._requiredColumns.forEach(reqCol => { if (r[reqCol] === undefined) r[reqCol] = ''; });
             sheetRows.push(r);
           });
         }
       });
     });
-
     this._rows = [...manualRows, ...sheetRows];
     this._rows.forEach((r, idx) => { r._rowNum = idx + 2; });
     this._validateRows();
@@ -330,7 +176,7 @@ class ExcelUploaderPro extends HTMLElement {
   _evalAssistedCode(expr, row, colName) {
     const value = String(row[colName] ?? '').trim();
     const num = Number(value);
-    const fn = new Function('value', 'num', 'row', `"use strict"; return (${expr});`);
+    const fn = new Function('value', 'num', 'row', '"use strict"; return (' + expr + ');');
     return fn(value, num, row);
   }
 
@@ -340,40 +186,28 @@ class ExcelUploaderPro extends HTMLElement {
     const alerts = (row._alerts && row._alerts[colName]) || [];
     const targetAlert = ruleId ? alerts.find(a => a.ruleId === ruleId) : alerts.find(a => a.autoFix);
     if (!targetAlert || !targetAlert.autoFix) return;
-
     try {
       const oldVal = String(row[colName] ?? '').trim();
-      const computed = this._evalAssistedCode(targetAlert.autoFix, row, colName);
-      const newVal = String(computed ?? '').trim();
+      const newVal = String(this._evalAssistedCode(targetAlert.autoFix, row, colName) ?? '').trim();
       if (oldVal !== newVal) {
         row[colName] = newVal;
         this._recordCellModification(row, colName, oldVal || '(Blank)', newVal);
-        this._logAction(
-          'AUTO_FIX_CODE',
-          `Row #${row._rowNum} [${colName}]`,
-          `Assisted code auto-fix (${targetAlert.autoFix}) applied for rule ${targetAlert.ruleId}`,
-          oldVal || '(Blank)',
-          newVal
-        );
+        this._logAction('AUTO_FIX_CODE', 'Row #' + row._rowNum + ' [' + colName + ']', 'Assisted auto-fix (' + targetAlert.autoFix + ') applied', oldVal || '(Blank)', newVal);
         this._validateRows();
-        this._notify(`Auto-fixed Row #${row._rowNum} [${colName}] → '${newVal}'`, 'success');
+        this._notify('Auto-fixed Row #' + row._rowNum + ' [' + colName + '] -> ' + newVal, 'success');
       }
-    } catch (e) {
-      this._notify(`Assisted auto-fix error: ${e.message}`, 'error');
-    }
+    } catch (e) { this._notify('Assisted auto-fix error: ' + e.message, 'error'); }
   }
 
   _applyAllAutoFixes() {
     let fixedCount = 0;
     this._rows.forEach(row => {
       this._requiredColumns.forEach(col => {
-        const alerts = (row._alerts && row._alerts[col]) || [];
-        const fixable = alerts.find(a => a.autoFix);
+        const fixable = ((row._alerts && row._alerts[col]) || []).find(a => a.autoFix);
         if (fixable) {
           try {
             const oldVal = String(row[col] ?? '').trim();
-            const computed = this._evalAssistedCode(fixable.autoFix, row, col);
-            const newVal = String(computed ?? '').trim();
+            const newVal = String(this._evalAssistedCode(fixable.autoFix, row, col) ?? '').trim();
             if (oldVal !== newVal) {
               row[col] = newVal;
               this._recordCellModification(row, col, oldVal || '(Blank)', newVal);
@@ -383,17 +217,10 @@ class ExcelUploaderPro extends HTMLElement {
         }
       });
     });
-
     if (fixedCount > 0) {
-      this._logAction(
-        'BULK_AUTO_FIX',
-        `Grid Auto-Fix (${fixedCount} cells)`,
-        'Executed Assisted Code Auto-Fix across all fixable alerts',
-        `${fixedCount} alerts`,
-        'FIXED'
-      );
+      this._logAction('BULK_AUTO_FIX', 'Grid Auto-Fix (' + fixedCount + ' cells)', 'Executed Assisted Code Auto-Fix across all fixable alerts', fixedCount + ' alerts', 'FIXED');
       this._validateRows();
-      this._notify(`Assisted Code repaired ${fixedCount} cell(s) automatically!`, 'success');
+      this._notify('Assisted Code repaired ' + fixedCount + ' cell(s) automatically!', 'success');
     } else {
       this._notify('No cells with Assisted Auto-Fix rules pending.', 'info');
     }
@@ -403,15 +230,8 @@ class ExcelUploaderPro extends HTMLElement {
     const row = this._rows[origIdx];
     if (!row) return;
     if (!row._checkedRules) row._checkedRules = {};
-    const key = `${colName}__${ruleId}`;
-    row._checkedRules[key] = true;
-    this._logAction(
-      'CHECK_VERIFIED',
-      `Row #${row._rowNum} [${colName}]`,
-      `User manually verified & approved check alert (${ruleId})`,
-      'Pending Check',
-      'Verified ✓'
-    );
+    row._checkedRules[colName + '__' + ruleId] = true;
+    this._logAction('CHECK_VERIFIED', 'Row #' + row._rowNum + ' [' + colName + ']', 'User verified & approved check alert (' + ruleId + ')', 'Pending Check', 'Verified');
     this._validateRows();
     this._render();
   }
@@ -421,18 +241,8 @@ class ExcelUploaderPro extends HTMLElement {
 
     const toggleHelpBtn = shadow.getElementById('toggleHelpBtn');
     const closeHelpModalBtn = shadow.getElementById('closeHelpModalBtn');
-    if (toggleHelpBtn) {
-      toggleHelpBtn.addEventListener('click', () => {
-        this._showHelpModal = !this._showHelpModal;
-        this._render();
-      });
-    }
-    if (closeHelpModalBtn) {
-      closeHelpModalBtn.addEventListener('click', () => {
-        this._showHelpModal = false;
-        this._render();
-      });
-    }
+    if (toggleHelpBtn) toggleHelpBtn.addEventListener('click', () => { this._showHelpModal = !this._showHelpModal; this._render(); });
+    if (closeHelpModalBtn) closeHelpModalBtn.addEventListener('click', () => { this._showHelpModal = false; this._render(); });
 
     shadow.querySelectorAll('.strategy-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -440,7 +250,7 @@ class ExcelUploaderPro extends HTMLElement {
         if (strat && this._loadStrategy !== strat) {
           const prev = this._loadStrategy;
           this._loadStrategy = strat;
-          this._logAction('STRATEGY_CHANGE', 'Load Strategy', `Planning mode switched from ${prev} to ${this._loadStrategy}`, prev, this._loadStrategy);
+          this._logAction('STRATEGY_CHANGE', 'Load Strategy', 'Planning mode switched from ' + prev + ' to ' + strat, prev, strat);
           this._render();
         }
       });
@@ -450,14 +260,13 @@ class ExcelUploaderPro extends HTMLElement {
     if (dspToggleChk) {
       dspToggleChk.addEventListener('change', (e) => {
         this._dspArtifactSync = e.currentTarget.checked;
-        this._logAction('DSP_ARTIFACT_MODE', 'DSP Artifact Sync', `Datasphere / SAC Artifact flag set to ${this._dspArtifactSync ? 'ACTIVE' : 'OFF'}`, !this._dspArtifactSync, this._dspArtifactSync);
+        this._logAction('DSP_ARTIFACT_MODE', 'DSP Artifact Sync', 'Datasphere Artifact flag set to ' + (this._dspArtifactSync ? 'ACTIVE' : 'OFF'), !this._dspArtifactSync, this._dspArtifactSync);
         this._render();
       });
     }
 
     const fileInput = shadow.getElementById('fileInput');
     const dropZone = shadow.getElementById('dropZone');
-
     if (fileInput) {
       fileInput.addEventListener('change', (e) => {
         if (e.target.files && e.target.files.length) {
@@ -466,15 +275,9 @@ class ExcelUploaderPro extends HTMLElement {
         }
       });
     }
-
     if (dropZone) {
-      dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.classList.add('drag-active');
-      });
-      dropZone.addEventListener('dragleave', () => {
-        dropZone.classList.remove('drag-active');
-      });
+      dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-active'); });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-active'));
       dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('drag-active');
@@ -489,18 +292,11 @@ class ExcelUploaderPro extends HTMLElement {
     const cfgNumFormat = shadow.getElementById('cfgNumFormat');
     const cfgHeaderRow = shadow.getElementById('cfgHeaderRow');
     const reparseFilesBtn = shadow.getElementById('reparseFilesBtn');
-
     if (cfgFormat) cfgFormat.addEventListener('change', (e) => { this._parseConfig.format = e.target.value; });
     if (cfgDelimiter) cfgDelimiter.addEventListener('change', (e) => { this._parseConfig.delimiter = e.target.value; });
     if (cfgNumFormat) cfgNumFormat.addEventListener('change', (e) => { this._parseConfig.numberFormat = e.target.value; });
-    if (cfgHeaderRow) {
-      cfgHeaderRow.addEventListener('change', (e) => {
-        this._parseConfig.headerRow = Math.max(1, parseInt(e.target.value, 10) || 1);
-      });
-    }
-    if (reparseFilesBtn) {
-      reparseFilesBtn.addEventListener('click', () => this._reparseAllFilesWithNewConfig());
-    }
+    if (cfgHeaderRow) cfgHeaderRow.addEventListener('change', (e) => { this._parseConfig.headerRow = Math.max(1, parseInt(e.target.value, 10) || 1); });
+    if (reparseFilesBtn) reparseFilesBtn.addEventListener('click', () => this._reparseAllFilesWithNewConfig());
 
     shadow.querySelectorAll('.step-item').forEach(stepEl => {
       stepEl.addEventListener('click', (e) => {
@@ -522,13 +318,7 @@ class ExcelUploaderPro extends HTMLElement {
         if (fileItem && fileItem.sheets && fileItem.sheets[sIdx]) {
           const sh = fileItem.sheets[sIdx];
           sh.selected = e.currentTarget.checked;
-          this._logAction(
-            sh.selected ? 'SHEET_ENABLED' : 'SHEET_DISABLED',
-            `${fileItem.file.name} [${sh.name}]`,
-            `${sh.selected ? 'Included' : 'Excluded'} sheet (${sh.rows.length} rows) in consolidation`,
-            sh.selected ? 'Excluded' : 'Included',
-            sh.selected ? 'Included' : 'Excluded'
-          );
+          this._logAction(sh.selected ? 'SHEET_ENABLED' : 'SHEET_DISABLED', fileItem.file.name + ' [' + sh.name + ']', (sh.selected ? 'Included' : 'Excluded') + ' sheet (' + sh.rows.length + ' rows)', !sh.selected, sh.selected);
           this._syncRowsFromActiveSheets();
           this._render();
         }
@@ -542,13 +332,7 @@ class ExcelUploaderPro extends HTMLElement {
         const fileItem = this._filesQueue[fIdx];
         if (fileItem && fileItem.sheets) {
           fileItem.sheets.forEach(sh => { sh.selected = mode; });
-          this._logAction(
-            'SHEET_BULK_TOGGLE',
-            fileItem.file.name,
-            `${mode ? 'Selected all' : 'Deselected all'} sheets in workbook`,
-            '',
-            mode ? 'ALL_SELECTED' : 'NONE_SELECTED'
-          );
+          this._logAction('SHEET_BULK_TOGGLE', fileItem.file.name, (mode ? 'Selected all' : 'Deselected all') + ' sheets', '', mode ? 'ALL' : 'NONE');
           this._syncRowsFromActiveSheets();
           this._render();
         }
@@ -558,7 +342,7 @@ class ExcelUploaderPro extends HTMLElement {
     const clearAllFilesBtn = shadow.getElementById('clearAllFilesBtn');
     if (clearAllFilesBtn) {
       clearAllFilesBtn.addEventListener('click', () => {
-        this._logAction('QUEUE_CLEARED', `All Files (${this._filesQueue.length})`, 'Removed all workbooks from queue', `${this._filesQueue.length} files`, '0 files');
+        this._logAction('QUEUE_CLEARED', 'All Files (' + this._filesQueue.length + ')', 'Removed all workbooks from queue', this._filesQueue.length + ' files', '0 files');
         this._filesQueue = [];
         this._rows = this._rows.filter(r => r._fileOwner === '__MANUAL__');
         if (this._rows.length === 0) this._step = 1;
@@ -585,15 +369,9 @@ class ExcelUploaderPro extends HTMLElement {
     if (prevBtn) prevBtn.addEventListener('click', () => { if (this._step > 1) { this._step--; this._render(); } });
     if (exitBtn) {
       exitBtn.addEventListener('click', () => {
-        this._step = 1;
-        this._filesQueue = [];
-        this._rows = [];
-        this._currentSessionLogs = [];
-        this._searchQuery = '';
-        this._render();
+        this._step = 1; this._filesQueue = []; this._rows = []; this._currentSessionLogs = []; this._searchQuery = ''; this._render();
       });
     }
-
     if (downloadLogBtn) downloadLogBtn.addEventListener('click', () => this._exportErrorLog());
     if (autoFixAllBtn) autoFixAllBtn.addEventListener('click', () => this._applyAllAutoFixes());
 
@@ -601,24 +379,21 @@ class ExcelUploaderPro extends HTMLElement {
       addRowBtn.addEventListener('click', () => {
         const newId = 'PLN_' + Math.floor(Math.random() * 9000 + 1000);
         const newRow = { _rowNum: 2, _sourceFile: 'Manual Entry', _fileOwner: '__MANUAL__', _isManual: true, _editedCols: {}, _checkedRules: {}, _errors: {}, _alerts: {} };
-        this._requiredColumns.forEach(col => {
-          newRow[col] = col === 'ID' ? newId : '';
-        });
+        this._requiredColumns.forEach(col => { newRow[col] = col === 'ID' ? newId : ''; });
         this._rows.unshift(newRow);
         this._rows.forEach((r, idx) => { r._rowNum = idx + 2; });
-        this._logAction('ROW_ADDED', `Row ID ${newId}`, 'Manual planning row inserted directly in grid', '', newId);
+        this._logAction('ROW_ADDED', 'Row ID ' + newId, 'Manual planning row inserted directly in grid', '', newId);
         this._validateRows();
         this._notify('New planning row added.', 'success');
       });
     }
 
-    // Re-connected Row Clone (⧉) & Row Delete (✕) listeners in Step 3
     shadow.querySelectorAll('.remove-row-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const origIdx = parseInt(e.currentTarget.dataset.origIdx, 10);
         if (!isNaN(origIdx) && this._rows[origIdx]) {
           const removed = this._rows[origIdx];
-          this._logAction('ROW_DELETED', `Row #${removed._rowNum} (ID: ${removed.ID || 'N/A'})`, `Deleted row from ${removed._sourceFile}`, String(removed.ID || 'Row'), 'DELETED');
+          this._logAction('ROW_DELETED', 'Row #' + removed._rowNum + ' (ID: ' + (removed.ID || 'N/A') + ')', 'Deleted row from ' + removed._sourceFile, String(removed.ID || 'Row'), 'DELETED');
           this._rows.splice(origIdx, 1);
           this._rows.forEach((r, idx) => { r._rowNum = idx + 2; });
           this._validateRows();
@@ -633,20 +408,11 @@ class ExcelUploaderPro extends HTMLElement {
         if (!isNaN(origIdx) && this._rows[origIdx]) {
           const source = this._rows[origIdx];
           const oldId = source.ID || 'N/A';
-          const newId = oldId ? `${oldId}_COPY` : 'PLN_COPY';
-          const clone = {
-            ...source,
-            ID: newId,
-            _fileOwner: '__MANUAL__',
-            _isManual: true,
-            _editedCols: { ...(source._editedCols || {}) },
-            _checkedRules: {},
-            _errors: {},
-            _alerts: {}
-          };
+          const newId = oldId ? oldId + '_COPY' : 'PLN_COPY';
+          const clone = { ...source, ID: newId, _fileOwner: '__MANUAL__', _isManual: true, _editedCols: { ...(source._editedCols || {}) }, _checkedRules: {}, _errors: {}, _alerts: {} };
           this._rows.splice(origIdx + 1, 0, clone);
           this._rows.forEach((r, idx) => { r._rowNum = idx + 2; });
-          this._logAction('ROW_CLONED', `Row #${source._rowNum}`, `Cloned planning row from ID '${oldId}'`, oldId, newId);
+          this._logAction('ROW_CLONED', 'Row #' + source._rowNum, 'Cloned planning row from ID ' + oldId, oldId, newId);
           this._validateRows();
           this._notify('Row duplicated. Verify the new ID.', 'info');
         }
@@ -656,30 +422,19 @@ class ExcelUploaderPro extends HTMLElement {
     shadow.querySelectorAll('.cell-autofix-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const origIdx = parseInt(e.currentTarget.dataset.origIdx, 10);
-        const col = e.currentTarget.dataset.col;
-        const ruleId = e.currentTarget.dataset.ruleId;
-        this._applyCellAutoFix(origIdx, col, ruleId);
+        this._applyCellAutoFix(parseInt(e.currentTarget.dataset.origIdx, 10), e.currentTarget.dataset.col, e.currentTarget.dataset.ruleId);
       });
     });
 
     shadow.querySelectorAll('.cell-check-ok-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const origIdx = parseInt(e.currentTarget.dataset.origIdx, 10);
-        const col = e.currentTarget.dataset.col;
-        const ruleId = e.currentTarget.dataset.ruleId;
-        this._acknowledgeCheckCell(origIdx, col, ruleId);
+        this._acknowledgeCheckCell(parseInt(e.currentTarget.dataset.origIdx, 10), e.currentTarget.dataset.col, e.currentTarget.dataset.ruleId);
       });
     });
 
     const ackNonBlockingChk = shadow.getElementById('ackNonBlockingChk');
-    if (ackNonBlockingChk) {
-      ackNonBlockingChk.addEventListener('change', (e) => {
-        this._acknowledgeNonBlocking = e.currentTarget.checked;
-        this._render();
-      });
-    }
+    if (ackNonBlockingChk) ackNonBlockingChk.addEventListener('change', (e) => { this._acknowledgeNonBlocking = e.currentTarget.checked; this._render(); });
 
     const openAddColBtn = shadow.getElementById('openAddColBtn');
     const confirmAddColBtn = shadow.getElementById('confirmAddColBtn');
@@ -688,37 +443,26 @@ class ExcelUploaderPro extends HTMLElement {
 
     if (openAddColBtn) {
       openAddColBtn.addEventListener('click', () => {
-        this._showAddColModal = true;
-        this._render();
+        this._showAddColModal = true; this._render();
         const inp = this._shadow.getElementById('newColInput');
         if (inp) inp.focus();
       });
     }
-
-    if (cancelAddColBtn) {
-      cancelAddColBtn.addEventListener('click', () => {
-        this._showAddColModal = false;
-        this._render();
-      });
-    }
-
+    if (cancelAddColBtn) cancelAddColBtn.addEventListener('click', () => { this._showAddColModal = false; this._render(); });
     if (confirmAddColBtn && newColInput) {
       const saveCol = () => {
         const upperCol = newColInput.value.trim().toUpperCase().replace(/\s+/g, '_');
         if (!upperCol) return;
-        if (this._requiredColumns.includes(upperCol)) {
-          this._notify(`Column '${upperCol}' already exists.`, 'error');
-          return;
-        }
+        if (this._requiredColumns.includes(upperCol)) { this._notify('Column ' + upperCol + ' already exists.', 'error'); return; }
         this._requiredColumns.push(upperCol);
         this._storageSet('sac_required_cols', this._requiredColumns);
         this._auditExportConfig.selectedCols.push(upperCol);
         this._auditExportConfig.numCols = this._auditExportConfig.selectedCols.length;
         this._rows.forEach(r => { if (r[upperCol] === undefined) r[upperCol] = ''; });
-        this._logAction('SCHEMA_ADD_COL', `Column [${upperCol}]`, 'Added new mandatory column to planning schema', '', upperCol);
+        this._logAction('SCHEMA_ADD_COL', 'Column [' + upperCol + ']', 'Added mandatory column to schema', '', upperCol);
         this._showAddColModal = false;
         this._validateRows();
-        this._notify(`Column '${upperCol}' added to model.`, 'success');
+        this._notify('Column ' + upperCol + ' added to model.', 'success');
       };
       confirmAddColBtn.addEventListener('click', saveCol);
       newColInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveCol(); });
@@ -728,37 +472,22 @@ class ExcelUploaderPro extends HTMLElement {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const colToRemove = e.currentTarget.dataset.col;
-        if (colToRemove === 'ID') {
-          this._notify('Primary ID column cannot be removed.', 'error');
-          return;
-        }
+        if (colToRemove === 'ID') { this._notify('Primary ID column cannot be removed.', 'error'); return; }
         this._requiredColumns = this._requiredColumns.filter(c => c !== colToRemove);
         this._storageSet('sac_required_cols', this._requiredColumns);
         this._syncExportColumnsWithSchema(this._requiredColumns);
-        if (!this._requiredColumns.includes(this._bulkCol)) {
-          this._bulkCol = this._requiredColumns[0] || 'ID';
-        }
-        this._logAction('SCHEMA_DEL_COL', `Column [${colToRemove}]`, 'Removed column from active planning model', colToRemove, 'DELETED');
+        if (!this._requiredColumns.includes(this._bulkCol)) this._bulkCol = this._requiredColumns[0] || 'ID';
+        this._logAction('SCHEMA_DEL_COL', 'Column [' + colToRemove + ']', 'Removed column from active planning model', colToRemove, 'DELETED');
         this._validateRows();
-        this._notify(`Column '${colToRemove}' removed.`, 'info');
+        this._notify('Column ' + colToRemove + ' removed.', 'info');
       });
     });
 
     const toggleInlineRuleBtn = shadow.getElementById('toggleInlineRuleBtn');
-    if (toggleInlineRuleBtn) {
-      toggleInlineRuleBtn.addEventListener('click', () => {
-        this._showInlineRuleCreator = !this._showInlineRuleCreator;
-        this._render();
-      });
-    }
+    if (toggleInlineRuleBtn) toggleInlineRuleBtn.addEventListener('click', () => { this._showInlineRuleCreator = !this._showInlineRuleCreator; this._render(); });
 
     const goToRulesTabBtn = shadow.getElementById('goToRulesTabBtn');
-    if (goToRulesTabBtn) {
-      goToRulesTabBtn.addEventListener('click', () => {
-        this._activeTab = 'rulesTab';
-        this._render();
-      });
-    }
+    if (goToRulesTabBtn) goToRulesTabBtn.addEventListener('click', () => { this._activeTab = 'rulesTab'; this._render(); });
 
     const ruleColSel = shadow.getElementById('ruleColSel');
     const ruleSeveritySel = shadow.getElementById('ruleSeveritySel');
@@ -779,20 +508,12 @@ class ExcelUploaderPro extends HTMLElement {
     if (ruleSeveritySel) {
       ruleSeveritySel.addEventListener('change', (e) => {
         this._newRuleForm.severity = e.target.value;
-        if (e.target.value === 'BLOCKING') this._newRuleForm.semaphore = 'RED';
-        else if (e.target.value === 'PREVENTIVE') this._newRuleForm.semaphore = 'AMBER';
-        else if (e.target.value === 'CHECK') this._newRuleForm.semaphore = 'PURPLE';
-        else this._newRuleForm.semaphore = 'BLUE';
+        this._newRuleForm.semaphore = e.target.value === 'BLOCKING' ? 'RED' : (e.target.value === 'PREVENTIVE' ? 'AMBER' : (e.target.value === 'CHECK' ? 'PURPLE' : 'BLUE'));
         this._render();
       });
     }
     if (ruleSemaphoreSel) ruleSemaphoreSel.addEventListener('change', (e) => { this._newRuleForm.semaphore = e.target.value; });
-    if (ruleTypeSel) {
-      ruleTypeSel.addEventListener('change', (e) => {
-        this._newRuleForm.type = e.target.value;
-        this._render();
-      });
-    }
+    if (ruleTypeSel) ruleTypeSel.addEventListener('change', (e) => { this._newRuleForm.type = e.target.value; this._render(); });
     if (ruleParamInp) ruleParamInp.addEventListener('input', (e) => { this._newRuleForm.param = e.target.value; });
     if (ruleMinInp) ruleMinInp.addEventListener('input', (e) => { this._newRuleForm.min = e.target.value; });
     if (ruleMaxInp) ruleMaxInp.addEventListener('input', (e) => { this._newRuleForm.max = e.target.value; });
@@ -805,13 +526,11 @@ class ExcelUploaderPro extends HTMLElement {
     shadow.querySelectorAll('.scope-quick-pill').forEach(pill => {
       pill.addEventListener('click', (e) => {
         const val = e.currentTarget.dataset.scopeVal;
-        if (val === 'ALL') {
-          this._newRuleForm.scopeFiles = 'ALL';
-        } else {
+        if (val === 'ALL') this._newRuleForm.scopeFiles = 'ALL';
+        else {
           const cur = (this._newRuleForm.scopeFiles || 'ALL').trim();
-          if (cur.toUpperCase() === 'ALL' || !cur) {
-            this._newRuleForm.scopeFiles = val;
-          } else {
+          if (cur.toUpperCase() === 'ALL' || !cur) this._newRuleForm.scopeFiles = val;
+          else {
             const parts = cur.split(',').map(s => s.trim()).filter(Boolean);
             if (!parts.includes(val)) parts.push(val);
             this._newRuleForm.scopeFiles = parts.join(', ');
@@ -825,50 +544,24 @@ class ExcelUploaderPro extends HTMLElement {
       btn.addEventListener('click', (e) => {
         const preset = e.currentTarget.dataset.preset;
         if (preset === 'capex_check') {
-          this._newRuleForm.col = this._requiredColumns.includes('CAPITALIZED') ? 'CAPITALIZED' : this._requiredColumns[0];
-          this._newRuleForm.severity = 'CHECK';
-          this._newRuleForm.semaphore = 'PURPLE';
-          this._newRuleForm.type = 'ASSISTED_CODE';
-          this._newRuleForm.param = "Number(row.H1 || 0) <= 50000 || String(value).toUpperCase() === 'Y'";
-          this._newRuleForm.autoFix = "'Y'";
-          this._newRuleForm.desc = 'CAPEX Check: If H1 > 50,000, CAPITALIZED must be Y';
+          Object.assign(this._newRuleForm, { col: this._requiredColumns.includes('CAPITALIZED') ? 'CAPITALIZED' : this._requiredColumns[0], severity: 'CHECK', semaphore: 'PURPLE', type: 'ASSISTED_CODE', param: "Number(row.H1 || 0) <= 50000 || String(value).toUpperCase() === 'Y'", autoFix: "'Y'", desc: 'CAPEX Check: If H1 > 50,000, CAPITALIZED must be Y' });
         } else if (preset === 'budget_prev') {
-          this._newRuleForm.col = this._requiredColumns.includes('H1') ? 'H1' : this._requiredColumns[0];
-          this._newRuleForm.severity = 'PREVENTIVE';
-          this._newRuleForm.semaphore = 'AMBER';
-          this._newRuleForm.type = 'ASSISTED_CODE';
-          this._newRuleForm.param = 'num >= 0 && num <= 100000';
-          this._newRuleForm.autoFix = 'num < 0 ? Math.abs(num) : 100000';
-          this._newRuleForm.desc = 'Preventive Alert: H1 budget between 0 and 100,000';
+          Object.assign(this._newRuleForm, { col: this._requiredColumns.includes('H1') ? 'H1' : this._requiredColumns[0], severity: 'PREVENTIVE', semaphore: 'AMBER', type: 'ASSISTED_CODE', param: 'num >= 0 && num <= 100000', autoFix: 'num < 0 ? Math.abs(num) : 100000', desc: 'Preventive Alert: H1 budget between 0 and 100,000' });
         } else if (preset === 'cc_company_block') {
-          this._newRuleForm.col = this._requiredColumns.includes('COSTCENTER') ? 'COSTCENTER' : this._requiredColumns[0];
-          this._newRuleForm.severity = 'BLOCKING';
-          this._newRuleForm.semaphore = 'RED';
-          this._newRuleForm.type = 'ASSISTED_CODE';
-          this._newRuleForm.param = "row.COMPANY !== '1000' || String(value).startsWith('CC_')";
-          this._newRuleForm.autoFix = "'CC_' + String(value).trim()";
-          this._newRuleForm.desc = 'Blocking: For Company 1000, Cost Center must start with CC_';
+          Object.assign(this._newRuleForm, { col: this._requiredColumns.includes('COSTCENTER') ? 'COSTCENTER' : this._requiredColumns[0], severity: 'BLOCKING', semaphore: 'RED', type: 'ASSISTED_CODE', param: "row.COMPANY !== '1000' || String(value).startsWith('CC_')", autoFix: "'CC_' + String(value).trim()", desc: 'Blocking: For Company 1000, Cost Center must start with CC_' });
         } else if (preset === 'upper_info') {
-          this._newRuleForm.col = this._requiredColumns.includes('DESCRIPTION') ? 'DESCRIPTION' : this._requiredColumns[0];
-          this._newRuleForm.severity = 'INFO';
-          this._newRuleForm.semaphore = 'BLUE';
-          this._newRuleForm.type = 'ASSISTED_CODE';
-          this._newRuleForm.param = 'String(value) === String(value).toUpperCase()';
-          this._newRuleForm.autoFix = 'String(value).toUpperCase().trim()';
-          this._newRuleForm.desc = 'Info: Recommended uppercase normalized description';
+          Object.assign(this._newRuleForm, { col: this._requiredColumns.includes('DESCRIPTION') ? 'DESCRIPTION' : this._requiredColumns[0], severity: 'INFO', semaphore: 'BLUE', type: 'ASSISTED_CODE', param: 'String(value) === String(value).toUpperCase()', autoFix: 'String(value).toUpperCase().trim()', desc: 'Info: Recommended uppercase normalized description' });
         }
         this._render();
       });
     });
 
     if (saveNewRuleBtn) saveNewRuleBtn.addEventListener('click', () => this._createNewValidationRule());
-
-    // Safe in-memory reset without reloading SAC browser window
     if (resetDefaultRulesBtn) {
       resetDefaultRulesBtn.addEventListener('click', () => {
         this._validationRules = this._getDefaultRules();
         this._saveRules();
-        this._logAction('RULES_RESET', 'Validation Rules Engine', 'Restored default corporate validation rules', 'Custom Rules', 'Default Rules');
+        this._logAction('RULES_RESET', 'Validation Rules Engine', 'Restored default corporate validation rules', 'Custom', 'Default');
         this._validateRows();
         this._notify('Default corporate validation rules restored.', 'info');
       });
@@ -876,12 +569,11 @@ class ExcelUploaderPro extends HTMLElement {
 
     shadow.querySelectorAll('.toggle-rule-chk').forEach(chk => {
       chk.addEventListener('change', (e) => {
-        const rId = e.currentTarget.dataset.ruleId;
-        const rule = this._validationRules.find(r => r.id === rId);
+        const rule = this._validationRules.find(r => r.id === e.currentTarget.dataset.ruleId);
         if (rule) {
           rule.active = e.currentTarget.checked;
           this._saveRules();
-          this._logAction('RULE_TOGGLED', `${rule.col} [${rule.severity}]`, `Validation rule ${rule.active ? 'enabled' : 'disabled'}`, !rule.active, rule.active);
+          this._logAction('RULE_TOGGLED', rule.col + ' [' + rule.severity + ']', 'Validation rule ' + (rule.active ? 'enabled' : 'disabled'), !rule.active, rule.active);
           this._validateRows();
           this._render();
         }
@@ -894,31 +586,23 @@ class ExcelUploaderPro extends HTMLElement {
         const rule = this._validationRules.find(r => r.id === rId);
         this._validationRules = this._validationRules.filter(r => r.id !== rId);
         this._saveRules();
-        if (rule) {
-          this._logAction('RULE_DELETED', `${rule.col} [${rule.severity}]`, 'Deleted custom validation rule', rule.param || rule.type, 'DELETED');
-        }
+        if (rule) this._logAction('RULE_DELETED', rule.col + ' [' + rule.severity + ']', 'Deleted validation rule', rule.param || rule.type, 'DELETED');
         this._validateRows();
         this._notify('Validation rule removed.', 'info');
       });
     });
 
-    // Clone Rule & Inline Scope Editor (Sandbox-safe, zero prompt() calls)
     shadow.querySelectorAll('.copy-rule-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        const rId = e.currentTarget.dataset.ruleId;
-        const sourceRule = this._validationRules.find(r => r.id === rId);
+        const sourceRule = this._validationRules.find(r => r.id === e.currentTarget.dataset.ruleId);
         if (sourceRule) {
-          const clonedRule = {
-            ...sourceRule,
-            id: 'RULE-' + Math.floor(1000 + Math.random() * 9000),
-            desc: `${sourceRule.desc} (Copy)`
-          };
+          const clonedRule = { ...sourceRule, id: 'RULE-' + Math.floor(1000 + Math.random() * 9000), desc: sourceRule.desc + ' (Copy)' };
           this._validationRules.push(clonedRule);
           this._editingScopeRuleId = clonedRule.id;
           this._saveRules();
-          this._logAction('RULE_COPIED', `${clonedRule.col} [${clonedRule.id}]`, `Cloned rule from ${sourceRule.id}`, sourceRule.id, clonedRule.id);
+          this._logAction('RULE_COPIED', clonedRule.col + ' [' + clonedRule.id + ']', 'Cloned rule from ' + sourceRule.id, sourceRule.id, clonedRule.id);
           this._validateRows();
-          this._notify(`Rule cloned (${clonedRule.id}). You can now adjust its target workbook scope.`, 'success');
+          this._notify('Rule cloned (' + clonedRule.id + '). Edit its target workbook scope inline.', 'success');
         }
       });
     });
@@ -934,7 +618,7 @@ class ExcelUploaderPro extends HTMLElement {
     shadow.querySelectorAll('.inline-scope-save-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const rId = e.currentTarget.dataset.ruleId;
-        const inp = shadow.getElementById(`scopeInp_${rId}`);
+        const inp = shadow.getElementById('scopeInp_' + rId);
         const rule = this._validationRules.find(r => r.id === rId);
         if (rule && inp) {
           const oldScope = rule.scopeFiles || 'ALL';
@@ -942,9 +626,9 @@ class ExcelUploaderPro extends HTMLElement {
           rule.scopeFiles = newScope.toUpperCase() === 'ALL' ? 'ALL' : newScope;
           this._editingScopeRuleId = null;
           this._saveRules();
-          this._logAction('RULE_SCOPE_UPDATED', `${rule.col} [${rule.id}]`, 'Updated target workbook scope for rule', oldScope, rule.scopeFiles);
+          this._logAction('RULE_SCOPE_UPDATED', rule.col + ' [' + rule.id + ']', 'Updated target workbook scope', oldScope, rule.scopeFiles);
           this._validateRows();
-          this._notify(`Rule scope updated to: ${rule.scopeFiles}`, 'success');
+          this._notify('Rule scope updated to: ' + rule.scopeFiles, 'success');
         }
       });
     });
@@ -956,10 +640,7 @@ class ExcelUploaderPro extends HTMLElement {
         this._searchQuery = e.target.value;
         this._render();
         const restored = this._shadow.getElementById('searchInput');
-        if (restored) {
-          restored.focus();
-          restored.setSelectionRange(pos, pos);
-        }
+        if (restored) { restored.focus(); restored.setSelectionRange(pos, pos); }
       });
     }
 
@@ -967,7 +648,6 @@ class ExcelUploaderPro extends HTMLElement {
     const bulkValInput = shadow.getElementById('bulkValInput');
     const applyBulkEmptyBtn = shadow.getElementById('applyBulkEmptyBtn');
     const applyBulkAllBtn = shadow.getElementById('applyBulkAllBtn');
-
     if (bulkColSelect) bulkColSelect.addEventListener('change', (e) => { this._bulkCol = e.target.value; });
     if (bulkValInput) bulkValInput.addEventListener('input', (e) => { this._bulkVal = e.target.value; });
     if (applyBulkEmptyBtn) applyBulkEmptyBtn.addEventListener('click', () => this._applyBulkFill(true));
@@ -976,9 +656,7 @@ class ExcelUploaderPro extends HTMLElement {
     shadow.querySelectorAll('.file-comment-input').forEach(input => {
       input.addEventListener('input', (e) => {
         const idx = parseInt(e.target.dataset.index, 10);
-        if (this._filesQueue[idx]) {
-          this._filesQueue[idx].comment = e.target.value;
-        }
+        if (this._filesQueue[idx]) this._filesQueue[idx].comment = e.target.value;
       });
       input.addEventListener('blur', (e) => {
         const idx = parseInt(e.target.dataset.index, 10);
@@ -988,7 +666,7 @@ class ExcelUploaderPro extends HTMLElement {
           this._filesQueue[idx].comment = newComment;
           if (prevLogged !== newComment) {
             this._filesQueue[idx]._lastLoggedComment = newComment;
-            this._logAction('FILE_COMMENT', this._filesQueue[idx].file.name, 'Updated business traceability comment', prevLogged || '(Empty)', newComment || '(Empty)');
+            this._logAction('FILE_COMMENT', this._filesQueue[idx].file.name, 'Updated business comment', prevLogged || '(Empty)', newComment || '(Empty)');
           }
         }
       });
@@ -999,30 +677,21 @@ class ExcelUploaderPro extends HTMLElement {
         const idx = parseInt(e.currentTarget.dataset.index, 10);
         const removedFile = this._filesQueue[idx];
         if (removedFile) {
-          const fileName = removedFile.file.name;
-          this._logAction('FILE_REMOVED', fileName, 'Removed workbook and its sheets from consolidation queue', fileName, 'REMOVED');
+          this._logAction('FILE_REMOVED', removedFile.file.name, 'Removed workbook from queue', removedFile.file.name, 'REMOVED');
           this._filesQueue.splice(idx, 1);
           this._syncRowsFromActiveSheets();
         }
-        if (this._filesQueue.length === 0 && this._rows.length === 0) {
-          this._step = 1;
-        }
+        if (this._filesQueue.length === 0 && this._rows.length === 0) this._step = 1;
         this._render();
       });
     });
 
     shadow.querySelectorAll('.nav-tab').forEach(tab => {
-      tab.addEventListener('click', (e) => {
-        this._activeTab = e.currentTarget.dataset.target;
-        this._render();
-      });
+      tab.addEventListener('click', (e) => { this._activeTab = e.currentTarget.dataset.target; this._render(); });
     });
 
     shadow.querySelectorAll('.chip').forEach(chip => {
-      chip.addEventListener('click', (e) => {
-        this._issueFilter = e.currentTarget.dataset.filter;
-        this._render();
-      });
+      chip.addEventListener('click', (e) => { this._issueFilter = e.currentTarget.dataset.filter; this._render(); });
     });
 
     shadow.querySelectorAll('.editable-cell').forEach(cell => {
@@ -1036,32 +705,20 @@ class ExcelUploaderPro extends HTMLElement {
           if (oldVal !== newVal) {
             row[colName] = newVal;
             this._recordCellModification(row, colName, oldVal, newVal);
-            this._logAction(
-              'CELL_EDIT',
-              `Row #${row._rowNum} [${colName}]`,
-              `Inline value modification in ${row._sourceFile}`,
-              oldVal || '(Blank)',
-              newVal || '(Blank)'
-            );
+            this._logAction('CELL_EDIT', 'Row #' + row._rowNum + ' [' + colName + ']', 'Inline modification in ' + row._sourceFile, oldVal || '(Blank)', newVal || '(Blank)');
             this._validateRows();
             this._render();
           }
         }
       });
-      cell.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          e.target.blur();
-        }
-      });
+      cell.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
     });
 
     shadow.querySelectorAll('.audit-row-link').forEach(rowEl => {
       rowEl.addEventListener('click', (e) => {
         this._selectedAuditId = e.currentTarget.dataset.loadId;
         const rec = this._history.find(h => h.id === this._selectedAuditId);
-        const availCols = (rec && rec.columns) || this._requiredColumns;
-        this._syncExportColumnsWithSchema(availCols);
+        this._syncExportColumnsWithSchema((rec && rec.columns) || this._requiredColumns);
         this._auditDetailSubTab = 'dataTab';
         this._auditSearchQuery = '';
         this._render();
@@ -1069,30 +726,36 @@ class ExcelUploaderPro extends HTMLElement {
     });
 
     const backToAuditListBtn = shadow.getElementById('backToAuditListBtn');
-    if (backToAuditListBtn) {
-      backToAuditListBtn.addEventListener('click', () => {
-        this._selectedAuditId = null;
-        this._render();
-      });
-    }
+    if (backToAuditListBtn) backToAuditListBtn.addEventListener('click', () => { this._selectedAuditId = null; this._render(); });
 
     const clearHistoryBtn = shadow.getElementById('clearHistoryBtn');
     if (clearHistoryBtn) {
       clearHistoryBtn.addEventListener('click', () => {
-        this._history = [];
-        this._selectedAuditId = null;
-        this._storageSet('sac_audit_history_v7', null);
+        this._history = []; this._selectedAuditId = null; this._storageSet('sac_audit_history_v9', null);
         this._notify('Audit history cleared.', 'info');
       });
     }
+
+    shadow.querySelectorAll('.direct-audit-exp-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const fmt = e.currentTarget.dataset.fmt;
+        const targetId = e.currentTarget.dataset.loadId || this._selectedAuditId;
+        if (targetId) {
+          const rec = this._history.find(h => h.id === targetId);
+          if (rec) this._downloadConfiguredAuditReport([rec], rec.id + '_Audit_Export', fmt);
+        } else {
+          this._downloadConfiguredAuditReport(this._history, 'Global_Audit_Monitor', fmt);
+        }
+      });
+    });
 
     const toggleAuditExportCfgBtn = shadow.getElementById('toggleAuditExportCfgBtn');
     if (toggleAuditExportCfgBtn) {
       toggleAuditExportCfgBtn.addEventListener('click', () => {
         this._auditExportConfig.open = !this._auditExportConfig.open;
         const rec = this._selectedAuditId ? this._history.find(h => h.id === this._selectedAuditId) : null;
-        const availCols = (rec && rec.columns) || this._requiredColumns;
-        this._syncExportColumnsWithSchema(availCols);
+        this._syncExportColumnsWithSchema((rec && rec.columns) || this._requiredColumns);
         this._render();
       });
     }
@@ -1115,9 +778,7 @@ class ExcelUploaderPro extends HTMLElement {
         const rec = this._selectedAuditId ? this._history.find(h => h.id === this._selectedAuditId) : null;
         const availCols = (rec && rec.columns) || this._requiredColumns;
         if (e.currentTarget.checked) {
-          if (!this._auditExportConfig.selectedCols.includes(col)) {
-            this._auditExportConfig.selectedCols.push(col);
-          }
+          if (!this._auditExportConfig.selectedCols.includes(col)) this._auditExportConfig.selectedCols.push(col);
         } else {
           if (this._auditExportConfig.selectedCols.length <= 1) {
             this._notify('At least 1 column must be selected for download.', 'error');
@@ -1133,43 +794,28 @@ class ExcelUploaderPro extends HTMLElement {
     });
 
     const auditIncCommentsChk = shadow.getElementById('auditIncCommentsChk');
-    if (auditIncCommentsChk) {
-      auditIncCommentsChk.addEventListener('change', (e) => {
-        this._auditExportConfig.includeComments = e.currentTarget.checked;
-      });
-    }
+    if (auditIncCommentsChk) auditIncCommentsChk.addEventListener('change', (e) => { this._auditExportConfig.includeComments = e.currentTarget.checked; });
 
     const auditIncDetailChk = shadow.getElementById('auditIncDetailChk');
-    if (auditIncDetailChk) {
-      auditIncDetailChk.addEventListener('change', (e) => {
-        this._auditExportConfig.includeAuditDetail = e.currentTarget.checked;
-      });
-    }
+    if (auditIncDetailChk) auditIncDetailChk.addEventListener('change', (e) => { this._auditExportConfig.includeAuditDetail = e.currentTarget.checked; });
 
     const auditExpFormatSel = shadow.getElementById('auditExpFormatSel');
-    if (auditExpFormatSel) {
-      auditExpFormatSel.addEventListener('change', (e) => {
-        this._auditExportConfig.format = e.target.value;
-      });
-    }
+    if (auditExpFormatSel) auditExpFormatSel.addEventListener('change', (e) => { this._auditExportConfig.format = e.target.value; });
 
     const runConfiguredAuditDownloadBtn = shadow.getElementById('runConfiguredAuditDownloadBtn');
     if (runConfiguredAuditDownloadBtn) {
       runConfiguredAuditDownloadBtn.addEventListener('click', () => {
         if (this._selectedAuditId) {
           const rec = this._history.find(h => h.id === this._selectedAuditId);
-          if (rec) this._downloadConfiguredAuditReport([rec], `${rec.id}_Custom_Audit_Report`);
+          if (rec) this._downloadConfiguredAuditReport([rec], rec.id + '_Custom_Audit_Report', this._auditExportConfig.format);
         } else {
-          this._downloadConfiguredAuditReport(this._history, 'Global_Audit_Monitor_Report');
+          this._downloadConfiguredAuditReport(this._history, 'Global_Audit_Monitor_Report', this._auditExportConfig.format);
         }
       });
     }
 
     shadow.querySelectorAll('.audit-subtab').forEach(subBtn => {
-      subBtn.addEventListener('click', (e) => {
-        this._auditDetailSubTab = e.currentTarget.dataset.subtab;
-        this._render();
-      });
+      subBtn.addEventListener('click', (e) => { this._auditDetailSubTab = e.currentTarget.dataset.subtab; this._render(); });
     });
 
     const auditSearchInput = shadow.getElementById('auditSearchInput');
@@ -1179,10 +825,7 @@ class ExcelUploaderPro extends HTMLElement {
         this._auditSearchQuery = e.target.value;
         this._render();
         const restored = this._shadow.getElementById('auditSearchInput');
-        if (restored) {
-          restored.focus();
-          restored.setSelectionRange(pos, pos);
-        }
+        if (restored) { restored.focus(); restored.setSelectionRange(pos, pos); }
       });
     }
 
@@ -1197,26 +840,19 @@ class ExcelUploaderPro extends HTMLElement {
     if (finishBtn) {
       finishBtn.addEventListener('click', () => {
         const stats = this._getAlertStats();
-        if (stats.blockingRows > 0) {
-          this._notify(`🛑 Cannot synchronize: ${stats.blockingRows} row(s) have BLOCKING alerts.`, 'error');
-          return;
-        }
+        if (stats.blockingRows > 0) { this._notify('Cannot synchronize: ' + stats.blockingRows + ' row(s) have BLOCKING alerts.', 'error'); return; }
         if ((stats.preventiveRows > 0 || stats.checkRows > 0) && !this._acknowledgeNonBlocking) {
-          this._notify(`⚠️ Please confirm review of preventive and check alerts before synchronizing.`, 'error');
-          return;
+          this._notify('Please confirm review of preventive and check alerts before synchronizing.', 'error'); return;
         }
-        if (this._rows.length === 0) {
-          this._notify('No active data rows to load.', 'error');
-          return;
-        }
+        if (this._rows.length === 0) { this._notify('No active data rows to load.', 'error'); return; }
 
         const loadId = 'LOAD-' + Math.floor(10000 + Math.random() * 90000);
         const fileSummary = this._filesQueue.length > 0
           ? this._filesQueue.map(f => {
               const activeSheets = (f.sheets || []).filter(s => s.selected).map(s => s.name).join(', ');
-              return `${f.file.name} [Sheets: ${activeSheets || 'None'}] (${f.comment || 'No comment'})`;
+              return f.file.name + ' [Sheets: ' + (activeSheets || 'None') + '] (' + (f.comment || 'No comment') + ')';
             }).join('; ')
-          : `Manual Planning Entry [Strategy: ${this._loadStrategy}]`;
+          : 'Manual Planning Entry [Strategy: ' + this._loadStrategy + ']';
 
         const filesMetadata = this._filesQueue.map(f => ({
           name: f.file.name,
@@ -1230,9 +866,7 @@ class ExcelUploaderPro extends HTMLElement {
         }));
 
         const commentByFileMap = {};
-        this._filesQueue.forEach(f => {
-          commentByFileMap[f.file.name] = f.comment || 'No comment';
-        });
+        this._filesQueue.forEach(f => { commentByFileMap[f.file.name] = f.comment || 'No comment'; });
 
         const snapshotRows = this._rows.map(r => {
           const copy = {
@@ -1249,10 +883,7 @@ class ExcelUploaderPro extends HTMLElement {
         });
 
         const cleanPayloadArray = this._rows.map(r => {
-          const clean = {
-            _loadStrategy: this._loadStrategy,
-            _dspArtifactSync: this._dspArtifactSync
-          };
+          const clean = { _loadStrategy: this._loadStrategy, _dspArtifactSync: this._dspArtifactSync };
           this._requiredColumns.forEach(c => { clean[c] = r[c] ?? ''; });
           return clean;
         });
@@ -1262,13 +893,9 @@ class ExcelUploaderPro extends HTMLElement {
         ).length;
 
         const appliedRulesSnapshot = this._validationRules.filter(r => r.active).map(r => ({
-          id: r.id,
-          col: r.col,
-          severity: r.severity,
-          semaphore: r.semaphore,
-          type: r.type,
+          id: r.id, col: r.col, severity: r.severity, semaphore: r.semaphore, type: r.type,
           scopeFiles: r.scopeFiles || 'ALL',
-          validity: (r.startDate || r.endDate) ? `${r.startDate || 'Any'} to ${r.endDate || 'Any'}` : 'Permanent'
+          validity: (r.startDate || r.endDate) ? (r.startDate || 'Any') + ' to ' + (r.endDate || 'Any') : 'Permanent'
         }));
 
         const auditRecord = {
@@ -1284,7 +911,7 @@ class ExcelUploaderPro extends HTMLElement {
           rows: this._rows.length,
           editsCount: manualEditsCount,
           timestamp: new Date().toLocaleString(),
-          status: stats.preventiveRows > 0 || stats.checkRows > 0 ? `${this._loadStrategy} (Approved Alerts)` : `${this._loadStrategy} Synchronized`,
+          status: stats.preventiveRows > 0 || stats.checkRows > 0 ? this._loadStrategy + ' (Approved Alerts)' : this._loadStrategy + ' Synchronized',
           snapshotRows,
           changeLog: [...this._currentSessionLogs],
           payloadJson: JSON.stringify(cleanPayloadArray, null, 2)
@@ -1294,21 +921,15 @@ class ExcelUploaderPro extends HTMLElement {
         this._saveHistory();
 
         this.dispatchEvent(new CustomEvent('propertiesChanged', {
-          bubbles: true,
-          composed: true,
+          bubbles: true, composed: true,
           detail: { properties: { validatedDataJson: JSON.stringify(cleanPayloadArray) } }
         }));
 
-        this._step = 1;
-        this._filesQueue = [];
-        this._rows = [];
-        this._currentSessionLogs = [];
-        this._acknowledgeNonBlocking = false;
-        this._activeTab = 'monitorTab';
-        this._selectedAuditId = loadId;
+        this._step = 1; this._filesQueue = []; this._rows = []; this._currentSessionLogs = [];
+        this._acknowledgeNonBlocking = false; this._activeTab = 'monitorTab'; this._selectedAuditId = loadId;
         this._syncExportColumnsWithSchema(auditRecord.columns);
         this._auditDetailSubTab = 'dataTab';
-        this._notify(`Load ${loadId} (${this._loadStrategy}) synchronized successfully with SAP Analytics Cloud!`, 'success');
+        this._notify('Load ' + loadId + ' (' + this._loadStrategy + ') synchronized successfully with SAP Analytics Cloud!', 'success');
       });
     }
   }
@@ -1328,62 +949,27 @@ class ExcelUploaderPro extends HTMLElement {
     let desc = (this._newRuleForm.desc || '').trim();
 
     if ((type === 'IN_LIST' || type === 'STARTS_WITH' || type === 'REGEX' || type === 'ASSISTED_CODE') && !param) {
-      this._notify('Please specify validation parameter or assisted code formula.', 'error');
-      return;
+      this._notify('Please specify validation parameter or assisted code formula.', 'error'); return;
     }
+    if (!desc) desc = col + ' rule [' + type + '] ' + param;
 
-    if (!desc) {
-      if (type === 'IN_LIST') desc = `${col} must be in list: ${param}`;
-      else if (type === 'NUMERIC_RANGE') desc = `${col} numeric range ${min !== '' ? '>= ' + min : ''} ${max !== '' ? '<= ' + max : ''}`.trim();
-      else if (type === 'STARTS_WITH') desc = `${col} must start with '${param}'`;
-      else if (type === 'REGEX') desc = `${col} must match regex ${param}`;
-      else if (type === 'UNIQUE') desc = `${col} must contain unique values`;
-      else desc = `Assisted Formula: ${param}`;
-    }
-
-    const newRule = {
-      id: 'RULE-' + Math.floor(1000 + Math.random() * 9000),
-      col,
-      severity,
-      semaphore,
-      type,
-      param,
-      min,
-      max,
-      autoFix,
-      scopeFiles,
-      startDate,
-      endDate,
-      active: true,
-      desc
-    };
-
+    const newRule = { id: 'RULE-' + Math.floor(1000 + Math.random() * 9000), col, severity, semaphore, type, param, min, max, autoFix, scopeFiles, startDate, endDate, active: true, desc };
     this._validationRules.push(newRule);
     this._saveRules();
-    this._logAction('RULE_CREATED', `${col} [${severity} • ${semaphore}]`, `${desc} (Scope: ${scopeFiles})`, '', param || `${min}..${max}` || type);
-    this._newRuleForm.param = '';
-    this._newRuleForm.min = '';
-    this._newRuleForm.max = '';
-    this._newRuleForm.autoFix = '';
-    this._newRuleForm.desc = '';
+    this._logAction('RULE_CREATED', col + ' [' + severity + ' / ' + semaphore + ']', desc + ' (Scope: ' + scopeFiles + ')', '', param || type);
+    Object.assign(this._newRuleForm, { param: '', min: '', max: '', autoFix: '', desc: '' });
     this._showInlineRuleCreator = false;
     this._validateRows();
-    this._notify(`Rule created for column '${col}' (Scope: ${scopeFiles}).`, 'success');
+    this._notify('Rule created for column ' + col + ' (Scope: ' + scopeFiles + ').', 'success');
   }
 
   _applyBulkFill(onlyEmpty) {
-    const col = this._requiredColumns.includes(this._bulkCol)
-      ? this._bulkCol
-      : (this._requiredColumns[0] || 'ID');
+    const col = this._requiredColumns.includes(this._bulkCol) ? this._bulkCol : (this._requiredColumns[0] || 'ID');
     this._bulkCol = col;
     const val = this._bulkVal.trim();
-    if (!col || !val) {
-      this._notify('Enter a value to apply in Bulk Fill.', 'error');
-      return;
-    }
+    if (!col || !val) { this._notify('Enter a value to apply in Bulk Fill.', 'error'); return; }
     let updated = 0;
-    const targetRows = this._getFilteredRows();
-    targetRows.forEach(({ row }) => {
+    this._getFilteredRows().forEach(({ row }) => {
       const current = String(row[col] ?? '').trim();
       if (!onlyEmpty || current === '') {
         if (current !== val) {
@@ -1393,132 +979,82 @@ class ExcelUploaderPro extends HTMLElement {
         }
       }
     });
-    if (updated > 0) {
-      this._logAction(
-        'BULK_FILL',
-        `Column [${col}] (${updated} rows)`,
-        onlyEmpty ? 'Bulk filled empty cells' : 'Bulk overwrote visible cells',
-        onlyEmpty ? '(Empty cells)' : '(Multiple values)',
-        val
-      );
-    }
+    if (updated > 0) this._logAction('BULK_FILL', 'Column [' + col + '] (' + updated + ' rows)', onlyEmpty ? 'Bulk filled empty cells' : 'Bulk overwrote visible cells', onlyEmpty ? '(Empty)' : '(Multiple)', val);
     this._validateRows();
-    this._notify(`Bulk updated ${updated} row(s) in column '${col}'.`, 'success');
+    this._notify('Bulk updated ' + updated + ' row(s) in column ' + col + '.', 'success');
   }
 
   async _handleFilesSelection(fileList) {
-    if (typeof XLSX === 'undefined') {
-      this._notify('Excel engine is still loading...', 'error');
-      return;
-    }
-
+    if (typeof XLSX === 'undefined') { this._notify('Excel engine is still loading...', 'error'); return; }
     const newItemsToParse = [];
     const duplicateNames = [];
-
     for (const newFile of fileList) {
-      const exists = this._filesQueue.some(item => item.file.name.toLowerCase() === newFile.name.toLowerCase());
-      if (exists) {
+      if (this._filesQueue.some(item => item.file.name.toLowerCase() === newFile.name.toLowerCase())) {
         duplicateNames.push(newFile.name);
       } else {
         const ext = (newFile.name.split('.').pop() || '').toUpperCase();
-        const queueItem = {
-          file: newFile,
-          ext,
-          comment: '',
-          _lastLoggedComment: '',
-          sheets: [],
-          sheetCount: 0,
-          rowCount: 0,
-          parsed: false
-        };
+        const queueItem = { file: newFile, ext, comment: '', _lastLoggedComment: '', sheets: [], sheetCount: 0, rowCount: 0, parsed: false };
         this._filesQueue.push(queueItem);
         newItemsToParse.push(queueItem);
-        this._logAction('FILE_UPLOAD', newFile.name, `Workbook loaded (${Math.max(1, Math.round(newFile.size / 1024))} KB, Format: ${ext})`, '', 'QUEUED');
+        this._logAction('FILE_UPLOAD', newFile.name, 'Workbook loaded (' + Math.max(1, Math.round(newFile.size / 1024)) + ' KB, Format: ' + ext + ')', '', 'QUEUED');
       }
     }
-
-    if (newItemsToParse.length > 0) {
-      await this._parseFilesInQueue(newItemsToParse);
-    }
-
-    if (duplicateNames.length > 0) {
-      this._notify(`Skipped duplicate file(s): ${duplicateNames.join(', ')}`, 'error');
-    }
+    if (newItemsToParse.length > 0) await this._parseFilesInQueue(newItemsToParse);
+    if (duplicateNames.length > 0) this._notify('Skipped duplicate file(s): ' + duplicateNames.join(', '), 'error');
   }
 
   async _reparseAllFilesWithNewConfig() {
     if (this._filesQueue.length === 0) return;
-    this._logAction(
-      'PARSE_CONFIG_CHANGED',
-      `Format: ${this._parseConfig.format}, Delimiter: ${this._parseConfig.delimiter === '\t' ? 'TAB' : this._parseConfig.delimiter}`,
-      `Re-parsing workbooks with Header Row #${this._parseConfig.headerRow} and Number Format ${this._parseConfig.numberFormat}`,
-      '',
-      'REPARSED'
-    );
+    this._logAction('PARSE_CONFIG_CHANGED', 'Format: ' + this._parseConfig.format, 'Re-parsing workbooks with Header Row #' + this._parseConfig.headerRow, '', 'REPARSED');
     await this._parseFilesInQueue(this._filesQueue);
     this._notify('All files re-parsed with new settings.', 'success');
   }
 
   _readFileAsArrayBuffer(file) {
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve(e.target.result);
-      reader.onerror = (err) => reject(err);
-      reader.readAsArrayBuffer(file);
+      const r = new FileReader(); r.onload = (e) => resolve(e.target.result); r.onerror = reject; r.readAsArrayBuffer(file);
     });
   }
 
   _readFileAsText(file) {
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve(e.target.result);
-      reader.onerror = (err) => reject(err);
-      reader.readAsText(file, 'utf-8');
+      const r = new FileReader(); r.onload = (e) => resolve(e.target.result); r.onerror = reject; r.readAsText(file, 'utf-8');
     });
   }
 
   _parseDelimitedTextToAOA(text, delimiterSetting) {
-    let sep = delimiterSetting;
-    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim() !== '');
+    const TAB_CH = String.fromCharCode(9);
+    const LF_CH = String.fromCharCode(10);
+    const CR_CH = String.fromCharCode(13);
+    let sep = delimiterSetting === 'TAB' ? TAB_CH : delimiterSetting;
+    const normalized = String(text ?? '').split(CR_CH + LF_CH).join(LF_CH).split(CR_CH).join(LF_CH);
+    const lines = normalized.split(LF_CH).filter(l => l.trim() !== '');
     if (lines.length === 0) return [];
-
     if (sep === 'AUTO') {
-      const sample = lines[0];
-      const counts = {
-        '\t': (sample.match(/\t/g) || []).length,
-        ';': (sample.match(/;/g) || []).length,
-        ',': (sample.match(/,/g) || []).length,
-        '|': (sample.match(/\|/g) || []).length
-      };
+      const s = lines[0];
+      const counts = {};
+      counts[TAB_CH] = s.split(TAB_CH).length - 1;
+      counts[';'] = s.split(';').length - 1;
+      counts[','] = s.split(',').length - 1;
+      counts['|'] = s.split('|').length - 1;
       sep = Object.keys(counts).reduce((a, b) => (counts[a] >= counts[b] ? a : b), ',');
       if (counts[sep] === 0) sep = ',';
     }
-
     return lines.map(line => {
-      const result = [];
-      let cur = '';
-      let inQuotes = false;
+      const res = []; let cur = ''; let inQ = false;
       for (let i = 0; i < line.length; i++) {
         const ch = line[i];
-        if (ch === '"') {
-          inQuotes = !inQuotes;
-        } else if (ch === sep && !inQuotes) {
-          result.push(cur.trim());
-          cur = '';
-        } else {
-          cur += ch;
-        }
+        if (ch === '"') inQ = !inQ;
+        else if (ch === sep && !inQ) { res.push(cur.trim()); cur = ''; }
+        else cur += ch;
       }
-      result.push(cur.trim());
-      return result;
+      res.push(cur.trim());
+      return res;
     });
   }
 
   async _parseFilesInQueue(itemsToParse) {
-    this._isLoading = true;
-    this._loadingText = 'Parsing sheets & data...';
-    this._render();
-
+    this._isLoading = true; this._loadingText = 'Parsing sheets & data...'; this._render();
     let detectedHeaders = [...this._headers];
     const headerIdx = Math.max(0, (this._parseConfig.headerRow || 1) - 1);
 
@@ -1528,111 +1064,40 @@ class ExcelUploaderPro extends HTMLElement {
         (item.sheets || []).forEach(s => { prevSelectionMap[s.name] = s.selected; });
         item.sheets = [];
         let fileRowsCount = 0;
-
         const isTextFile = ['CSV', 'TXT', 'TSV'].includes(item.ext) || this._parseConfig.format === 'CSV_TXT';
+
+        const buildSheetRows = (aoa, sheetName) => {
+          if (aoa.length <= headerIdx) { item.sheets.push({ name: sheetName, selected: false, rows: [] }); return; }
+          const sheetHeaders = (aoa[headerIdx] || []).map(h => String(h ?? '').trim().toUpperCase()).filter(Boolean);
+          if (detectedHeaders.length === 0 && sheetHeaders.length > 0) detectedHeaders = sheetHeaders;
+          const currentHeaders = sheetHeaders.length > 0 ? sheetHeaders : detectedHeaders;
+          const rows = aoa.slice(headerIdx + 1).map(row => {
+            const obj = { _rowNum: 0, _sourceFile: item.file.name + ' [' + sheetName + ']', _fileOwner: item.file.name, _sheetOwner: sheetName, _isManual: false, _editedCols: {}, _checkedRules: {}, _errors: {}, _alerts: {} };
+            currentHeaders.forEach((h, i) => { obj[h] = this._normalizeCellValue(row[i]); });
+            this._requiredColumns.forEach(reqCol => { if (obj[reqCol] === undefined) obj[reqCol] = ''; });
+            return obj;
+          }).filter(r => Object.keys(r).some(k => !k.startsWith('_') && String(r[k]).trim() !== ''));
+          item.sheets.push({ name: sheetName, selected: prevSelectionMap[sheetName] !== undefined ? prevSelectionMap[sheetName] : true, rows });
+          fileRowsCount += rows.length;
+        };
 
         if (isTextFile) {
           const text = await this._readFileAsText(item.file);
-          const aoa = this._parseDelimitedTextToAOA(text, this._parseConfig.delimiter);
-          const sheetName = 'Delimited_Data';
-
-          if (aoa.length > headerIdx) {
-            const sheetHeaders = aoa[headerIdx].map(h => String(h ?? '').trim().toUpperCase()).filter(Boolean);
-            if (detectedHeaders.length === 0 && sheetHeaders.length > 0) {
-              detectedHeaders = sheetHeaders;
-            }
-            const currentHeaders = sheetHeaders.length > 0 ? sheetHeaders : detectedHeaders;
-            const rows = aoa.slice(headerIdx + 1).map(row => {
-              const obj = {
-                _rowNum: 0,
-                _sourceFile: `${item.file.name} [${sheetName}]`,
-                _fileOwner: item.file.name,
-                _sheetOwner: sheetName,
-                _isManual: false,
-                _editedCols: {},
-                _checkedRules: {},
-                _errors: {},
-                _alerts: {}
-              };
-              currentHeaders.forEach((h, i) => {
-                obj[h] = this._normalizeCellValue(row[i]);
-              });
-              this._requiredColumns.forEach(reqCol => {
-                if (obj[reqCol] === undefined) obj[reqCol] = '';
-              });
-              return obj;
-            }).filter(r => Object.keys(r).some(k => !k.startsWith('_') && String(r[k]).trim() !== ''));
-
-            item.sheets.push({
-              name: sheetName,
-              selected: prevSelectionMap[sheetName] !== undefined ? prevSelectionMap[sheetName] : true,
-              rows
-            });
-            fileRowsCount += rows.length;
-          }
+          buildSheetRows(this._parseDelimitedTextToAOA(text, this._parseConfig.delimiter), 'Delimited_Data');
         } else {
           const buffer = await this._readFileAsArrayBuffer(item.file);
-          const data = new Uint8Array(buffer);
-          const wb = XLSX.read(data, { type: 'array' });
-
+          const wb = XLSX.read(new Uint8Array(buffer), { type: 'array' });
           wb.SheetNames.forEach(sheetName => {
-            const ws = wb.Sheets[sheetName];
-            const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
-
-            if (json.length > headerIdx) {
-              const sheetHeaders = (json[headerIdx] || []).map(h => String(h ?? '').trim().toUpperCase()).filter(Boolean);
-              if (detectedHeaders.length === 0 && sheetHeaders.length > 0) {
-                detectedHeaders = sheetHeaders;
-              }
-
-              const currentHeaders = sheetHeaders.length > 0 ? sheetHeaders : detectedHeaders;
-              const rows = json.slice(headerIdx + 1).map((row) => {
-                const sourceLabel = `${item.file.name} [${sheetName}]`;
-                const obj = {
-                  _rowNum: 0,
-                  _sourceFile: sourceLabel,
-                  _fileOwner: item.file.name,
-                  _sheetOwner: sheetName,
-                  _isManual: false,
-                  _editedCols: {},
-                  _checkedRules: {},
-                  _errors: {},
-                  _alerts: {}
-                };
-                currentHeaders.forEach((h, i) => {
-                  obj[h] = this._normalizeCellValue(row[i]);
-                });
-                this._requiredColumns.forEach(reqCol => {
-                  if (obj[reqCol] === undefined) obj[reqCol] = '';
-                });
-                return obj;
-              }).filter(r => Object.keys(r).some(k => !k.startsWith('_') && String(r[k]).trim() !== ''));
-
-              item.sheets.push({
-                name: sheetName,
-                selected: prevSelectionMap[sheetName] !== undefined ? prevSelectionMap[sheetName] : true,
-                rows
-              });
-              fileRowsCount += rows.length;
-            } else {
-              item.sheets.push({
-                name: sheetName,
-                selected: false,
-                rows: []
-              });
-            }
+            buildSheetRows(XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1 }), sheetName);
           });
         }
-
         item.sheetCount = item.sheets.length;
         item.rowCount = fileRowsCount;
         item.parsed = true;
       } catch (err) {
-        console.error(`Error parsing ${item.file.name}:`, err);
-        this._notify(`Error reading ${item.file.name}`, 'error');
+        this._notify('Error reading ' + item.file.name, 'error');
       }
     }
-
     this._headers = detectedHeaders.length > 0 ? detectedHeaders : this._requiredColumns;
     this._syncRowsFromActiveSheets();
     if (this._step === 1 && this._filesQueue.length > 0) this._step = 2;
@@ -1643,176 +1108,100 @@ class ExcelUploaderPro extends HTMLElement {
   _pushAlert(row, col, alertObj) {
     if (!row._alerts[col]) row._alerts[col] = [];
     row._alerts[col].push(alertObj);
-    row._errors[col] = `[${alertObj.severity}] ${alertObj.msg}`;
+    row._errors[col] = '[' + alertObj.severity + '] ' + alertObj.msg;
   }
 
   _validateRows() {
     const activeRules = this._validationRules.filter(r => r.active);
     const todayIso = new Date().toISOString().slice(0, 10);
-
-    const uniqueCols = activeRules.filter(r => r.type === 'UNIQUE').map(r => r.col);
     const valueCountsPerCol = {};
-    uniqueCols.forEach(col => {
-      valueCountsPerCol[col] = {};
-      this._rows.forEach(r => {
-        const val = String(r[col] ?? '').trim();
-        if (val) valueCountsPerCol[col][val] = (valueCountsPerCol[col][val] || 0) + 1;
+    activeRules.filter(r => r.type === 'UNIQUE').forEach(r => {
+      valueCountsPerCol[r.col] = {};
+      this._rows.forEach(row => {
+        const val = String(row[r.col] ?? '').trim();
+        if (val) valueCountsPerCol[r.col][val] = (valueCountsPerCol[r.col][val] || 0) + 1;
       });
     });
 
     this._rows.forEach(row => {
-      row._errors = {};
-      row._alerts = {};
+      row._errors = {}; row._alerts = {};
       if (!row._checkedRules) row._checkedRules = {};
 
       this._requiredColumns.forEach(col => {
         if (row[col] === undefined || String(row[col]).trim() === '') {
-          this._pushAlert(row, col, {
-            ruleId: 'SYS-MANDATORY',
-            severity: 'BLOCKING',
-            semaphore: 'RED',
-            msg: 'Mandatory field',
-            autoFix: ''
-          });
+          this._pushAlert(row, col, { ruleId: 'SYS-MANDATORY', severity: 'BLOCKING', semaphore: 'RED', msg: 'Mandatory field', autoFix: '' });
         }
       });
 
       activeRules.forEach(rule => {
         const col = rule.col;
         if (!this._requiredColumns.includes(col)) return;
-
-        // Check workbook file scope ('ALL' or comma-separated filenames)
         const scope = (rule.scopeFiles || 'ALL').trim();
         if (scope.toUpperCase() !== 'ALL') {
           const owner = String(row._fileOwner || '').trim().toLowerCase();
           const targets = scope.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-          const matchesFile = targets.some(t => owner === t || owner.includes(t));
-          if (!matchesFile) return;
+          if (!targets.some(t => owner === t || owner.includes(t))) return;
         }
-
-        // Check temporal validity window (YYYY-MM-DD comparison)
         if (rule.startDate && todayIso < rule.startDate) return;
         if (rule.endDate && todayIso > rule.endDate) return;
 
         const rawVal = String(row[col] ?? '').trim();
         if (!rawVal && rule.type !== 'ASSISTED_CODE') return;
-
         const severity = rule.severity || 'BLOCKING';
         const semaphore = rule.semaphore || (severity === 'BLOCKING' ? 'RED' : (severity === 'PREVENTIVE' ? 'AMBER' : (severity === 'CHECK' ? 'PURPLE' : 'BLUE')));
-        const checkKey = `${col}__${rule.id}`;
-        if ((severity === 'CHECK' || severity === 'PREVENTIVE') && row._checkedRules[checkKey]) {
-          return;
-        }
+        if ((severity === 'CHECK' || severity === 'PREVENTIVE') && row._checkedRules[col + '__' + rule.id]) return;
 
         let failed = false;
         let failMsg = rule.desc || 'Validation failed';
 
-        if (rule.type === 'UNIQUE') {
-          if (rawVal && valueCountsPerCol[col] && valueCountsPerCol[col][rawVal] > 1) {
-            failed = true;
-            failMsg = 'Duplicate value not allowed';
-          }
+        if (rule.type === 'UNIQUE' && rawVal && valueCountsPerCol[col] && valueCountsPerCol[col][rawVal] > 1) {
+          failed = true; failMsg = 'Duplicate value not allowed';
         } else if (rule.type === 'IN_LIST') {
           const allowed = rule.param.split(',').map(s => s.trim()).filter(Boolean);
-          if (allowed.length > 0 && !allowed.includes(rawVal)) {
-            failed = true;
-            failMsg = `Allowed: ${allowed.join(', ')}`;
-          }
+          if (allowed.length > 0 && !allowed.includes(rawVal)) { failed = true; failMsg = 'Allowed: ' + allowed.join(', '); }
         } else if (rule.type === 'NUMERIC_RANGE') {
           const num = Number(rawVal);
-          if (isNaN(num)) {
-            failed = true;
-            failMsg = 'Must be numeric';
-          } else {
-            if (rule.min !== '' && !isNaN(Number(rule.min)) && num < Number(rule.min)) {
-              failed = true;
-              failMsg = `Min threshold: ${rule.min}`;
-            }
-            if (rule.max !== '' && !isNaN(Number(rule.max)) && num > Number(rule.max)) {
-              failed = true;
-              failMsg = `Max threshold: ${rule.max}`;
-            }
+          if (isNaN(num)) { failed = true; failMsg = 'Must be numeric'; }
+          else {
+            if (rule.min !== '' && !isNaN(Number(rule.min)) && num < Number(rule.min)) { failed = true; failMsg = 'Min threshold: ' + rule.min; }
+            if (rule.max !== '' && !isNaN(Number(rule.max)) && num > Number(rule.max)) { failed = true; failMsg = 'Max threshold: ' + rule.max; }
           }
-        } else if (rule.type === 'STARTS_WITH') {
-          if (!rawVal.toUpperCase().startsWith(rule.param.toUpperCase())) {
-            failed = true;
-            failMsg = `Must start with '${rule.param}'`;
-          }
+        } else if (rule.type === 'STARTS_WITH' && !rawVal.toUpperCase().startsWith(rule.param.toUpperCase())) {
+          failed = true; failMsg = 'Must start with ' + rule.param;
         } else if (rule.type === 'REGEX') {
-          try {
-            const re = new RegExp(rule.param);
-            if (!re.test(rawVal)) {
-              failed = true;
-              failMsg = `Invalid pattern (${rule.param})`;
-            }
-          } catch (e) {}
+          try { if (!(new RegExp(rule.param)).test(rawVal)) { failed = true; failMsg = 'Invalid pattern (' + rule.param + ')'; } } catch (e) {}
         } else if (rule.type === 'ASSISTED_CODE') {
-          try {
-            const isValid = Boolean(this._evalAssistedCode(rule.param, row, col));
-            if (!isValid) {
-              failed = true;
-              failMsg = rule.desc || `Formula failed: ${rule.param}`;
-            }
-          } catch (e) {
-            failed = true;
-            failMsg = `Code syntax error: ${e.message}`;
-          }
+          try { if (!this._evalAssistedCode(rule.param, row, col)) { failed = true; failMsg = rule.desc || ('Formula failed: ' + rule.param); } }
+          catch (e) { failed = true; failMsg = 'Code syntax error: ' + e.message; }
         }
-
-        if (failed) {
-          this._pushAlert(row, col, {
-            ruleId: rule.id,
-            severity,
-            semaphore,
-            msg: failMsg,
-            autoFix: rule.autoFix || ''
-          });
-        }
+        if (failed) this._pushAlert(row, col, { ruleId: rule.id, severity, semaphore, msg: failMsg, autoFix: rule.autoFix || '' });
       });
     });
   }
 
   _getRowSeverities(row) {
     const set = new Set();
-    Object.values(row._alerts || {}).forEach(arr => {
-      (arr || []).forEach(a => set.add(a.severity));
-    });
+    Object.values(row._alerts || {}).forEach(arr => (arr || []).forEach(a => set.add(a.severity)));
     return set;
   }
 
   _getAlertStats() {
-    let blockingRows = 0;
-    let preventiveRows = 0;
-    let checkRows = 0;
-    let infoRows = 0;
-    let fixableCells = 0;
-
+    let blockingRows = 0, preventiveRows = 0, checkRows = 0, infoRows = 0, fixableCells = 0;
     this._rows.forEach(r => {
       const sevs = this._getRowSeverities(r);
       if (sevs.has('BLOCKING')) blockingRows++;
       if (sevs.has('PREVENTIVE')) preventiveRows++;
       if (sevs.has('CHECK')) checkRows++;
       if (sevs.has('INFO')) infoRows++;
-
-      Object.values(r._alerts || {}).forEach(arr => {
-        if ((arr || []).some(a => a.autoFix)) fixableCells++;
-      });
+      Object.values(r._alerts || {}).forEach(arr => { if ((arr || []).some(a => a.autoFix)) fixableCells++; });
     });
-
     const cleanRows = this._rows.filter(r => this._getRowSeverities(r).size === 0).length;
     return { blockingRows, preventiveRows, checkRows, infoRows, cleanRows, fixableCells };
   }
 
   _downloadTemplate() {
     if (typeof XLSX === 'undefined') return;
-    const sampleRow = this._requiredColumns.map(col => {
-      if (col === 'ID') return 'PLN_1001';
-      if (col === 'COMPANY') return '1000';
-      if (col === 'COSTCENTER') return 'CC_IT_01';
-      if (col === 'H1') return '25000';
-      if (col === 'CAPITALIZED') return 'Y';
-      return 'SAMPLE_DESC';
-    });
+    const sampleRow = this._requiredColumns.map(col => col === 'ID' ? 'PLN_1001' : (col === 'COMPANY' ? '1000' : (col === 'COSTCENTER' ? 'CC_IT_01' : (col === 'H1' ? '25000' : (col === 'CAPITALIZED' ? 'Y' : 'SAMPLE_DESC')))));
     const ws = XLSX.utils.aoa_to_sheet([this._requiredColumns, sampleRow]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Planning_Template');
@@ -1823,10 +1212,7 @@ class ExcelUploaderPro extends HTMLElement {
   _exportCleanExcel() {
     if (typeof XLSX === 'undefined' || this._rows.length === 0) return;
     const header = ['SOURCE_FILE', ...this._requiredColumns];
-    const data = this._rows.map(r => [
-      r._sourceFile,
-      ...this._requiredColumns.map(c => r[c] ?? '')
-    ]);
+    const data = this._rows.map(r => [r._sourceFile, ...this._requiredColumns.map(c => r[c] ?? '')]);
     const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Consolidated_Data');
@@ -1834,16 +1220,27 @@ class ExcelUploaderPro extends HTMLElement {
     this._notify('Consolidated data exported to Excel.', 'success');
   }
 
-  _downloadConfiguredAuditReport(recordsList, filePrefix) {
-    if (!recordsList || recordsList.length === 0) {
-      this._notify('No audit records available to download.', 'error');
-      return;
-    }
-
+  _downloadConfiguredAuditReport(recordsList, filePrefix, forcedFormat = null) {
+    const TAB_CH = String.fromCharCode(9);
+    const LF_CH = String.fromCharCode(10);
     const cfg = this._auditExportConfig;
-    const chosenCols = cfg.selectedCols && cfg.selectedCols.length > 0
-      ? cfg.selectedCols
-      : this._requiredColumns.slice(0, cfg.numCols || this._requiredColumns.length);
+    const format = forcedFormat || cfg.format || 'XLSX';
+    const chosenCols = cfg.selectedCols && cfg.selectedCols.length > 0 ? cfg.selectedCols : this._requiredColumns.slice(0, cfg.numCols || this._requiredColumns.length);
+
+    let effectiveRecords = recordsList && recordsList.length > 0 ? recordsList : [];
+    if (effectiveRecords.length === 0 && this._rows.length > 0) {
+      effectiveRecords = [{
+        id: 'LIVE-DRAFT',
+        loadStrategy: this._loadStrategy,
+        semaphoreStatus: 'DRAFT',
+        timestamp: new Date().toLocaleString(),
+        user: this._currentUser,
+        file: 'Current Uncommitted Session',
+        snapshotRows: this._rows,
+        changeLog: this._currentSessionLogs,
+        filesDetails: []
+      }];
+    }
 
     const baseHeaders = ['LOAD_ID', 'LOAD_STRATEGY', 'SEMAPHORE_STATUS', 'TIMESTAMP', 'SAP_USER', 'ROW_NUM', 'SOURCE_WORKBOOK_SHEET'];
     if (cfg.includeComments) baseHeaders.push('BUSINESS_COMMENTS');
@@ -1853,162 +1250,123 @@ class ExcelUploaderPro extends HTMLElement {
     const dataRows = [];
     const allChangeLogs = [];
 
-    recordsList.forEach(rec => {
-      const snap = rec.snapshotRows || [];
-      snap.forEach(r => {
+    effectiveRecords.forEach(rec => {
+      (rec.snapshotRows || []).forEach(r => {
         const editedCols = r._editedCols || {};
-        const editSummary = Object.keys(editedCols)
-          .map(c => `${c}: '${editedCols[c].from}' -> '${editedCols[c].to}'`)
-          .join(' | ');
-        const stateLabel = r._isManual
-          ? 'NEW / CLONED IN WIDGET'
-          : (Object.keys(editedCols).length > 0 ? `EDITED (${Object.keys(editedCols).length} cols)` : 'ORIGINAL EXCEL');
-
-        const rowArr = [
-          rec.id,
-          rec.loadStrategy || 'FULL',
-          rec.semaphoreStatus || 'GREEN',
-          rec.timestamp,
-          rec.user,
-          r._rowNum,
-          r._sourceFile
-        ];
-
+        const editSummary = Object.keys(editedCols).map(c => c + ': ' + editedCols[c].from + ' -> ' + editedCols[c].to).join(' | ');
+        const stateLabel = r._isManual ? 'NEW / CLONED IN WIDGET' : (Object.keys(editedCols).length > 0 ? 'EDITED (' + Object.keys(editedCols).length + ' cols)' : 'ORIGINAL EXCEL');
+        const rowArr = [rec.id, rec.loadStrategy || 'FULL', rec.semaphoreStatus || 'GREEN', rec.timestamp, rec.user, r._rowNum, r._sourceFile];
         if (cfg.includeComments) rowArr.push(r._fileComment || rec.file || 'No comment');
         if (cfg.includeAuditDetail) rowArr.push(stateLabel, editSummary || 'No changes');
-
-        chosenCols.forEach(col => { rowArr.push(r[col] ?? ''); });
+        chosenCols.forEach(col => rowArr.push(r[col] ?? ''));
         dataRows.push(rowArr);
       });
-
       if (cfg.includeAuditDetail && rec.changeLog) {
-        rec.changeLog.forEach(l => {
-          allChangeLogs.push([rec.id, rec.loadStrategy || 'FULL', rec.timestamp, rec.user, l.time, l.type, l.target, l.detail, l.oldVal, l.newVal]);
-        });
+        rec.changeLog.forEach(l => allChangeLogs.push([rec.id, rec.loadStrategy || 'FULL', rec.timestamp, rec.user, l.time, l.type, l.target, l.detail, l.oldVal, l.newVal]));
       }
     });
 
-    if (cfg.format === 'CSV' || typeof XLSX === 'undefined') {
-      const escapeCsv = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-      let csvContent = finalHeaders.map(escapeCsv).join(',') + '\n';
-      dataRows.forEach(r => { csvContent += r.map(escapeCsv).join(',') + '\n'; });
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    if (format === 'CSV' || format === 'TXT' || typeof XLSX === 'undefined') {
+      const isTxt = format === 'TXT';
+      const sep = isTxt ? TAB_CH : ',';
+      const ext = isTxt ? 'txt' : 'csv';
+      const fmtCell = (v) => isTxt ? String(v ?? '').replace(/\s+/g, ' ') : '"' + String(v ?? '').replace(/"/g, '""') + '"';
+
+      let content = finalHeaders.map(fmtCell).join(sep) + LF_CH;
+      dataRows.forEach(r => { content += r.map(fmtCell).join(sep) + LF_CH; });
+
+      if (cfg.includeAuditDetail && allChangeLogs.length > 0) {
+        content += LF_CH + '--- AUDIT ACTIVITY LOG ---' + LF_CH;
+        const logHeaders = ['LOAD_ID', 'LOAD_STRATEGY', 'LOAD_DATE', 'SAP_USER', 'EVENT_TIME', 'ACTION_TYPE', 'TARGET', 'DESCRIPTION', 'PREVIOUS_VALUE', 'NEW_VALUE'];
+        content += logHeaders.map(fmtCell).join(sep) + LF_CH;
+        allChangeLogs.forEach(l => { content += l.map(fmtCell).join(sep) + LF_CH; });
+      }
+
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${filePrefix}_${chosenCols.length}Cols.csv`;
+      a.download = filePrefix + '_' + chosenCols.length + 'Cols.' + ext;
       a.click();
       URL.revokeObjectURL(url);
-      this._notify('Audit report downloaded as CSV.', 'success');
+      this._notify('Audit report exported as .' + ext.toUpperCase() + ' (' + chosenCols.length + ' columns).', 'success');
       return;
     }
 
     const wb = XLSX.utils.book_new();
-    const wsData = XLSX.utils.aoa_to_sheet([finalHeaders, ...dataRows]);
-    XLSX.utils.book_append_sheet(wb, wsData, 'Audit_Snapshot_Data');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([finalHeaders, ...dataRows]), 'Audit_Snapshot_Data');
 
     if (cfg.includeComments) {
       const filesHeader = ['LOAD_ID', 'LOAD_STRATEGY', 'TIMESTAMP', 'WORKBOOK_NAME', 'SIZE_KB', 'SELECTED_SHEETS', 'COMMITTED_ROWS', 'BUSINESS_COMMENT'];
       const filesRows = [];
-      recordsList.forEach(rec => {
-        (rec.filesDetails || []).forEach(f => {
-          filesRows.push([
-            rec.id,
-            rec.strategy || rec.loadStrategy || 'FULL',
-            rec.timestamp,
-            f.name,
-            f.sizeKB || 1,
-            (f.selectedSheetNames || []).join(', '),
-            f.rows,
-            f.comment || 'No comment'
-          ]);
-        });
+      effectiveRecords.forEach(rec => {
+        (rec.filesDetails || []).forEach(f => filesRows.push([rec.id, rec.strategy || rec.loadStrategy || 'FULL', rec.timestamp, f.name, f.sizeKB || 1, (f.selectedSheetNames || []).join(', '), f.rows, f.comment || 'No comment']));
       });
-      if (filesRows.length > 0) {
-        const wsFiles = XLSX.utils.aoa_to_sheet([filesHeader, ...filesRows]);
-        XLSX.utils.book_append_sheet(wb, wsFiles, 'Workbooks_&_Comments');
-      }
+      if (filesRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([filesHeader, ...filesRows]), 'Workbooks_&_Comments');
     }
 
     if (cfg.includeAuditDetail && allChangeLogs.length > 0) {
       const logHeader = ['LOAD_ID', 'LOAD_STRATEGY', 'LOAD_DATE', 'SAP_USER', 'EVENT_TIME', 'ACTION_TYPE', 'TARGET', 'DESCRIPTION', 'PREVIOUS_VALUE', 'NEW_VALUE'];
-      const wsLog = XLSX.utils.aoa_to_sheet([logHeader, ...allChangeLogs]);
-      XLSX.utils.book_append_sheet(wb, wsLog, 'Audit_Activity_Log');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([logHeader, ...allChangeLogs]), 'Audit_Activity_Log');
     }
 
-    XLSX.writeFile(wb, `${filePrefix}_${chosenCols.length}Cols.xlsx`);
-    this._notify('Configurable Audit Report exported successfully.', 'success');
+    XLSX.writeFile(wb, filePrefix + '_' + chosenCols.length + 'Cols.xlsx');
+    this._notify('Audit Report exported as .XLSX (' + chosenCols.length + ' columns).', 'success');
   }
 
   _exportAuditRecordJson(rec) {
     if (!rec) return;
     const blob = new Blob([JSON.stringify(rec, null, 2)], { type: 'application/json;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${rec.id}_Audit_Certificate.json`;
-    a.click();
+    const a = document.createElement('a'); a.href = url; a.download = rec.id + '_Audit_Certificate.json'; a.click();
     URL.revokeObjectURL(url);
-    this._notify(`Audit certificate ${rec.id} downloaded.`, 'success');
+    this._notify('Audit certificate ' + rec.id + ' downloaded.', 'success');
   }
 
   _exportErrorLog() {
-    let csv = 'SourceFile,Row,ID,Column,Alert Severity,Semaphore,Rule ID,Alert Description\n';
+    const LF_CH = String.fromCharCode(10);
+    let csv = 'SourceFile,Row,ID,Column,Alert Severity,Semaphore,Rule ID,Alert Description' + LF_CH;
     let count = 0;
     this._rows.forEach(r => {
       Object.keys(r._alerts || {}).forEach(col => {
         (r._alerts[col] || []).forEach(a => {
           count++;
-          csv += `"${this._esc(r._sourceFile)}",${r._rowNum},"${this._esc(r.ID || '')}","${col}","${a.severity}","${a.semaphore}","${a.ruleId}","${this._esc(a.msg)}"\n`;
+          csv += '"' + this._esc(r._sourceFile) + '",' + r._rowNum + ',"' + this._esc(r.ID || '') + '","' + col + '","' + a.severity + '","' + a.semaphore + '","' + a.ruleId + '","' + this._esc(a.msg) + '"' + LF_CH;
         });
       });
     });
     if (count === 0) return;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'SAC_Validation_Alerts_Log.csv';
-    a.click();
+    const a = document.createElement('a'); a.href = url; a.download = 'SAC_Validation_Alerts_Log.csv'; a.click();
     URL.revokeObjectURL(url);
   }
 
   _getFilteredRows() {
     const q = this._searchQuery.trim().toLowerCase();
-    return this._rows
-      .map((row, origIdx) => ({ row, origIdx }))
-      .filter(({ row }) => {
-        const sevs = this._getRowSeverities(row);
-        if (this._issueFilter === 'correct' && sevs.size > 0) return false;
-        if (['BLOCKING', 'PREVENTIVE', 'CHECK', 'INFO'].includes(this._issueFilter) && !sevs.has(this._issueFilter)) {
-          return false;
-        }
-        if (q) {
-          const matchSource = String(row._sourceFile ?? '').toLowerCase().includes(q);
-          const matchCols = this._requiredColumns.some(col =>
-            String(row[col] ?? '').toLowerCase().includes(q)
-          );
-          return matchSource || matchCols;
-        }
-        return true;
-      });
+    return this._rows.map((row, origIdx) => ({ row, origIdx })).filter(({ row }) => {
+      const sevs = this._getRowSeverities(row);
+      if (this._issueFilter === 'correct' && sevs.size > 0) return false;
+      if (['BLOCKING', 'PREVENTIVE', 'CHECK', 'INFO'].includes(this._issueFilter) && !sevs.has(this._issueFilter)) return false;
+      if (q) {
+        return String(row._sourceFile ?? '').toLowerCase().includes(q) || this._requiredColumns.some(col => String(row[col] ?? '').toLowerCase().includes(q));
+      }
+      return true;
+    });
   }
 
   _renderSemaphoreDot(sem) {
-    let bg = '#107E3E'; // Green
-    if (sem === 'RED') bg = '#BB0000';
-    else if (sem === 'AMBER') bg = '#E9730C';
-    else if (sem === 'PURPLE') bg = '#6D28D9';
-    else if (sem === 'BLUE') bg = '#0070F2';
-    return `<span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${bg}; margin-right:4px; box-shadow:0 0 4px ${bg};" title="Semaphore: ${sem}"></span>`;
+    const colors = { RED: '#BB0000', AMBER: '#E9730C', PURPLE: '#6D28D9', BLUE: '#0070F2', GREEN: '#107E3E' };
+    const bg = colors[sem] || '#107E3E';
+    return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + bg + ';margin-right:4px;box-shadow:0 0 4px ' + bg + ';" title="Semaphore: ' + sem + '"></span>';
   }
 
   _renderSeverityBadge(sev, sem) {
     const dot = this._renderSemaphoreDot(sem);
-    if (sev === 'BLOCKING') return `<span class="sev-badge sev-blocking">${dot} Blocking</span>`;
-    if (sev === 'PREVENTIVE') return `<span class="sev-badge sev-preventive">${dot} Preventive</span>`;
-    if (sev === 'CHECK') return `<span class="sev-badge sev-check">${dot} Check</span>`;
-    return `<span class="sev-badge sev-info">${dot} Info</span>`;
+    if (sev === 'BLOCKING') return '<span class="sev-badge sev-blocking">' + dot + ' Blocking</span>';
+    if (sev === 'PREVENTIVE') return '<span class="sev-badge sev-preventive">' + dot + ' Preventive</span>';
+    if (sev === 'CHECK') return '<span class="sev-badge sev-check">' + dot + ' Check</span>';
+    return '<span class="sev-badge sev-info">' + dot + ' Info</span>';
   }
 
   _renderHelpModal() {
@@ -2016,44 +1374,32 @@ class ExcelUploaderPro extends HTMLElement {
     return `
       <div class="help-modal-overlay">
         <div class="help-modal-card">
-          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #D9E0E6; padding-bottom:12px; margin-bottom:14px;">
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span style="background:#0070F2; color:#FFF; width:28px; height:28px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-weight:800; font-size:15px;">?</span>
+          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #D9E0E6;padding-bottom:12px;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="background:#0070F2;color:#FFF;width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:800;">?</span>
               <div>
-                <h3 style="margin:0; color:#1D2D3E; font-size:16px;">Interactive Help Guide — Excel Planning Uploader Pro</h3>
-                <span style="font-size:11px; color:#556B82;">Full/Delta Load, Sheet Selector, Scoped Rules, Semaphores & Audit Monitor</span>
+                <h3 style="margin:0;color:#1D2D3E;font-size:16px;">📘 Interactive Help Guide — Excel Planning Uploader Pro</h3>
+                <span style="font-size:11px;color:#556B82;">Full/Delta Load, Sheet Selector, Scoped Rules, Semaphores & Multi-Format Audit Exports</span>
               </div>
             </div>
             <button class="btn" id="closeHelpModalBtn" type="button">✕ Close Help</button>
           </div>
-
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; max-height:420px; overflow:auto; padding-right:4px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-height:420px;overflow:auto;">
             <div class="help-step-box">
-              <div class="help-step-title">1️⃣ Full vs. Delta Load & Formats</div>
-              <p style="margin:4px 0 0 0; font-size:12px; color:#32363A; line-height:1.45;">
-                Select your load strategy using the visual cards (<strong>FULL LOAD</strong> for complete model replacement or <strong>DELTA LOAD</strong> for incremental adjustments). Drag & drop multiple Excel/CSV files, and configure delimiters & number formatting.
-              </p>
+              <div class="help-step-title">🔄 1. Full vs. Delta Load & File Formats</div>
+              <p style="margin:4px 0 0;font-size:12px;line-height:1.45;">Select <strong>FULL LOAD</strong> (complete replacement) or <strong>DELTA LOAD</strong> (incremental adjustments). Drag & drop multiple Excel/CSV/TXT files and configure delimiters and European decimals.</p>
             </div>
-
             <div class="help-step-box">
-              <div class="help-step-title">2️⃣ Sheet Selector & Business Comments</div>
-              <p style="margin:4px 0 0 0; font-size:12px; color:#32363A; line-height:1.45;">
-                In Step 2, check or uncheck which individual sheets inside each workbook to consolidate, add business comments per file, and manage the required columns in your unified planning model.
-              </p>
+              <div class="help-step-title">📑 2. Sheet Selector & Business Comments</div>
+              <p style="margin:4px 0 0;font-size:12px;line-height:1.45;">In Step 2, check/uncheck which individual sheets (tabs) inside each workbook to consolidate, attach business audit comments, and add/remove model columns.</p>
             </div>
-
             <div class="help-step-box">
-              <div class="help-step-title">3️⃣ Rules, Semaphores, File Scope & Temporal Validity</div>
-              <p style="margin:4px 0 0 0; font-size:12px; color:#32363A; line-height:1.45;">
-                Create validation rules with configurable color semaphores (🟢🟡🔴🟣), clone rules (`📋`), restrict rules to specific workbook names (`ALL` or specific files) or date validity windows (`Start Date` / `End Date`), and apply <strong>Assisted Code Auto-Fix</strong> (`✨`).
-              </p>
+              <div class="help-step-title">🚦 3. Semaphores, File Scope & Temporal Rules</div>
+              <p style="margin:4px 0 0;font-size:12px;line-height:1.45;">Assign color semaphores (🟢🟡🔴🟣), clone rules (<strong>📋 Clone</strong>), target specific workbooks (<strong>ALL</strong> or filenames), set validity dates, and run <strong>Assisted Code Auto-Fix</strong> (<strong>✨</strong>).</p>
             </div>
-
             <div class="help-step-box">
-              <div class="help-step-title">4️⃣ Audit Monitor & Custom Exports</div>
-              <p style="margin:4px 0 0 0; font-size:12px; color:#32363A; line-height:1.45;">
-                Click any load execution in the <strong>Audit Monitor</strong> to inspect committed snapshots, load strategies, active rules, and cell-by-cell modifications. Use <strong>⚙️ Configure & Download Audit</strong> to select exact column counts, comments, and audit trail details.
-              </p>
+              <div class="help-step-title">🛡️ 4. Audit Monitor & XLSX / CSV / TXT Exports</div>
+              <p style="margin:4px 0 0;font-size:12px;line-height:1.45;">In <strong>🛡️ Audit Monitor</strong>, export directly to <strong>.XLSX</strong>, <strong>.CSV</strong>, or <strong>.TXT</strong>, or open <strong>⚙️ Configure Export</strong> to pick exact column counts, comments, and cell modification logs.</p>
             </div>
           </div>
         </div>
@@ -2065,50 +1411,44 @@ class ExcelUploaderPro extends HTMLElement {
     if (!this._auditExportConfig.open) return '';
     const cfg = this._auditExportConfig;
     return `
-      <div style="background:#F0F6FF; border:1px solid #0070F2; border-radius:8px; padding:14px 16px; margin-bottom:14px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
-          <div style="font-weight:800; color:#005CB9; font-size:13px;">
-            ⚙️ Configure Audit Download ${isSingleRecord ? `(Load ${this._esc(this._selectedAuditId)})` : '(Global History)'}
+      <div style="background:#F0F6FF;border:1px solid #0070F2;border-radius:8px;padding:14px 16px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
+          <div style="font-weight:800;color:#005CB9;font-size:13px;">
+            ⚙️ Custom Audit Export Configuration ${isSingleRecord ? '(Load ' + this._esc(this._selectedAuditId) + ')' : '(Global Audit Log)'}
           </div>
-          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <div>
-              <label style="font-size:10px; font-weight:700; color:#556B82; margin-right:4px;">NUMBER OF COLUMNS (1 - ${availableCols.length}):</label>
-              <input type="number" id="auditNumColsInp" class="input-std" style="width:58px; font-weight:700;" min="1" max="${availableCols.length}" value="${cfg.numCols}" />
+              <label style="font-size:10px;font-weight:700;color:#556B82;margin-right:4px;">COLUMNS COUNT (1 - ${availableCols.length}):</label>
+              <input type="number" id="auditNumColsInp" class="input-std" style="width:56px;font-weight:700;" min="1" max="${availableCols.length}" value="${cfg.numCols}" />
             </div>
             <div>
-              <label style="font-size:10px; font-weight:700; color:#556B82; margin-right:4px;">FORMAT:</label>
+              <label style="font-size:10px;font-weight:700;color:#556B82;margin-right:4px;">EXPORT FORMAT:</label>
               <select id="auditExpFormatSel" class="input-std">
-                <option value="XLSX" ${cfg.format === 'XLSX' ? 'selected' : ''}>Excel Workbook (.xlsx)</option>
-                <option value="CSV" ${cfg.format === 'CSV' ? 'selected' : ''}>CSV Flat File (.csv)</option>
+                <option value="XLSX" ${cfg.format === 'XLSX' ? 'selected' : ''}>📊 Excel Workbook (.xlsx)</option>
+                <option value="CSV" ${cfg.format === 'CSV' ? 'selected' : ''}>📄 CSV Comma-Separated (.csv)</option>
+                <option value="TXT" ${cfg.format === 'TXT' ? 'selected' : ''}>📝 Text Tab-Delimited (.txt)</option>
               </select>
             </div>
             <button class="btn btn-success" id="runConfiguredAuditDownloadBtn" type="button">
-              📥 Download Configured Report (${cfg.selectedCols.length} cols)
+              📥 Download Custom Audit (${cfg.selectedCols.length} cols • .${cfg.format})
             </button>
           </div>
         </div>
-
-        <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center; padding-top:8px; border-top:1px dashed #B3D4FF; margin-bottom:10px;">
-          <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:#1D2D3E; cursor:pointer;">
-            <input type="checkbox" id="auditIncCommentsChk" ${cfg.includeComments ? 'checked' : ''} style="cursor:pointer; width:15px; height:15px;" />
-            <span>💬 Include Business Comments & File Metadata</span>
+        <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;padding-top:8px;border-top:1px dashed #B3D4FF;margin-bottom:10px;">
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#1D2D3E;cursor:pointer;">
+            <input type="checkbox" id="auditIncCommentsChk" ${cfg.includeComments ? 'checked' : ''} />
+            <span>💬 Include Business Comments & Workbook Metadata</span>
           </label>
-          <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:#1D2D3E; cursor:pointer;">
-            <input type="checkbox" id="auditIncDetailChk" ${cfg.includeAuditDetail ? 'checked' : ''} style="cursor:pointer; width:15px; height:15px;" />
-            <span>🛠️ Include Audit Trail (Traceability State, Previous Values & Change Log)</span>
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#1D2D3E;cursor:pointer;">
+            <input type="checkbox" id="auditIncDetailChk" ${cfg.includeAuditDetail ? 'checked' : ''} />
+            <span>🛠️ Include Full Audit Trail (Row State, Previous Values & Activity Log)</span>
           </label>
         </div>
-
-        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-          <span style="font-size:11px; font-weight:700; color:#556B82; margin-right:4px;">Selected columns (${cfg.selectedCols.length}/${availableCols.length}):</span>
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
+          <span style="font-size:11px;font-weight:700;color:#556B82;margin-right:4px;">Selected Columns (${cfg.selectedCols.length}/${availableCols.length}):</span>
           ${availableCols.map(col => {
             const isChecked = cfg.selectedCols.includes(col);
-            return `
-              <label class="sheet-pill-chk ${isChecked ? 'sheet-active' : ''}">
-                <input type="checkbox" class="audit-exp-col-chk" data-col="${this._esc(col)}" ${isChecked ? 'checked' : ''} style="margin:0; cursor:pointer;" />
-                <span>${this._esc(col)}</span>
-              </label>
-            `;
+            return '<label class="sheet-pill-chk ' + (isChecked ? 'sheet-active' : '') + '"><input type="checkbox" class="audit-exp-col-chk" data-col="' + this._esc(col) + '" ' + (isChecked ? 'checked' : '') + ' style="margin:0;" /><span>' + this._esc(col) + '</span></label>';
           }).join('')}
         </div>
       </div>
@@ -2116,54 +1456,45 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   _renderRuleCreatorForm() {
-    const t = this._newRuleForm.type;
-    const sev = this._newRuleForm.severity;
-    const sem = this._newRuleForm.semaphore;
+    const t = this._newRuleForm.type, sev = this._newRuleForm.severity, sem = this._newRuleForm.semaphore;
     const loadedFileNames = this._filesQueue.map(f => f.file.name);
-
     return `
-      <div style="background:#F8FAFC; border:1px solid #B3D4FF; border-radius:8px; padding:16px; margin-top:10px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
-          <div style="font-weight:800; color:#005CB9; font-size:13px;">➕ Create Validation Rule, Semaphore, Workbook Scope & Temporal Validity</div>
-          <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-            <span style="font-size:11px; font-weight:700; color:#556B82;">💻 1-Click Assisted Code Templates:</span>
-            <button class="icon-btn assisted-snippet-btn" data-preset="cc_company_block" type="button">🛑 Company/CC Cross-Check</button>
-            <button class="icon-btn assisted-snippet-btn" data-preset="budget_prev" type="button">⚠️ Budget Threshold</button>
-            <button class="icon-btn assisted-snippet-btn" data-preset="capex_check" type="button">🔎 CAPEX Check</button>
-            <button class="icon-btn assisted-snippet-btn" data-preset="upper_info" type="button">ℹ️ Uppercase Info</button>
+      <div style="background:#F8FAFC;border:1px solid #B3D4FF;border-radius:8px;padding:16px;margin-top:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+          <div style="font-weight:800;color:#005CB9;font-size:13px;">➕ Create Validation Rule, Semaphore, Workbook Scope & Temporal Validity</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <span style="font-size:11px;font-weight:700;color:#556B82;">💻 1-Click Templates:</span>
+            <button class="icon-btn assisted-snippet-btn" data-preset="cc_company_block" type="button">🛑 Company/CC</button>
+            <button class="icon-btn assisted-snippet-btn" data-preset="budget_prev" type="button">⚠️ Budget</button>
+            <button class="icon-btn assisted-snippet-btn" data-preset="capex_check" type="button">🔎 CAPEX</button>
+            <button class="icon-btn assisted-snippet-btn" data-preset="upper_info" type="button">ℹ️ Uppercase</button>
           </div>
         </div>
-
-        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-bottom:10px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:10px;">
           <div>
-            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">COLUMN</label>
-            <select id="ruleColSel" class="input-std" style="width:100%;">
-              ${this._requiredColumns.map(c => `<option value="${this._esc(c)}" ${this._newRuleForm.col === c ? 'selected' : ''}>${this._esc(c)}</option>`).join('')}
-            </select>
+            <label style="display:block;font-size:10px;font-weight:700;color:#556B82;margin-bottom:3px;">🧱 COLUMN</label>
+            <select id="ruleColSel" class="input-std" style="width:100%;">${this._requiredColumns.map(c => '<option value="' + this._esc(c) + '" ' + (this._newRuleForm.col === c ? 'selected' : '') + '>' + this._esc(c) + '</option>').join('')}</select>
           </div>
-
           <div>
-            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">ALERT SEVERITY</label>
-            <select id="ruleSeveritySel" class="input-std" style="width:100%; font-weight:700;">
+            <label style="display:block;font-size:10px;font-weight:700;color:#556B82;margin-bottom:3px;">⚡ ALERT SEVERITY</label>
+            <select id="ruleSeveritySel" class="input-std" style="width:100%;font-weight:700;">
               <option value="BLOCKING" ${sev === 'BLOCKING' ? 'selected' : ''}>🛑 Blocking (Blocks Sync)</option>
               <option value="PREVENTIVE" ${sev === 'PREVENTIVE' ? 'selected' : ''}>⚠️ Preventive (Sign-off)</option>
               <option value="CHECK" ${sev === 'CHECK' ? 'selected' : ''}>🔎 Check (Verify Cell)</option>
               <option value="INFO" ${sev === 'INFO' ? 'selected' : ''}>ℹ️ Info (Guidance)</option>
             </select>
           </div>
-
           <div>
-            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">🚦 SEMAPHORE COLOR</label>
-            <select id="ruleSemaphoreSel" class="input-std" style="width:100%; font-weight:700;">
+            <label style="display:block;font-size:10px;font-weight:700;color:#556B82;margin-bottom:3px;">🚦 SEMAPHORE COLOR</label>
+            <select id="ruleSemaphoreSel" class="input-std" style="width:100%;font-weight:700;">
               <option value="RED" ${sem === 'RED' ? 'selected' : ''}>🔴 Red Signal</option>
               <option value="AMBER" ${sem === 'AMBER' ? 'selected' : ''}>🟡 Amber Signal</option>
               <option value="PURPLE" ${sem === 'PURPLE' ? 'selected' : ''}>🟣 Purple Signal</option>
               <option value="BLUE" ${sem === 'BLUE' ? 'selected' : ''}>🔵 Blue Signal</option>
             </select>
           </div>
-
           <div>
-            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">LOGIC TYPE</label>
+            <label style="display:block;font-size:10px;font-weight:700;color:#556B82;margin-bottom:3px;">🧠 LOGIC TYPE</label>
             <select id="ruleTypeSel" class="input-std" style="width:100%;">
               <option value="IN_LIST" ${t === 'IN_LIST' ? 'selected' : ''}>Master Data List</option>
               <option value="NUMERIC_RANGE" ${t === 'NUMERIC_RANGE' ? 'selected' : ''}>Numeric Range</option>
@@ -2174,59 +1505,32 @@ class ExcelUploaderPro extends HTMLElement {
             </select>
           </div>
         </div>
-
-        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:10px;">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:10px;">
           ${t === 'IN_LIST' || t === 'STARTS_WITH' || t === 'REGEX' || t === 'ASSISTED_CODE' ? `
-            <div style="flex:2; min-width:220px;">
-              <label style="display:block; font-size:10px; font-weight:700; color:#005CB9; margin-bottom:3px;">PARAMETER / ASSISTED FORMULA (value, num, row.COL)</label>
-              <input type="text" id="ruleParamInp" class="input-std" style="width:100%; box-sizing:border-box;" placeholder="e.g. 1000, 2000 or JS expression" value="${this._esc(this._newRuleForm.param)}" />
+            <div style="flex:2;min-width:220px;">
+              <label style="display:block;font-size:10px;font-weight:700;color:#005CB9;margin-bottom:3px;">PARAMETER / ASSISTED FORMULA (value, num, row.COL)</label>
+              <input type="text" id="ruleParamInp" class="input-std" style="width:100%;box-sizing:border-box;" placeholder="e.g. 1000, 2000 or JS expression" value="${this._esc(this._newRuleForm.param)}" />
             </div>
           ` : ''}
-
           ${t === 'NUMERIC_RANGE' ? `
-            <div>
-              <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">MIN VALUE</label>
-              <input type="number" id="ruleMinInp" class="input-std" style="width:90px;" placeholder="0" value="${this._esc(this._newRuleForm.min)}" />
-            </div>
-            <div>
-              <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">MAX VALUE</label>
-              <input type="number" id="ruleMaxInp" class="input-std" style="width:90px;" placeholder="100000" value="${this._esc(this._newRuleForm.max)}" />
-            </div>
+            <div><label style="display:block;font-size:10px;font-weight:700;color:#556B82;margin-bottom:3px;">MIN VALUE</label><input type="number" id="ruleMinInp" class="input-std" style="width:90px;" placeholder="0" value="${this._esc(this._newRuleForm.min)}" /></div>
+            <div><label style="display:block;font-size:10px;font-weight:700;color:#556B82;margin-bottom:3px;">MAX VALUE</label><input type="number" id="ruleMaxInp" class="input-std" style="width:90px;" placeholder="100000" value="${this._esc(this._newRuleForm.max)}" /></div>
           ` : ''}
-
-          <div style="flex:1; min-width:170px;">
-            <label style="display:block; font-size:10px; font-weight:700; color:#107E3E; margin-bottom:3px;">✨ AUTO-FIX EXPRESSION</label>
-            <input type="text" id="ruleAutoFixInp" class="input-std" style="width:100%; box-sizing:border-box; font-family:monospace;" placeholder="e.g. '1000' or value.trim()" value="${this._esc(this._newRuleForm.autoFix)}" />
+          <div style="flex:1;min-width:170px;">
+            <label style="display:block;font-size:10px;font-weight:700;color:#107E3E;margin-bottom:3px;">✨ AUTO-FIX EXPRESSION</label>
+            <input type="text" id="ruleAutoFixInp" class="input-std" style="width:100%;box-sizing:border-box;font-family:monospace;" placeholder="e.g. '1000' or value.trim()" value="${this._esc(this._newRuleForm.autoFix)}" />
           </div>
         </div>
-
-        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; padding-top:8px; border-top:1px dashed #B3D4FF;">
-          <div style="flex:1; min-width:200px;">
-            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">TARGET WORKBOOKS SCOPE ('ALL' OR FILENAMES)</label>
-            <input type="text" id="ruleScopeFilesInp" class="input-std" style="width:100%; box-sizing:border-box;" placeholder="ALL or file1.xlsx, file2.xlsx" value="${this._esc(this._newRuleForm.scopeFiles || 'ALL')}" />
-            ${loadedFileNames.length > 0 ? `
-              <div style="margin-top:4px; display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
-                <span style="font-size:10px; color:#556B82;">Quick pick:</span>
-                <button type="button" class="icon-btn scope-quick-pill" data-scope-val="ALL" style="font-size:10px; padding:1px 6px;">ALL</button>
-                ${loadedFileNames.map(fn => `<button type="button" class="icon-btn scope-quick-pill" data-scope-val="${this._esc(fn)}" style="font-size:10px; padding:1px 6px;">+${this._esc(fn)}</button>`).join('')}
-              </div>
-            ` : ''}
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding-top:8px;border-top:1px dashed #B3D4FF;">
+          <div style="flex:1;min-width:200px;">
+            <label style="display:block;font-size:10px;font-weight:700;color:#556B82;margin-bottom:3px;">📂 TARGET WORKBOOKS SCOPE ('ALL' OR FILENAMES)</label>
+            <input type="text" id="ruleScopeFilesInp" class="input-std" style="width:100%;box-sizing:border-box;" placeholder="ALL or file1.xlsx, file2.xlsx" value="${this._esc(this._newRuleForm.scopeFiles || 'ALL')}" />
+            ${loadedFileNames.length > 0 ? '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;"><button type="button" class="icon-btn scope-quick-pill" data-scope-val="ALL" style="font-size:10px;padding:1px 6px;">ALL</button>' + loadedFileNames.map(fn => '<button type="button" class="icon-btn scope-quick-pill" data-scope-val="' + this._esc(fn) + '" style="font-size:10px;padding:1px 6px;">+' + this._esc(fn) + '</button>').join('') + '</div>' : ''}
           </div>
-          <div>
-            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">VALID FROM (OPTIONAL)</label>
-            <input type="date" id="ruleStartDateInp" class="input-std" value="${this._esc(this._newRuleForm.startDate)}" />
-          </div>
-          <div>
-            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">VALID UNTIL (OPTIONAL)</label>
-            <input type="date" id="ruleEndDateInp" class="input-std" value="${this._esc(this._newRuleForm.endDate)}" />
-          </div>
-          <div style="flex:1; min-width:180px;">
-            <label style="display:block; font-size:10px; font-weight:700; color:#556B82; margin-bottom:3px;">ALERT DESCRIPTION</label>
-            <input type="text" id="ruleDescInp" class="input-std" style="width:100%; box-sizing:border-box;" placeholder="Rule description..." value="${this._esc(this._newRuleForm.desc)}" />
-          </div>
-          <div>
-            <button class="btn" id="saveNewRuleBtn" type="button">+ Save Rule</button>
-          </div>
+          <div><label style="display:block;font-size:10px;font-weight:700;color:#556B82;margin-bottom:3px;">📅 VALID FROM</label><input type="date" id="ruleStartDateInp" class="input-std" value="${this._esc(this._newRuleForm.startDate)}" /></div>
+          <div><label style="display:block;font-size:10px;font-weight:700;color:#556B82;margin-bottom:3px;">📅 VALID UNTIL</label><input type="date" id="ruleEndDateInp" class="input-std" value="${this._esc(this._newRuleForm.endDate)}" /></div>
+          <div style="flex:1;min-width:180px;"><label style="display:block;font-size:10px;font-weight:700;color:#556B82;margin-bottom:3px;">💬 DESCRIPTION</label><input type="text" id="ruleDescInp" class="input-std" style="width:100%;box-sizing:border-box;" placeholder="Rule description..." value="${this._esc(this._newRuleForm.desc)}" /></div>
+          <div><button class="btn" id="saveNewRuleBtn" type="button">💾 Save Rule</button></div>
         </div>
       </div>
     `;
@@ -2235,72 +1539,47 @@ class ExcelUploaderPro extends HTMLElement {
   _renderValidationRulesTab() {
     return `
       <div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
           <div>
-            <h3 style="margin:0; color:#1D2D3E;">⚙️ Validation Rules, Semaphores, File Scope & Temporal Validity</h3>
-            <p style="margin:4px 0 0 0; color:#556B82; font-size:12px;">Clone rules across workbooks, assign multi-file scopes, set temporal validity windows, and configure color semaphores.</p>
+            <h3 style="margin:0;color:#1D2D3E;">⚙️ Validation Rules, Semaphores, File Scope & Temporal Validity</h3>
+            <p style="margin:4px 0 0;color:#556B82;font-size:12px;">Clone rules across workbooks, assign multi-file scopes, set temporal validity windows, and configure color semaphores.</p>
           </div>
           <button class="btn btn-ghost" id="resetDefaultRulesBtn" type="button">↺ Restore Default Rules</button>
         </div>
-
         ${this._renderRuleCreatorForm()}
-
-        <div style="margin-top:18px; border:1px solid #D9E0E6; border-radius:8px; overflow:hidden; background:#FFFFFF;">
+        <div style="margin-top:18px;border:1px solid #D9E0E6;border-radius:8px;overflow:hidden;background:#FFFFFF;">
           <table>
             <thead>
               <tr>
-                <th style="width:55px; text-align:center;">Active</th>
-                <th style="width:100px;">Column</th>
-                <th style="width:110px;">Semaphore</th>
-                <th style="width:115px;">Severity</th>
-                <th style="width:180px;">Workbook Scope</th>
-                <th style="width:140px;">Temporal Validity</th>
-                <th>Logic & Assisted Code</th>
-                <th style="width:110px; text-align:center;">Clone / Actions</th>
+                <th style="width:55px;text-align:center;">Active</th>
+                <th style="width:100px;">🧱 Column</th>
+                <th style="width:110px;">🚦 Signal</th>
+                <th style="width:115px;">⚡ Severity</th>
+                <th style="width:180px;">📂 Workbook Scope</th>
+                <th style="width:140px;">📅 Temporal Validity</th>
+                <th>💻 Logic & Assisted Code</th>
+                <th style="width:110px;text-align:center;">Actions</th>
               </tr>
             </thead>
             <tbody>
-              ${this._validationRules.length > 0 ? this._validationRules.map(r => `
-                <tr style="${!r.active ? 'opacity:0.55; background:#F8FAFC;' : ''}">
-                  <td style="text-align:center;">
-                    <label class="fiori-switch">
-                      <input type="checkbox" class="toggle-rule-chk" data-rule-id="${this._esc(r.id)}" ${r.active ? 'checked' : ''} />
-                      <span class="fiori-slider"></span>
-                    </label>
-                  </td>
+              ${this._validationRules.map(r => `
+                <tr style="${!r.active ? 'opacity:0.55;background:#F8FAFC;' : ''}">
+                  <td style="text-align:center;"><label class="fiori-switch"><input type="checkbox" class="toggle-rule-chk" data-rule-id="${this._esc(r.id)}" ${r.active ? 'checked' : ''} /><span class="fiori-slider"></span></label></td>
                   <td><span class="col-pill">${this._esc(r.col)}</span></td>
                   <td>${this._renderSemaphoreDot(r.semaphore || 'RED')} <strong style="font-size:11px;">${this._esc(r.semaphore || 'RED')}</strong></td>
                   <td>${this._renderSeverityBadge(r.severity || 'BLOCKING', r.semaphore || 'RED')}</td>
                   <td>
                     ${this._editingScopeRuleId === r.id ? `
-                      <div style="display:flex; gap:4px; align-items:center;">
-                        <input type="text" id="scopeInp_${this._esc(r.id)}" class="input-std" style="width:115px; padding:3px 6px; font-size:11px;" value="${this._esc(r.scopeFiles || 'ALL')}" placeholder="ALL or file.xlsx" />
-                        <button class="btn inline-scope-save-btn" data-rule-id="${this._esc(r.id)}" type="button" style="padding:3px 8px; font-size:10px;">Save</button>
-                      </div>
+                      <div style="display:flex;gap:4px;"><input type="text" id="scopeInp_${this._esc(r.id)}" class="input-std" style="width:115px;padding:3px 6px;font-size:11px;" value="${this._esc(r.scopeFiles || 'ALL')}" /><button class="btn inline-scope-save-btn" data-rule-id="${this._esc(r.id)}" type="button" style="padding:3px 8px;font-size:10px;">Save</button></div>
                     ` : `
-                      <div style="display:flex; align-items:center; gap:6px;">
-                        <code style="background:#F0F6FF; color:#005CB9; padding:2px 6px; border-radius:4px; font-size:11px;">${this._esc(r.scopeFiles || 'ALL')}</code>
-                        <button class="icon-btn edit-scope-btn" data-rule-id="${this._esc(r.id)}" type="button" title="Edit workbook scope" style="padding:1px 5px; font-size:10px;">✎</button>
-                      </div>
+                      <div style="display:flex;align-items:center;gap:6px;"><code style="background:#F0F6FF;color:#005CB9;padding:2px 6px;border-radius:4px;font-size:11px;">${this._esc(r.scopeFiles || 'ALL')}</code><button class="icon-btn edit-scope-btn" data-rule-id="${this._esc(r.id)}" type="button" style="padding:1px 5px;font-size:10px;">✎</button></div>
                     `}
                   </td>
-                  <td style="font-size:11px; color:#556B82;">
-                    ${r.startDate || r.endDate ? `📅 ${this._esc(r.startDate || 'Any')} → ${this._esc(r.endDate || 'Any')}` : '♾️ Permanent'}
-                  </td>
-                  <td style="font-family:monospace; font-size:11px; color:#1D2D3E;">
-                    <strong>${this._esc(r.type)}</strong>: ${this._esc(r.param || r.desc)}
-                    ${r.autoFix ? `<div style="color:#107E3E; font-size:10px;">✨ Auto-Fix: ${this._esc(r.autoFix)}</div>` : ''}
-                  </td>
-                  <td style="text-align:center;">
-                    <div class="row-actions">
-                      <button class="icon-btn copy-rule-btn" data-rule-id="${this._esc(r.id)}" type="button" title="Clone rule to apply to other workbooks">📋 Clone</button>
-                      <button class="icon-btn icon-btn-del delete-rule-btn" data-rule-id="${this._esc(r.id)}" type="button" title="Delete rule">✕</button>
-                    </div>
-                  </td>
+                  <td style="font-size:11px;color:#556B82;">${r.startDate || r.endDate ? '📅 ' + this._esc(r.startDate || 'Any') + ' -> ' + this._esc(r.endDate || 'Any') : '♾️ Permanent'}</td>
+                  <td style="font-family:monospace;font-size:11px;color:#1D2D3E;"><strong>${this._esc(r.type)}</strong>: ${this._esc(r.param || r.desc)}${r.autoFix ? '<div style="color:#107E3E;font-size:10px;">✨ Auto-Fix: ' + this._esc(r.autoFix) + '</div>' : ''}</td>
+                  <td style="text-align:center;"><div class="row-actions"><button class="icon-btn copy-rule-btn" data-rule-id="${this._esc(r.id)}" type="button">📋 Clone</button><button class="icon-btn icon-btn-del delete-rule-btn" data-rule-id="${this._esc(r.id)}" type="button">✕</button></div></td>
                 </tr>
-              `).join('') : `
-                <tr><td colspan="8" style="text-align:center; padding:28px; color:#556B82;">No validation rules configured.</td></tr>
-              `}
+              `).join('')}
             </tbody>
           </table>
         </div>
@@ -2310,11 +1589,11 @@ class ExcelUploaderPro extends HTMLElement {
 
   _renderFormatConfigBar(showReparseBtn = false) {
     return `
-      <div class="toolbar-box" style="background:#F8FAFC; border:1px solid #B3D4FF;">
-        <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
-          <span style="font-weight:800; color:#005CB9; font-size:12px;">⚙️ Format & Delimiter Settings:</span>
+      <div class="toolbar-box" style="background:#F8FAFC;border:1px solid #B3D4FF;">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+          <span style="font-weight:800;color:#005CB9;font-size:12px;">🛠️ Format & Delimiter Settings:</span>
           <div>
-            <label style="font-size:10px; font-weight:700; color:#556B82; margin-right:4px;">FORMAT:</label>
+            <label style="font-size:10px;font-weight:700;color:#556B82;margin-right:4px;">📄 FORMAT:</label>
             <select id="cfgFormat" class="input-std">
               <option value="AUTO" ${this._parseConfig.format === 'AUTO' ? 'selected' : ''}>Auto-Detect (.xlsx, .xls, .csv, .txt)</option>
               <option value="XLSX" ${this._parseConfig.format === 'XLSX' ? 'selected' : ''}>Excel Workbook (.xlsx / .xls / .xlsm)</option>
@@ -2322,30 +1601,41 @@ class ExcelUploaderPro extends HTMLElement {
             </select>
           </div>
           <div>
-            <label style="font-size:10px; font-weight:700; color:#556B82; margin-right:4px;">TABULADOR / DELIMITER:</label>
+            <label style="font-size:10px;font-weight:700;color:#556B82;margin-right:4px;">⇥ TABULADOR / DELIMITER:</label>
             <select id="cfgDelimiter" class="input-std">
               <option value="AUTO" ${this._parseConfig.delimiter === 'AUTO' ? 'selected' : ''}>Auto-Detect</option>
-              <option value="&#9;" ${this._parseConfig.delimiter === '\t' ? 'selected' : ''}>Tab (TAB \t)</option>
+              <option value="TAB" ${this._parseConfig.delimiter === 'TAB' ? 'selected' : ''}>Tab (TAB)</option>
               <option value=";" ${this._parseConfig.delimiter === ';' ? 'selected' : ''}>Semicolon (;)</option>
               <option value="," ${this._parseConfig.delimiter === ',' ? 'selected' : ''}>Comma (,)</option>
               <option value="|" ${this._parseConfig.delimiter === '|' ? 'selected' : ''}>Pipe (|)</option>
             </select>
           </div>
           <div>
-            <label style="font-size:10px; font-weight:700; color:#556B82; margin-right:4px;">NUMBER FORMAT:</label>
+            <label style="font-size:10px;font-weight:700;color:#556B82;margin-right:4px;">🔢 DECIMALS:</label>
             <select id="cfgNumFormat" class="input-std">
               <option value="STD" ${this._parseConfig.numberFormat === 'STD' ? 'selected' : ''}>Standard (1,234.56)</option>
-              <option value="EU" ${this._parseConfig.numberFormat === 'EU' ? 'selected' : ''}>European (1.234,56 → 1234.56)</option>
+              <option value="EU" ${this._parseConfig.numberFormat === 'EU' ? 'selected' : ''}>European (1.234,56 -> 1234.56)</option>
             </select>
           </div>
           <div>
-            <label style="font-size:10px; font-weight:700; color:#556B82; margin-right:4px;">HEADER ROW:</label>
+            <label style="font-size:10px;font-weight:700;color:#556B82;margin-right:4px;">📏 HEADER ROW:</label>
             <input type="number" id="cfgHeaderRow" class="input-std" style="width:52px;" min="1" max="20" value="${this._parseConfig.headerRow}" />
           </div>
         </div>
-        ${showReparseBtn ? `
-          <button class="btn btn-ghost" id="reparseFilesBtn" type="button" style="font-size:11px; padding:6px 12px;">↻ Apply & Re-Parse Files</button>
-        ` : ''}
+        ${showReparseBtn ? '<button class="btn btn-ghost" id="reparseFilesBtn" type="button" style="font-size:11px;padding:6px 12px;">↻ Apply & Re-Parse Files</button>' : ''}
+      </div>
+    `;
+  }
+
+  _renderAuditExportButtonsBar(loadId = '') {
+    return `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+        <button class="btn btn-ghost direct-audit-exp-btn" data-fmt="XLSX" data-load-id="${this._esc(loadId)}" type="button" style="font-size:11px;padding:6px 10px;">📊 Export .XLSX</button>
+        <button class="btn btn-ghost direct-audit-exp-btn" data-fmt="CSV" data-load-id="${this._esc(loadId)}" type="button" style="font-size:11px;padding:6px 10px;">📄 Export .CSV</button>
+        <button class="btn btn-ghost direct-audit-exp-btn" data-fmt="TXT" data-load-id="${this._esc(loadId)}" type="button" style="font-size:11px;padding:6px 10px;">📝 Export .TXT</button>
+        <button class="btn" id="toggleAuditExportCfgBtn" type="button" style="font-size:11px;padding:6px 12px;">
+          ⚙️ ${this._auditExportConfig.open ? 'Close Custom Export' : 'Configure Export'}
+        </button>
       </div>
     `;
   }
@@ -2353,121 +1643,73 @@ class ExcelUploaderPro extends HTMLElement {
   _renderAuditMonitor() {
     if (this._selectedAuditId) {
       const rec = this._history.find(h => h.id === this._selectedAuditId);
-      if (!rec) {
-        this._selectedAuditId = null;
-      } else {
+      if (!rec) { this._selectedAuditId = null; }
+      else {
         const cols = rec.columns || this._requiredColumns;
         const snapshotRows = rec.snapshotRows || [];
         const changeLog = rec.changeLog || [];
         const filesDetails = rec.filesDetails || [];
         const appliedRules = rec.appliedRules || [];
         const q = this._auditSearchQuery.trim().toLowerCase();
-
-        const filteredSnapshot = snapshotRows.filter(r => {
-          if (!q) return true;
-          const matchSrc = String(r._sourceFile ?? '').toLowerCase().includes(q);
-          const matchCol = cols.some(c => String(r[c] ?? '').toLowerCase().includes(q));
-          return matchSrc || matchCol;
-        });
-
-        const modifiedRowsCount = snapshotRows.filter(
-          r => r._isManual || Object.keys(r._editedCols || {}).length > 0
-        ).length;
+        const filteredSnapshot = snapshotRows.filter(r => !q || String(r._sourceFile ?? '').toLowerCase().includes(q) || cols.some(c => String(r[c] ?? '').toLowerCase().includes(q)));
+        const modifiedRowsCount = snapshotRows.filter(r => r._isManual || Object.keys(r._editedCols || {}).length > 0).length;
 
         return `
           <div class="audit-detail-view">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
-              <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+              <div style="display:flex;align-items:center;gap:10px;">
                 <button class="btn btn-ghost" id="backToAuditListBtn" type="button">← Back to Audit Monitor</button>
                 <div>
-                  <div style="font-size:11px; color:#556B82; font-weight:600;">Audit Monitor  /  Execution Drill-Down</div>
-                  <div style="font-size:16px; font-weight:800; color:#1D2D3E;">
-                    Load ID: ${this._esc(rec.id)}
-                    <span style="background:#E6F9EC; color:#107E3E; padding:3px 10px; border-radius:12px; font-size:11px; margin-left:6px;">
-                      ${this._renderSemaphoreDot(rec.semaphoreStatus || 'GREEN')} ${this._esc(rec.status)}
-                    </span>
-                  </div>
+                  <div style="font-size:11px;color:#556B82;font-weight:600;">🛡️ Audit Monitor / Execution Drill-Down</div>
+                  <div style="font-size:16px;font-weight:800;color:#1D2D3E;">Load ID: ${this._esc(rec.id)} <span style="background:#E6F9EC;color:#107E3E;padding:3px 10px;border-radius:12px;font-size:11px;margin-left:6px;">${this._renderSemaphoreDot(rec.semaphoreStatus || 'GREEN')} ${this._esc(rec.status)}</span></div>
                 </div>
               </div>
-              <div style="display:flex; gap:8px;">
-                <button class="btn" id="toggleAuditExportCfgBtn" type="button">
-                  ⚙️ ${this._auditExportConfig.open ? 'Close Export Config' : 'Configure & Download Audit'}
-                </button>
-                <button class="btn btn-ghost" id="exportAuditJsonBtn" type="button">📜 Audit Certificate (.json)</button>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                ${this._renderAuditExportButtonsBar(rec.id)}
+                <button class="btn btn-ghost" id="exportAuditJsonBtn" type="button" style="font-size:11px;padding:6px 10px;">📜 .JSON</button>
               </div>
             </div>
 
             ${this._renderAuditExportConfigurator(cols, true)}
 
-            <div class="metrics-bar" style="grid-template-columns: repeat(5, 1fr);">
-              <div class="metric-box"><div class="metric-title">Load Strategy</div><div class="metric-val" style="font-size:13px; color:#0064D9;">${this._esc(rec.loadStrategy || 'FULL')} ${rec.dspArtifact ? '• DSP' : ''}</div></div>
-              <div class="metric-box"><div class="metric-title">Timestamp</div><div class="metric-val" style="font-size:13px;">${this._esc(rec.timestamp)}</div></div>
-              <div class="metric-box kpi-ok"><div class="metric-title">Committed Rows</div><div class="metric-val" style="color:#107E3E;">${rec.rows}</div></div>
-              <div class="metric-box"><div class="metric-title">Rows Modified</div><div class="metric-val" style="color:#0064D9;">${modifiedRowsCount}</div></div>
-              <div class="metric-box"><div class="metric-title">Tracked Actions</div><div class="metric-val">${changeLog.length} events</div></div>
+            <div class="metrics-bar" style="grid-template-columns:repeat(5,1fr);">
+              <div class="metric-box"><div class="metric-title">🔄 Load Strategy</div><div class="metric-val" style="font-size:13px;color:#0064D9;">${this._esc(rec.loadStrategy || 'FULL')} ${rec.dspArtifact ? '• DSP' : ''}</div></div>
+              <div class="metric-box"><div class="metric-title">🕒 Timestamp</div><div class="metric-val" style="font-size:13px;">${this._esc(rec.timestamp)}</div></div>
+              <div class="metric-box kpi-ok"><div class="metric-title">✅ Committed Rows</div><div class="metric-val" style="color:#107E3E;">${rec.rows}</div></div>
+              <div class="metric-box"><div class="metric-title">✎ Rows Modified</div><div class="metric-val" style="color:#0064D9;">${modifiedRowsCount}</div></div>
+              <div class="metric-box"><div class="metric-title">🛠️ Tracked Actions</div><div class="metric-val">${changeLog.length} events</div></div>
             </div>
 
             <div class="subtabs-bar">
-              <button class="audit-subtab ${this._auditDetailSubTab === 'dataTab' ? 'active' : ''}" data-subtab="dataTab" type="button">
-                📊 Consolidated Data Snapshot (${snapshotRows.length})
-              </button>
-              <button class="audit-subtab ${this._auditDetailSubTab === 'changesTab' ? 'active' : ''}" data-subtab="changesTab" type="button">
-                🛠️ User Edits, Auto-Fixes & Checks (${changeLog.length})
-              </button>
-              <button class="audit-subtab ${this._auditDetailSubTab === 'filesTab' ? 'active' : ''}" data-subtab="filesTab" type="button">
-                📁 Workbooks, Rules & SAC Payload (${filesDetails.length})
-              </button>
+              <button class="audit-subtab ${this._auditDetailSubTab === 'dataTab' ? 'active' : ''}" data-subtab="dataTab" type="button">📊 Consolidated Data Snapshot (${snapshotRows.length})</button>
+              <button class="audit-subtab ${this._auditDetailSubTab === 'changesTab' ? 'active' : ''}" data-subtab="changesTab" type="button">🛠️ User Edits, Auto-Fixes & Checks (${changeLog.length})</button>
+              <button class="audit-subtab ${this._auditDetailSubTab === 'filesTab' ? 'active' : ''}" data-subtab="filesTab" type="button">📁 Workbooks, Rules & SAC Payload (${filesDetails.length})</button>
             </div>
 
             ${this._auditDetailSubTab === 'dataTab' ? `
               <div class="toolbar-box" style="margin-bottom:10px;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <span style="font-weight:700; font-size:12px;">🔍 Inspect Committed Rows:</span>
-                  <input type="text" id="auditSearchInput" class="input-std" style="width:240px;" placeholder="Search ID, cost center, sheet..." value="${this._esc(this._auditSearchQuery)}" />
-                </div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:700;font-size:12px;">🔍 Inspect Committed Rows:</span><input type="text" id="auditSearchInput" class="input-std" style="width:240px;" placeholder="Search ID, cost center, sheet..." value="${this._esc(this._auditSearchQuery)}" /></div>
               </div>
-
               <div class="tbl-wrap">
                 <table>
-                  <thead>
-                    <tr>
-                      <th style="width:32px;">#</th>
-                      <th style="width:120px;">Traceability State</th>
-                      <th>Source Workbook & Sheet</th>
-                      <th>Business Comment</th>
-                      ${cols.map(c => `<th>${this._esc(c)}</th>`).join('')}
-                    </tr>
-                  </thead>
+                  <thead><tr><th style="width:32px;">#</th><th style="width:120px;">🏷️ Traceability</th><th>📂 Source Workbook & Sheet</th><th>💬 Business Comment</th>${cols.map(c => '<th>' + this._esc(c) + '</th>').join('')}</tr></thead>
                   <tbody>
-                    ${filteredSnapshot.length > 0 ? filteredSnapshot.map(r => {
+                    ${filteredSnapshot.map(r => {
                       const editedCols = r._editedCols || {};
                       const hasEdits = Object.keys(editedCols).length > 0;
                       return `
                         <tr style="${r._isManual ? 'background:#F5F9FF;' : ''}">
-                          <td style="color:#556B82; font-weight:600; font-size:11px;">${r._rowNum}</td>
-                          <td>
-                            ${r._isManual
-                              ? `<span style="background:#EBF5FF; color:#005CB9; border:1px solid #B3D4FF; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:700;">★ New / Cloned</span>`
-                              : (hasEdits
-                                ? `<span style="background:#FFF8E6; color:#B45309; border:1px solid #FCD34D; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:700;">✎ Edited (${Object.keys(editedCols).length})</span>`
-                                : `<span style="background:#F0F3F6; color:#556B82; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">Original Excel</span>`)}
-                          </td>
-                          <td style="font-size:11px; color:#0064D9; font-weight:700;">${this._esc(r._sourceFile)}</td>
-                          <td style="font-size:11px; color:#556B82;">${this._esc(r._fileComment || 'No comment')}</td>
+                          <td style="color:#556B82;font-weight:600;font-size:11px;">${r._rowNum}</td>
+                          <td>${r._isManual ? '<span style="background:#EBF5FF;color:#005CB9;border:1px solid #B3D4FF;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;">★ New / Cloned</span>' : (hasEdits ? '<span style="background:#FFF8E6;color:#B45309;border:1px solid #FCD34D;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;">✎ Edited (' + Object.keys(editedCols).length + ')</span>' : '<span style="background:#F0F3F6;color:#556B82;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;">Original Excel</span>')}</td>
+                          <td style="font-size:11px;color:#0064D9;font-weight:700;">${this._esc(r._sourceFile)}</td>
+                          <td style="font-size:11px;color:#556B82;">${this._esc(r._fileComment || 'No comment')}</td>
                           ${cols.map(col => {
                             const editInfo = editedCols[col];
-                            return `
-                              <td style="${editInfo ? 'background:#FFFBEB; border-left:3px solid #F59E0B;' : ''}">
-                                <div style="font-weight:${editInfo ? '700' : '400'}; color:#1D2D3E;">${this._esc(r[col] ?? '')}</div>
-                                ${editInfo ? `<div style="font-size:10px; color:#B45309; margin-top:2px;">Was: <strike>${this._esc(editInfo.from)}</strike></div>` : ''}
-                              </td>
-                            `;
+                            return '<td style="' + (editInfo ? 'background:#FFFBEB;border-left:3px solid #F59E0B;' : '') + '"><div style="font-weight:' + (editInfo ? '700' : '400') + ';">' + this._esc(r[col] ?? '') + '</div>' + (editInfo ? '<div style="font-size:10px;color:#B45309;">Was: <strike>' + this._esc(editInfo.from) + '</strike></div>' : '') + '</td>';
                           }).join('')}
                         </tr>
                       `;
-                    }).join('') : `
-                      <tr><td colspan="${cols.length + 4}" style="text-align:center; padding:24px; color:#556B82;">No rows match the search filter.</td></tr>
-                    `}
+                    }).join('')}
                   </tbody>
                 </table>
               </div>
@@ -2476,75 +1718,33 @@ class ExcelUploaderPro extends HTMLElement {
             ${this._auditDetailSubTab === 'changesTab' ? `
               <div class="tbl-wrap">
                 <table>
-                  <thead>
-                    <tr>
-                      <th style="width:90px;">Time</th>
-                      <th style="width:140px;">Action Type</th>
-                      <th style="width:180px;">Target Element</th>
-                      <th>Audit Description</th>
-                      <th style="width:140px;">Previous Value</th>
-                      <th style="width:140px;">Committed Value</th>
-                    </tr>
-                  </thead>
+                  <thead><tr><th style="width:90px;">🕒 Time</th><th style="width:140px;">⚡ Action Type</th><th style="width:180px;">🎯 Target</th><th>📝 Audit Description</th><th style="width:140px;">⏪ Previous Value</th><th style="width:140px;">⏩ Committed Value</th></tr></thead>
                   <tbody>
-                    ${changeLog.length > 0 ? changeLog.map(log => {
-                      let badgeStyle = 'background:#EBF5FF; color:#005CB9;';
-                      if (['CELL_EDIT', 'BULK_FILL', 'AUTO_FIX_CODE', 'BULK_AUTO_FIX'].includes(log.type)) badgeStyle = 'background:#FFF8E6; color:#B45309;';
-                      if (['ROW_DELETED', 'FILE_REMOVED', 'SCHEMA_DEL_COL', 'SHEET_DISABLED'].includes(log.type)) badgeStyle = 'background:#FEEAEA; color:#BB0000;';
-                      if (['ROW_ADDED', 'ROW_CLONED', 'SHEET_ENABLED', 'CHECK_VERIFIED'].includes(log.type)) badgeStyle = 'background:#E6F9EC; color:#107E3E;';
-                      return `
-                        <tr>
-                          <td style="font-size:11px; color:#556B82; font-weight:600;">${this._esc(log.time)}</td>
-                          <td><span style="${badgeStyle} padding:3px 8px; border-radius:6px; font-weight:700; font-size:10px;">${this._esc(log.type)}</span></td>
-                          <td style="font-weight:700; color:#1D2D3E;">${this._esc(log.target)}</td>
-                          <td style="color:#32363A;">${this._esc(log.detail)}</td>
-                          <td style="color:#BB0000; font-family:monospace; font-size:11px;">${this._esc(log.oldVal || '—')}</td>
-                          <td style="color:#107E3E; font-weight:700; font-family:monospace; font-size:11px;">${this._esc(log.newVal || '—')}</td>
-                        </tr>
-                      `;
-                    }).join('') : `
-                      <tr><td colspan="6" style="text-align:center; padding:28px; color:#556B82;">No manual edits or modifications were required during this load.</td></tr>
-                    `}
+                    ${changeLog.length > 0 ? changeLog.map(log => `
+                      <tr>
+                        <td style="font-size:11px;color:#556B82;font-weight:600;">${this._esc(log.time)}</td>
+                        <td><span style="background:#FFF8E6;color:#B45309;padding:3px 8px;border-radius:6px;font-weight:700;font-size:10px;">${this._esc(log.type)}</span></td>
+                        <td style="font-weight:700;">${this._esc(log.target)}</td>
+                        <td>${this._esc(log.detail)}</td>
+                        <td style="color:#BB0000;font-family:monospace;font-size:11px;">${this._esc(log.oldVal || '—')}</td>
+                        <td style="color:#107E3E;font-weight:700;font-family:monospace;font-size:11px;">${this._esc(log.newVal || '—')}</td>
+                      </tr>
+                    `).join('') : '<tr><td colspan="6" style="text-align:center;padding:28px;color:#556B82;">No manual edits were required during this load.</td></tr>'}
                   </tbody>
                 </table>
               </div>
             ` : ''}
 
             ${this._auditDetailSubTab === 'filesTab' ? `
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
-                <div style="background:#FFFFFF; border:1px solid #D9E0E6; border-radius:8px; padding:16px;">
-                  <h4 style="margin:0 0 12px 0; color:#1D2D3E;">Consolidated Source Workbooks & Scoped Rules</h4>
-                  ${filesDetails.length > 0 ? filesDetails.map(f => `
-                    <div class="file-card-item" style="margin-bottom:8px;">
-                      <div>
-                        <div style="font-weight:700; color:#0064D9;">📄 ${this._esc(f.name)} <span style="font-weight:400; color:#556B82;">(${f.sizeKB || 1} KB)</span></div>
-                        <div style="font-size:11px; color:#556B82; margin-top:2px;">
-                          Strategy: <strong>${this._esc(f.strategy || rec.loadStrategy || 'FULL')}</strong> • ${f.sheets} of ${f.totalSheets || f.sheets} sheet(s) selected (${this._esc((f.selectedSheetNames || []).join(', '))}) • ${f.rows} rows
-                        </div>
-                        <div style="font-size:12px; color:#1D2D3E; margin-top:6px; background:#F8FAFC; padding:6px 10px; border-radius:6px; border-left:3px solid #0070F2;">
-                          💬 <strong>Business Comment:</strong> ${this._esc(f.comment)}
-                        </div>
-                      </div>
-                    </div>
-                  `).join('') : `<p style="color:#556B82;">Manual entry load without Excel workbooks.</p>`}
-
-                  ${appliedRules.length > 0 ? `
-                    <div style="margin-top:12px; padding-top:12px; border-top:1px solid #D9E0E6;">
-                      <div style="font-weight:700; font-size:12px; margin-bottom:6px; color:#1D2D3E;">Active Validation Rules Executed (${appliedRules.length}):</div>
-                      <div style="display:flex; flex-wrap:wrap; gap:6px;">
-                        ${appliedRules.map(ar => `
-                          <span style="background:#F8FAFC; border:1px solid #D9E0E6; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:600;">
-                            ${this._renderSemaphoreDot(ar.semaphore)} <strong>${this._esc(ar.col)}</strong> [${this._esc(ar.scopeFiles)}] (${this._esc(ar.validity)})
-                          </span>
-                        `).join('')}
-                      </div>
-                    </div>
-                  ` : ''}
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div style="background:#FFFFFF;border:1px solid #D9E0E6;border-radius:8px;padding:16px;">
+                  <h4 style="margin:0 0 12px;color:#1D2D3E;">📂 Consolidated Source Workbooks & Scoped Rules</h4>
+                  ${filesDetails.map(f => '<div class="file-card-item" style="margin-bottom:8px;"><div><div style="font-weight:700;color:#0064D9;">📄 ' + this._esc(f.name) + ' (' + (f.sizeKB || 1) + ' KB)</div><div style="font-size:11px;color:#556B82;">Strategy: <strong>' + this._esc(f.strategy || rec.loadStrategy) + '</strong> • ' + f.sheets + ' sheet(s) • ' + f.rows + ' rows</div><div style="font-size:12px;margin-top:6px;background:#F8FAFC;padding:6px 10px;border-radius:6px;border-left:3px solid #0070F2;">💬 <strong>Comment:</strong> ' + this._esc(f.comment) + '</div></div></div>').join('')}
+                  ${appliedRules.length > 0 ? '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #D9E0E6;"><div style="font-weight:700;font-size:12px;margin-bottom:6px;">🚦 Active Validation Rules Executed (' + appliedRules.length + '):</div><div style="display:flex;flex-wrap:wrap;gap:6px;">' + appliedRules.map(ar => '<span style="background:#F8FAFC;border:1px solid #D9E0E6;padding:3px 8px;border-radius:6px;font-size:10px;font-weight:600;">' + this._renderSemaphoreDot(ar.semaphore) + ' <strong>' + this._esc(ar.col) + '</strong> [' + this._esc(ar.scopeFiles) + ']</span>').join('') + '</div></div>' : ''}
                 </div>
-
-                <div style="background:#FFFFFF; border:1px solid #D9E0E6; border-radius:8px; padding:16px;">
-                  <h4 style="margin:0 0 12px 0; color:#1D2D3E;">Synchronized SAC JSON Payload</h4>
-                  <pre style="background:#132337; color:#74D8FF; padding:12px; border-radius:6px; font-size:11px; max-height:220px; overflow:auto; margin:0;">${this._esc(rec.payloadJson || '[]')}</pre>
+                <div style="background:#FFFFFF;border:1px solid #D9E0E6;border-radius:8px;padding:16px;">
+                  <h4 style="margin:0 0 12px;color:#1D2D3E;">💻 Synchronized SAC JSON Payload</h4>
+                  <pre style="background:#132337;color:#74D8FF;padding:12px;border-radius:6px;font-size:11px;max-height:220px;overflow:auto;margin:0;">${this._esc(rec.payloadJson || '[]')}</pre>
                 </div>
               </div>
             ` : ''}
@@ -2554,63 +1754,54 @@ class ExcelUploaderPro extends HTMLElement {
     }
 
     return `
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
         <div>
-          <h3 style="margin:0; color:#1D2D3E;">Audit Monitor</h3>
-          <p style="margin:4px 0 0 0; color:#556B82; font-size:12px;">Click on any execution row below to inspect committed rows, load strategy (Full/Delta), semaphores, edits, and source workbooks.</p>
+          <h3 style="margin:0;color:#1D2D3E;">🛡️ Audit Monitor & Multi-Format Export Center</h3>
+          <p style="margin:4px 0 0;color:#556B82;font-size:12px;">Click on any execution row to inspect committed rows and modifications, or export audit reports in <strong>.XLSX</strong>, <strong>.CSV</strong>, or <strong>.TXT</strong>.</p>
         </div>
-        <div style="display:flex; gap:8px;">
-          ${this._history.length > 0 ? `
-            <button class="btn" id="toggleAuditExportCfgBtn" type="button" style="font-size:11px; padding:6px 12px;">
-              ⚙️ ${this._auditExportConfig.open ? 'Close Export Config' : 'Configure & Download Audit'}
-            </button>
-            <button class="btn btn-danger" id="clearHistoryBtn" type="button" style="font-size:11px; padding:6px 12px;">🗑️ Clear History</button>
-          ` : ''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          ${this._renderAuditExportButtonsBar('')}
+          ${this._history.length > 0 ? '<button class="btn btn-danger" id="clearHistoryBtn" type="button" style="font-size:11px;padding:6px 12px;">🗑️ Clear History</button>' : ''}
         </div>
       </div>
 
       ${this._renderAuditExportConfigurator(this._requiredColumns, false)}
 
-      <div style="border: 1px solid #D9E0E6; border-radius: 8px; overflow:hidden; background:#FFFFFF; box-shadow: 0 2px 6px rgba(0,0,0,0.02);">
+      <div style="border:1px solid #D9E0E6;border-radius:8px;overflow:hidden;background:#FFFFFF;">
         <table>
           <thead>
             <tr>
-              <th>Load ID</th>
-              <th>Strategy</th>
-              <th>SAP User</th>
-              <th>Workbooks, Selected Sheets & Comments</th>
-              <th>Rows</th>
-              <th>User Edits</th>
-              <th>Timestamp</th>
-              <th>Semaphore & Status</th>
-              <th style="text-align:right;">Inspection</th>
+              <th>🆔 Load ID</th>
+              <th>🔄 Strategy</th>
+              <th>👤 SAP User</th>
+              <th>📂 Workbooks, Selected Sheets & Comments</th>
+              <th>📊 Rows</th>
+              <th>✎ User Edits</th>
+              <th>🕒 Timestamp</th>
+              <th>🚦 Semaphore & Status</th>
+              <th style="text-align:right;">📥 Quick Export & Inspect</th>
             </tr>
           </thead>
           <tbody>
             ${this._history.length > 0 ? this._history.map(h => `
               <tr class="audit-row-link" data-load-id="${this._esc(h.id)}" style="cursor:pointer;">
-                <td><strong style="color:#0064D9; text-decoration:underline;">${this._esc(h.id)}</strong></td>
-                <td><span style="background:#EBF5FF; color:#005CB9; padding:2px 8px; border-radius:10px; font-weight:700; font-size:11px;">${this._esc(h.loadStrategy || 'FULL')}</span></td>
+                <td><strong style="color:#0064D9;text-decoration:underline;">${this._esc(h.id)}</strong></td>
+                <td><span style="background:#EBF5FF;color:#005CB9;padding:2px 8px;border-radius:10px;font-weight:700;font-size:11px;">${this._esc(h.loadStrategy || 'FULL')}</span></td>
                 <td>${this._esc(h.user)}</td>
                 <td>${this._esc(h.file)}</td>
                 <td><strong>${h.rows}</strong> rows</td>
-                <td>
-                  ${(h.editsCount || 0) > 0
-                    ? `<span style="background:#FFF8E6; color:#B45309; border:1px solid #FCD34D; padding:2px 8px; border-radius:10px; font-weight:700; font-size:11px;">✎ ${h.editsCount} action(s)</span>`
-                    : `<span style="color:#556B82; font-size:11px;">Direct (0 edits)</span>`}
-                </td>
+                <td>${(h.editsCount || 0) > 0 ? '<span style="background:#FFF8E6;color:#B45309;border:1px solid #FCD34D;padding:2px 8px;border-radius:10px;font-weight:700;font-size:11px;">✎ ' + h.editsCount + ' action(s)</span>' : '<span style="color:#556B82;font-size:11px;">Direct (0 edits)</span>'}</td>
                 <td>${this._esc(h.timestamp)}</td>
-                <td>
-                  <span style="background:#E6F9EC; color:#107E3E; padding:4px 10px; border-radius:12px; font-weight:700; font-size:11px; display:inline-flex; align-items:center;">
-                    ${this._renderSemaphoreDot(h.semaphoreStatus || 'GREEN')} ${this._esc(h.status)}
-                  </span>
-                </td>
-                <td style="text-align:right;">
-                  <button class="btn btn-ghost" type="button" style="padding:4px 10px; font-size:11px;">🔍 View Details →</button>
+                <td><span style="background:#E6F9EC;color:#107E3E;padding:4px 10px;border-radius:12px;font-weight:700;font-size:11px;display:inline-flex;align-items:center;">${this._renderSemaphoreDot(h.semaphoreStatus || 'GREEN')} ${this._esc(h.status)}</span></td>
+                <td style="text-align:right;white-space:nowrap;">
+                  <button class="icon-btn direct-audit-exp-btn" data-fmt="XLSX" data-load-id="${this._esc(h.id)}" type="button" title="Export Excel .XLSX">📊 .XLSX</button>
+                  <button class="icon-btn direct-audit-exp-btn" data-fmt="CSV" data-load-id="${this._esc(h.id)}" type="button" title="Export .CSV">📄 .CSV</button>
+                  <button class="icon-btn direct-audit-exp-btn" data-fmt="TXT" data-load-id="${this._esc(h.id)}" type="button" title="Export .TXT">📝 .TXT</button>
+                  <button class="btn btn-ghost" type="button" style="padding:4px 10px;font-size:11px;margin-left:4px;">🔍 Details →</button>
                 </td>
               </tr>
             `).join('') : `
-              <tr><td colspan="9" style="text-align:center; padding:36px; color:#556B82;">No planning loads registered yet. Complete an upload in the Wizard to inspect its full audit trail here.</td></tr>
+              <tr><td colspan="9" style="text-align:center;padding:36px;color:#556B82;">No planning loads registered yet. Use the export buttons above to download a template/draft audit report or complete an upload in the Wizard.</td></tr>
             `}
           </tbody>
         </table>
@@ -2625,626 +1816,138 @@ class ExcelUploaderPro extends HTMLElement {
     const filteredRows = this._getFilteredRows();
     const activeRulesCount = this._validationRules.filter(r => r.active).length;
 
-    let globalSemaphore = 'GREEN';
-    let globalSemaphoreText = 'GREEN (Ready to Load)';
-    if (stats.blockingRows > 0) {
-      globalSemaphore = 'RED';
-      globalSemaphoreText = 'RED (Blocking Alerts)';
-    } else if (stats.preventiveRows > 0) {
-      globalSemaphore = 'AMBER';
-      globalSemaphoreText = 'AMBER (Preventive Sign-Off)';
-    } else if (stats.checkRows > 0) {
-      globalSemaphore = 'PURPLE';
-      globalSemaphoreText = 'PURPLE (Check Pending)';
-    }
+    let globalSemaphore = 'GREEN', globalSemaphoreText = 'GREEN (Ready)';
+    if (stats.blockingRows > 0) { globalSemaphore = 'RED'; globalSemaphoreText = 'RED (Blocking)'; }
+    else if (stats.preventiveRows > 0) { globalSemaphore = 'AMBER'; globalSemaphoreText = 'AMBER (Sign-Off)'; }
+    else if (stats.checkRows > 0) { globalSemaphore = 'PURPLE'; globalSemaphoreText = 'PURPLE (Check)'; }
 
     this._shadow.innerHTML = `
       <style>
-        :host {
-          display: block;
-          font-family: "72", "72full", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-          font-size: 13px;
-          color: #1D2D3E;
-          background: #F5F6F7;
-          padding: 16px;
-          box-sizing: border-box;
-          height: 100%;
-          overflow: auto;
-        }
-
-        .main-card {
-          background: #FFFFFF;
-          border: 1px solid #D9E0E6;
-          border-radius: 12px;
-          box-shadow: 0 8px 24px rgba(29, 45, 62, 0.07);
-          overflow: hidden;
-          position: relative;
-        }
-
-        .busy-overlay {
-          position: absolute;
-          inset: 0;
-          background: rgba(255, 255, 255, 0.9);
-          backdrop-filter: blur(2px);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          z-index: 100;
-        }
-        .spinner {
-          width: 40px;
-          height: 40px;
-          border: 4px solid #E5E9EC;
-          border-top-color: #0070F2;
-          border-radius: 50%;
-          animation: spin 0.75s linear infinite;
-          margin-bottom: 12px;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        .help-modal-overlay {
-          position: fixed;
-          inset: 0;
-          background: rgba(19, 35, 55, 0.62);
-          backdrop-filter: blur(2px);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 250;
-          padding: 20px;
-        }
-        .help-modal-card {
-          background: #FFFFFF;
-          border: 1px solid #D9E0E6;
-          border-top: 4px solid #0070F2;
-          border-radius: 12px;
-          max-width: 820px;
-          width: 100%;
-          padding: 20px 24px;
-          box-shadow: 0 16px 40px rgba(0,0,0,0.22);
-        }
-        .help-step-box {
-          background: #F8FAFC;
-          border: 1px solid #D9E0E6;
-          border-left: 4px solid #0070F2;
-          border-radius: 8px;
-          padding: 12px 14px;
-        }
-        .help-step-title {
-          font-weight: 800;
-          color: #005CB9;
-          font-size: 13px;
-        }
-
-        .sap-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          background: linear-gradient(90deg, #132337 0%, #1F3652 100%);
-          color: #FFFFFF;
-          padding: 12px 24px;
-          border-bottom: 3px solid #0070F2;
-        }
-        .sap-brand { display: flex; align-items: center; gap: 14px; }
-        .sap-logo-img { height: 28px; width: auto; display: block; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25)); }
-        .sap-title-wrap { display: flex; flex-direction: column; }
-        .sap-title { font-size: 15px; font-weight: 700; letter-spacing: -0.2px; color: #FFFFFF; }
-        .sap-subtitle { font-size: 11px; color: #A9B8C8; font-weight: 500; }
-        .sap-badge-env {
-          background: rgba(0, 184, 241, 0.16);
-          border: 1px solid rgba(0, 184, 241, 0.45);
-          color: #74D8FF;
-          padding: 4px 10px;
-          border-radius: 20px;
-          font-size: 11px;
-          font-weight: 600;
-        }
-        .help-icon-btn {
-          background: rgba(255, 255, 255, 0.14);
-          border: 1px solid rgba(255, 255, 255, 0.35);
-          color: #FFFFFF;
-          padding: 5px 12px;
-          border-radius: 20px;
-          font-size: 12px;
-          font-weight: 700;
-          cursor: pointer;
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          transition: all 0.15s;
-        }
-        .help-icon-btn:hover { background: #0070F2; border-color: #74D8FF; }
-
-        /* FIORI PILL SWITCH (DSP ARTIFACT STYLE) */
-        .fiori-switch-wrap {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          cursor: pointer;
-          user-select: none;
-        }
-        .fiori-switch {
-          position: relative;
-          display: inline-block;
-          width: 38px;
-          height: 20px;
-        }
-        .fiori-switch input {
-          opacity: 0;
-          width: 0;
-          height: 0;
-        }
-        .fiori-slider {
-          position: absolute;
-          cursor: pointer;
-          inset: 0;
-          background-color: #788FA6;
-          transition: 0.2s;
-          border-radius: 20px;
-        }
-        .fiori-slider:before {
-          position: absolute;
-          content: "";
-          height: 14px;
-          width: 14px;
-          left: 3px;
-          bottom: 3px;
-          background-color: #FFFFFF;
-          transition: 0.2s;
-          border-radius: 50%;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.25);
-        }
-        .fiori-switch input:checked + .fiori-slider {
-          background-color: #0070F2;
-        }
-        .fiori-switch input:checked + .fiori-slider:before {
-          transform: translateX(18px);
-        }
-
-        .toast-banner {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 10px 24px;
-          font-weight: 600;
-          font-size: 12px;
-          color: #FFFFFF;
-        }
-        .toast-info { background: #0070F2; }
-        .toast-success { background: #107E3E; }
-        .toast-error { background: #BB0000; }
-
-        .nav-tabs {
-          display: flex;
-          background: #FFFFFF;
-          border-bottom: 1px solid #D9E0E6;
-          padding: 0 24px;
-          gap: 8px;
-        }
-        .nav-tab {
-          padding: 13px 18px;
-          cursor: pointer;
-          font-weight: 600;
-          color: #556B82;
-          border-bottom: 3px solid transparent;
-          font-size: 13px;
-          transition: all 0.2s;
-        }
-        .nav-tab:hover { color: #0070F2; }
-        .nav-tab.active {
-          color: #0070F2;
-          border-bottom-color: #0070F2;
-          background: linear-gradient(180deg, transparent 0%, rgba(0,112,242,0.04) 100%);
-        }
-
-        .tab-content { padding: 24px; background: #F5F6F7; }
-
-        .subtabs-bar {
-          display: flex;
-          gap: 8px;
-          margin-bottom: 14px;
-          border-bottom: 1px solid #D9E0E6;
-          padding-bottom: 10px;
-        }
-        .audit-subtab {
-          padding: 8px 14px;
-          border-radius: 6px;
-          border: 1px solid #D9E0E6;
-          background: #FFFFFF;
-          color: #556B82;
-          font-weight: 700;
-          font-size: 12px;
-          cursor: pointer;
-        }
-        .audit-subtab.active { background: #0070F2; color: #FFFFFF; border-color: #0070F2; }
-
-        .wizard-steps {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 12px;
-          margin-bottom: 20px;
-        }
-        .step-item {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          background: #FFFFFF;
-          border: 1px solid #D9E0E6;
-          border-radius: 10px;
-          padding: 12px 16px;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-        .step-item:hover { border-color: #0070F2; transform: translateY(-1px); }
-        .step-item.active { border-color: #0070F2; background: #F0F6FF; }
-        .step-item.completed { border-color: #107E3E; }
-        .step-num {
-          width: 26px;
-          height: 26px;
-          border-radius: 50%;
-          background: #E5E9EC;
-          color: #556B82;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 12px;
-          font-weight: 700;
-        }
-        .step-item.active .step-num { background: #0070F2; color: #FFFFFF; }
-        .step-item.completed .step-num { background: #107E3E; color: #FFFFFF; }
-        .step-label-title { font-weight: 700; font-size: 12px; color: #1D2D3E; }
-        .step-label-sub { font-size: 11px; color: #556B82; }
-
-        /* VISUAL STRATEGY CARDS */
-        .strategy-bar-card {
-          background: #FFFFFF;
-          border: 1px solid #D9E0E6;
-          border-radius: 10px;
-          padding: 14px 18px;
-          margin-bottom: 14px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          flex-wrap: wrap;
-          gap: 14px;
-        }
-        .strategy-toggle-group {
-          display: inline-flex;
-          background: #EBF0F5;
-          padding: 4px;
-          border-radius: 10px;
-          gap: 6px;
-        }
-        .strategy-btn {
-          border: 1px solid transparent;
-          background: transparent;
-          border-radius: 8px;
-          padding: 8px 16px;
-          text-align: left;
-          cursor: pointer;
-          transition: all 0.18s ease;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-        .strategy-btn:hover { background: rgba(255,255,255,0.6); }
-        .strategy-btn.active {
-          background: #0070F2;
-          color: #FFFFFF;
-          box-shadow: 0 2px 8px rgba(0, 112, 242, 0.28);
-        }
-        .strategy-btn-title {
-          font-size: 12px;
-          font-weight: 800;
-          display: block;
-          color: #1D2D3E;
-        }
-        .strategy-btn.active .strategy-btn-title { color: #FFFFFF; }
-        .strategy-btn-sub {
-          font-size: 10px;
-          color: #556B82;
-          display: block;
-        }
-        .strategy-btn.active .strategy-btn-sub { color: #D9EFFF; }
-
-        .btn {
-          padding: 8px 16px;
-          font-size: 12px;
-          font-weight: 600;
-          border-radius: 6px;
-          cursor: pointer;
-          border: 1px solid #0070F2;
-          background: #0070F2;
-          color: #FFFFFF;
-          transition: all 0.15s ease;
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-        }
-        .btn:hover { background: #005CB9; }
-        .btn-ghost { background: #FFFFFF; color: #0064D9; border-color: #BCC8D4; }
-        .btn-ghost:hover { background: #F0F6FF; border-color: #0070F2; }
-        .btn-danger { background: #FFFFFF; color: #BB0000; border-color: #F5C6C6; }
-        .btn-danger:hover { background: #FEEAEA; border-color: #BB0000; }
-        .btn-success { background: #107E3E; border-color: #107E3E; color: #FFFFFF; }
-        .btn-success:hover { background: #0C6230; }
-
-        .drop-zone {
-          border: 2px dashed #0070F2;
-          border-radius: 12px;
-          padding: 36px 24px;
-          text-align: center;
-          background: #FFFFFF;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 12px;
-        }
-        .drop-zone.drag-active { background: #F0F6FF; border-color: #005CB9; }
-        .upload-icon-circle {
-          width: 54px;
-          height: 54px;
-          border-radius: 50%;
-          background: #EBF5FF;
-          color: #0070F2;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 24px;
-        }
-        .file-label-btn {
-          padding: 9px 20px;
-          background: #0070F2;
-          color: #FFFFFF;
-          font-weight: 700;
-          font-size: 13px;
-          border-radius: 6px;
-          cursor: pointer;
-          display: inline-block;
-        }
-
-        .metrics-bar {
-          display: grid;
-          grid-template-columns: repeat(6, 1fr);
-          gap: 10px;
-          margin-bottom: 14px;
-        }
-        .metric-box {
-          background: #FFFFFF;
-          border: 1px solid #D9E0E6;
-          border-left: 4px solid #0070F2;
-          padding: 10px 12px;
-          border-radius: 8px;
-        }
-        .metric-box.kpi-ok { border-left-color: #107E3E; }
-        .metric-box.kpi-err { border-left-color: #BB0000; }
-        .metric-box.kpi-prev { border-left-color: #E9730C; }
-        .metric-box.kpi-chk { border-left-color: #6D28D9; }
-        .metric-title { font-size: 10px; color: #556B82; margin-bottom: 4px; font-weight: 700; text-transform: uppercase; }
-        .metric-val { font-size: 17px; font-weight: 800; color: #1D2D3E; }
-
-        .dist-bar {
-          display: flex;
-          height: 8px;
-          border-radius: 4px;
-          overflow: hidden;
-          background: #FEEAEA;
-          margin-bottom: 16px;
-          border: 1px solid #D9E0E6;
-        }
-        .dist-ok { background: linear-gradient(90deg, #107E3E, #16A34A); height: 100%; transition: width 0.35s ease; }
-
-        .toolbar-box {
-          background: #FFFFFF;
-          border: 1px solid #D9E0E6;
-          border-radius: 8px;
-          padding: 10px 14px;
-          margin-bottom: 12px;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 12px;
-          align-items: center;
-          justify-content: space-between;
-        }
-        .input-std {
-          border: 1px solid #BCC8D4;
-          border-radius: 6px;
-          padding: 6px 10px;
-          font-size: 12px;
-          color: #1D2D3E;
-          outline: none;
-        }
-        .input-std:focus { border-color: #0070F2; box-shadow: 0 0 0 2px rgba(0, 112, 242, 0.15); }
-
-        .chips-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 10px;
-          margin-bottom: 12px;
-          align-items: center;
-          justify-content: space-between;
-        }
-        .chips-left { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-        .chip {
-          padding: 5px 12px;
-          border-radius: 16px;
-          font-size: 11px;
-          font-weight: 700;
-          cursor: pointer;
-          border: 1px solid #D9E0E6;
-          background: #FFFFFF;
-          color: #32363A;
-        }
-        .chip-all.active-chip { background: #1D2D3E; color: #FFFFFF; border-color: #1D2D3E; }
-        .chip-ok.active-chip { background: #107E3E; color: #FFFFFF; border-color: #107E3E; }
-        .chip-err.active-chip { background: #BB0000; color: #FFFFFF; border-color: #BB0000; }
-        .chip-prev.active-chip { background: #E9730C; color: #FFFFFF; border-color: #E9730C; }
-        .chip-chk.active-chip { background: #6D28D9; color: #FFFFFF; border-color: #6D28D9; }
-        .chip-info.active-chip { background: #0070F2; color: #FFFFFF; border-color: #0070F2; }
-
-        .sev-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          padding: 3px 8px;
-          border-radius: 12px;
-          font-size: 10px;
-          font-weight: 800;
-        }
-        .sev-blocking { background: #FEEAEA; color: #BB0000; border: 1px solid #F5C6C6; }
-        .sev-preventive { background: #FFF4E5; color: #B45309; border: 1px solid #FCD34D; }
-        .sev-check { background: #F5F3FF; color: #6D28D9; border: 1px solid #DDD6FE; }
-        .sev-info { background: #EBF5FF; color: #005CB9; border: 1px solid #B3D4FF; }
-
-        td.cell-sev-BLOCKING { background: #FFF2F2; border-left: 3px solid #BB0000; }
-        td.cell-sev-PREVENTIVE { background: #FFFBEB; border-left: 3px solid #E9730C; }
-        td.cell-sev-CHECK { background: #FAF5FF; border-left: 3px solid #6D28D9; }
-        td.cell-sev-INFO { background: #F0F7FF; border-left: 3px solid #0070F2; }
-
-        .alert-line {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 6px;
-          margin-top: 3px;
-          padding: 2px 5px;
-          border-radius: 4px;
-          font-size: 10px;
-          font-weight: 700;
-        }
-        .alert-line-BLOCKING { color: #BB0000; background: rgba(187,0,0,0.06); }
-        .alert-line-PREVENTIVE { color: #B45309; background: rgba(233,115,12,0.08); }
-        .alert-line-CHECK { color: #6D28D9; background: rgba(109,40,217,0.08); }
-        .alert-line-INFO { color: #005CB9; background: rgba(0,112,242,0.08); }
-
-        .mini-fix-btn {
-          border: 1px solid #107E3E;
-          background: #E6F9EC;
-          color: #107E3E;
-          font-size: 9px;
-          font-weight: 800;
-          padding: 1px 5px;
-          border-radius: 4px;
-          cursor: pointer;
-          white-space: nowrap;
-        }
-        .mini-fix-btn:hover { background: #107E3E; color: #FFFFFF; }
-
-        .mini-chk-btn {
-          border: 1px solid #6D28D9;
-          background: #F5F3FF;
-          color: #6D28D9;
-          font-size: 9px;
-          font-weight: 800;
-          padding: 1px 5px;
-          border-radius: 4px;
-          cursor: pointer;
-          white-space: nowrap;
-        }
-        .mini-chk-btn:hover { background: #6D28D9; color: #FFFFFF; }
-
-        .tbl-wrap {
-          max-height: 360px;
-          overflow: auto;
-          border: 1px solid #D9E0E6;
-          border-radius: 8px;
-          background: #FFFFFF;
-        }
-        table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
-        th {
-          background: #F0F3F6;
-          padding: 10px 12px;
-          border-bottom: 2px solid #D9E0E6;
-          position: sticky;
-          top: 0;
-          font-weight: 700;
-          color: #1D2D3E;
-          white-space: nowrap;
-          z-index: 5;
-        }
-        tbody tr:hover { background: #F8FAFC; }
-        td { padding: 8px 10px; border-bottom: 1px solid #EDF0F2; vertical-align: top; }
-        .editable-cell {
-          outline: none;
-          border: 1px solid transparent;
-          border-bottom: 1px dashed #0070F2;
-          display: inline-block;
-          min-width: 65px;
-          padding: 2px 5px;
-          border-radius: 4px;
-        }
-        .editable-cell:focus { background: #FFFFFF; border: 1px solid #0070F2; }
-
-        .th-content { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-        .remove-col-btn { background: none; border: none; color: #BB0000; font-weight: 700; cursor: pointer; font-size: 11px; }
-
-        .row-actions { display: flex; gap: 4px; justify-content: center; }
-        .icon-btn {
-          border: 1px solid #D9E0E6;
-          background: #FFFFFF;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 11px;
-          padding: 3px 7px;
-          font-weight: 700;
-        }
-        .icon-btn:hover { border-color: #0070F2; color: #0070F2; background: #F0F6FF; }
-        .icon-btn-del { border-color: #F5C6C6; color: #BB0000; background: #FEEAEA; }
-
-        .wizard-footer {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-top: 20px;
-          border-top: 1px solid #D9E0E6;
-          padding-top: 16px;
-          flex-wrap: wrap;
-          gap: 10px;
-        }
-        .file-card-item {
-          background: #FFFFFF;
-          border: 1px solid #D9E0E6;
-          border-left: 4px solid #0070F2;
-          border-radius: 8px;
-          padding: 14px 16px;
-          margin-bottom: 12px;
-        }
-        .sheet-pill-chk {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 4px 10px;
-          border-radius: 6px;
-          font-size: 11px;
-          font-weight: 600;
-          cursor: pointer;
-          border: 1px solid #BCC8D4;
-          background: #F8FAFC;
-        }
-        .sheet-pill-chk.sheet-active { background: #EBF5FF; border-color: #0070F2; color: #005CB9; }
-        .col-pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          background: #EBF5FF;
-          color: #005CB9;
-          padding: 5px 12px;
-          border-radius: 6px;
-          font-weight: 700;
-          font-size: 11px;
-          border: 1px solid #B3D4FF;
-        }
+        :host { display:block; font-family:"72","72full",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; font-size:13px; color:#1D2D3E; background:#F5F6F7; padding:16px; box-sizing:border-box; height:100%; overflow:auto; }
+        .main-card { background:#FFFFFF; border:1px solid #D9E0E6; border-radius:12px; box-shadow:0 8px 24px rgba(29,45,62,0.07); overflow:hidden; position:relative; }
+        .busy-overlay { position:absolute; inset:0; background:rgba(255,255,255,0.9); backdrop-filter:blur(2px); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:100; }
+        .spinner { width:40px; height:40px; border:4px solid #E5E9EC; border-top-color:#0070F2; border-radius:50%; animation:spin 0.75s linear infinite; margin-bottom:12px; }
+        @keyframes spin { to { transform:rotate(360deg); } }
+        .help-modal-overlay { position:fixed; inset:0; background:rgba(19,35,55,0.62); backdrop-filter:blur(2px); display:flex; align-items:center; justify-content:center; z-index:250; padding:20px; }
+        .help-modal-card { background:#FFFFFF; border:1px solid #D9E0E6; border-top:4px solid #0070F2; border-radius:12px; max-width:820px; width:100%; padding:20px 24px; box-shadow:0 16px 40px rgba(0,0,0,0.22); }
+        .help-step-box { background:#F8FAFC; border:1px solid #D9E0E6; border-left:4px solid #0070F2; border-radius:8px; padding:12px 14px; }
+        .help-step-title { font-weight:800; color:#005CB9; font-size:13px; }
+        .sap-header { display:flex; align-items:center; justify-content:space-between; background:linear-gradient(90deg,#132337 0%,#1F3652 100%); color:#FFFFFF; padding:12px 24px; border-bottom:3px solid #0070F2; }
+        .sap-brand { display:flex; align-items:center; gap:14px; }
+        .sap-logo-img { height:28px; width:auto; display:block; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.25)); }
+        .sap-title-wrap { display:flex; flex-direction:column; }
+        .sap-title { font-size:15px; font-weight:700; color:#FFFFFF; }
+        .sap-subtitle { font-size:11px; color:#A9B8C8; font-weight:500; }
+        .sap-badge-env { background:rgba(0,184,241,0.16); border:1px solid rgba(0,184,241,0.45); color:#74D8FF; padding:4px 10px; border-radius:20px; font-size:11px; font-weight:600; }
+        .help-icon-btn { background:rgba(255,255,255,0.14); border:1px solid rgba(255,255,255,0.35); color:#FFFFFF; padding:5px 12px; border-radius:20px; font-size:12px; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+        .help-icon-btn:hover { background:#0070F2; border-color:#74D8FF; }
+        .fiori-switch-wrap { display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none; }
+        .fiori-switch { position:relative; display:inline-block; width:38px; height:20px; }
+        .fiori-switch input { opacity:0; width:0; height:0; }
+        .fiori-slider { position:absolute; cursor:pointer; inset:0; background-color:#788FA6; transition:0.2s; border-radius:20px; }
+        .fiori-slider:before { position:absolute; content:""; height:14px; width:14px; left:3px; bottom:3px; background-color:#FFFFFF; transition:0.2s; border-radius:50%; box-shadow:0 1px 3px rgba(0,0,0,0.25); }
+        .fiori-switch input:checked + .fiori-slider { background-color:#0070F2; }
+        .fiori-switch input:checked + .fiori-slider:before { transform:translateX(18px); }
+        .toast-banner { display:flex; align-items:center; justify-content:space-between; padding:10px 24px; font-weight:600; font-size:12px; color:#FFFFFF; }
+        .toast-info { background:#0070F2; } .toast-success { background:#107E3E; } .toast-error { background:#BB0000; }
+        .nav-tabs { display:flex; background:#FFFFFF; border-bottom:1px solid #D9E0E6; padding:0 24px; gap:8px; }
+        .nav-tab { padding:13px 18px; cursor:pointer; font-weight:700; color:#556B82; border-bottom:3px solid transparent; font-size:13px; transition:all 0.2s; display:inline-flex; align-items:center; gap:7px; }
+        .nav-tab:hover { color:#0070F2; }
+        .nav-tab.active { color:#0070F2; border-bottom-color:#0070F2; background:linear-gradient(180deg,transparent 0%,rgba(0,112,242,0.05) 100%); }
+        .tab-content { padding:24px; background:#F5F6F7; }
+        .subtabs-bar { display:flex; gap:8px; margin-bottom:14px; border-bottom:1px solid #D9E0E6; padding-bottom:10px; }
+        .audit-subtab { padding:8px 14px; border-radius:6px; border:1px solid #D9E0E6; background:#FFFFFF; color:#556B82; font-weight:700; font-size:12px; cursor:pointer; }
+        .audit-subtab.active { background:#0070F2; color:#FFFFFF; border-color:#0070F2; }
+        .wizard-steps { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px; }
+        .step-item { display:flex; align-items:center; gap:12px; background:#FFFFFF; border:1px solid #D9E0E6; border-radius:10px; padding:12px 16px; cursor:pointer; transition:all 0.2s ease; }
+        .step-item:hover { border-color:#0070F2; transform:translateY(-1px); }
+        .step-item.active { border-color:#0070F2; background:#F0F6FF; }
+        .step-item.completed { border-color:#107E3E; }
+        .step-num { width:26px; height:26px; border-radius:50%; background:#E5E9EC; color:#556B82; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; }
+        .step-item.active .step-num { background:#0070F2; color:#FFFFFF; }
+        .step-item.completed .step-num { background:#107E3E; color:#FFFFFF; }
+        .step-label-title { font-weight:700; font-size:12px; color:#1D2D3E; }
+        .step-label-sub { font-size:11px; color:#556B82; }
+        .strategy-bar-card { background:#FFFFFF; border:1px solid #D9E0E6; border-radius:10px; padding:14px 18px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px; }
+        .strategy-toggle-group { display:inline-flex; background:#EBF0F5; padding:4px; border-radius:10px; gap:6px; }
+        .strategy-btn { border:1px solid transparent; background:transparent; border-radius:8px; padding:8px 16px; text-align:left; cursor:pointer; transition:all 0.18s ease; display:flex; align-items:center; gap:10px; }
+        .strategy-btn:hover { background:rgba(255,255,255,0.6); }
+        .strategy-btn.active { background:#0070F2; color:#FFFFFF; box-shadow:0 2px 8px rgba(0,112,242,0.28); }
+        .strategy-btn-title { font-size:12px; font-weight:800; display:block; color:#1D2D3E; }
+        .strategy-btn.active .strategy-btn-title { color:#FFFFFF; }
+        .strategy-btn-sub { font-size:10px; color:#556B82; display:block; }
+        .strategy-btn.active .strategy-btn-sub { color:#D9EFFF; }
+        .btn { padding:8px 16px; font-size:12px; font-weight:600; border-radius:6px; cursor:pointer; border:1px solid #0070F2; background:#0070F2; color:#FFFFFF; transition:all 0.15s ease; display:inline-flex; align-items:center; gap:6px; }
+        .btn:hover { background:#005CB9; }
+        .btn-ghost { background:#FFFFFF; color:#0064D9; border-color:#BCC8D4; }
+        .btn-ghost:hover { background:#F0F6FF; border-color:#0070F2; }
+        .btn-danger { background:#FFFFFF; color:#BB0000; border-color:#F5C6C6; }
+        .btn-danger:hover { background:#FEEAEA; border-color:#BB0000; }
+        .btn-success { background:#107E3E; border-color:#107E3E; color:#FFFFFF; }
+        .btn-success:hover { background:#0C6230; }
+        .drop-zone { border:2px dashed #0070F2; border-radius:12px; padding:36px 24px; text-align:center; background:#FFFFFF; display:flex; flex-direction:column; align-items:center; gap:12px; }
+        .drop-zone.drag-active { background:#F0F6FF; border-color:#005CB9; }
+        .upload-icon-circle { width:54px; height:54px; border-radius:50%; background:#EBF5FF; color:#0070F2; display:flex; align-items:center; justify-content:center; font-size:24px; }
+        .file-label-btn { padding:9px 20px; background:#0070F2; color:#FFFFFF; font-weight:700; font-size:13px; border-radius:6px; cursor:pointer; display:inline-block; }
+        .metrics-bar { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin-bottom:14px; }
+        .metric-box { background:#FFFFFF; border:1px solid #D9E0E6; border-left:4px solid #0070F2; padding:10px 12px; border-radius:8px; }
+        .metric-box.kpi-ok { border-left-color:#107E3E; } .metric-box.kpi-err { border-left-color:#BB0000; } .metric-box.kpi-prev { border-left-color:#E9730C; } .metric-box.kpi-chk { border-left-color:#6D28D9; }
+        .metric-title { font-size:10px; color:#556B82; margin-bottom:4px; font-weight:700; text-transform:uppercase; }
+        .metric-val { font-size:17px; font-weight:800; color:#1D2D3E; }
+        .dist-bar { display:flex; height:8px; border-radius:4px; overflow:hidden; background:#FEEAEA; margin-bottom:16px; border:1px solid #D9E0E6; }
+        .dist-ok { background:linear-gradient(90deg,#107E3E,#16A34A); height:100%; transition:width 0.35s ease; }
+        .toolbar-box { background:#FFFFFF; border:1px solid #D9E0E6; border-radius:8px; padding:10px 14px; margin-bottom:12px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
+        .input-std { border:1px solid #BCC8D4; border-radius:6px; padding:6px 10px; font-size:12px; color:#1D2D3E; outline:none; }
+        .input-std:focus { border-color:#0070F2; box-shadow:0 0 0 2px rgba(0,112,242,0.15); }
+        .chips-row { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px; align-items:center; justify-content:space-between; }
+        .chips-left { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+        .chip { padding:5px 12px; border-radius:16px; font-size:11px; font-weight:700; cursor:pointer; border:1px solid #D9E0E6; background:#FFFFFF; color:#32363A; }
+        .chip-all.active-chip { background:#1D2D3E; color:#FFFFFF; border-color:#1D2D3E; }
+        .chip-ok.active-chip { background:#107E3E; color:#FFFFFF; border-color:#107E3E; }
+        .chip-err.active-chip { background:#BB0000; color:#FFFFFF; border-color:#BB0000; }
+        .chip-prev.active-chip { background:#E9730C; color:#FFFFFF; border-color:#E9730C; }
+        .chip-chk.active-chip { background:#6D28D9; color:#FFFFFF; border-color:#6D28D9; }
+        .chip-info.active-chip { background:#0070F2; color:#FFFFFF; border-color:#0070F2; }
+        .sev-badge { display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:12px; font-size:10px; font-weight:800; }
+        .sev-blocking { background:#FEEAEA; color:#BB0000; border:1px solid #F5C6C6; }
+        .sev-preventive { background:#FFF4E5; color:#B45309; border:1px solid #FCD34D; }
+        .sev-check { background:#F5F3FF; color:#6D28D9; border:1px solid #DDD6FE; }
+        .sev-info { background:#EBF5FF; color:#005CB9; border:1px solid #B3D4FF; }
+        td.cell-sev-BLOCKING { background:#FFF2F2; border-left:3px solid #BB0000; }
+        td.cell-sev-PREVENTIVE { background:#FFFBEB; border-left:3px solid #E9730C; }
+        td.cell-sev-CHECK { background:#FAF5FF; border-left:3px solid #6D28D9; }
+        td.cell-sev-INFO { background:#F0F7FF; border-left:3px solid #0070F2; }
+        .alert-line { display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:3px; padding:2px 5px; border-radius:4px; font-size:10px; font-weight:700; }
+        .alert-line-BLOCKING { color:#BB0000; background:rgba(187,0,0,0.06); }
+        .alert-line-PREVENTIVE { color:#B45309; background:rgba(233,115,12,0.08); }
+        .alert-line-CHECK { color:#6D28D9; background:rgba(109,40,217,0.08); }
+        .alert-line-INFO { color:#005CB9; background:rgba(0,112,242,0.08); }
+        .mini-fix-btn { border:1px solid #107E3E; background:#E6F9EC; color:#107E3E; font-size:9px; font-weight:800; padding:1px 5px; border-radius:4px; cursor:pointer; }
+        .mini-fix-btn:hover { background:#107E3E; color:#FFFFFF; }
+        .mini-chk-btn { border:1px solid #6D28D9; background:#F5F3FF; color:#6D28D9; font-size:9px; font-weight:800; padding:1px 5px; border-radius:4px; cursor:pointer; }
+        .mini-chk-btn:hover { background:#6D28D9; color:#FFFFFF; }
+        .tbl-wrap { max-height:360px; overflow:auto; border:1px solid #D9E0E6; border-radius:8px; background:#FFFFFF; }
+        table { width:100%; border-collapse:collapse; font-size:12px; text-align:left; }
+        th { background:#F0F3F6; padding:10px 12px; border-bottom:2px solid #D9E0E6; position:sticky; top:0; font-weight:700; color:#1D2D3E; white-space:nowrap; z-index:5; }
+        tbody tr:hover { background:#F8FAFC; }
+        td { padding:8px 10px; border-bottom:1px solid #EDF0F2; vertical-align:top; }
+        .editable-cell { outline:none; border:1px solid transparent; border-bottom:1px dashed #0070F2; display:inline-block; min-width:65px; padding:2px 5px; border-radius:4px; }
+        .editable-cell:focus { background:#FFFFFF; border:1px solid #0070F2; }
+        .th-content { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+        .remove-col-btn { background:none; border:none; color:#BB0000; font-weight:700; cursor:pointer; font-size:11px; }
+        .row-actions { display:flex; gap:4px; justify-content:center; }
+        .icon-btn { border:1px solid #D9E0E6; background:#FFFFFF; border-radius:4px; cursor:pointer; font-size:11px; padding:3px 7px; font-weight:700; }
+        .icon-btn:hover { border-color:#0070F2; color:#0070F2; background:#F0F6FF; }
+        .icon-btn-del { border-color:#F5C6C6; color:#BB0000; background:#FEEAEA; }
+        .wizard-footer { display:flex; justify-content:space-between; align-items:center; margin-top:20px; border-top:1px solid #D9E0E6; padding-top:16px; flex-wrap:wrap; gap:10px; }
+        .file-card-item { background:#FFFFFF; border:1px solid #D9E0E6; border-left:4px solid #0070F2; border-radius:8px; padding:14px 16px; margin-bottom:12px; }
+        .sheet-pill-chk { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; border:1px solid #BCC8D4; background:#F8FAFC; }
+        .sheet-pill-chk.sheet-active { background:#EBF5FF; border-color:#0070F2; color:#005CB9; }
+        .col-pill { display:inline-flex; align-items:center; gap:6px; background:#EBF5FF; color:#005CB9; padding:5px 12px; border-radius:6px; font-weight:700; font-size:11px; border:1px solid #B3D4FF; }
       </style>
 
       <div class="main-card">
-        ${this._isLoading ? `
-          <div class="busy-overlay">
-            <div class="spinner"></div>
-            <div style="font-weight:700; color:#1D2D3E;">${this._esc(this._loadingText)}</div>
-          </div>
-        ` : ''}
-
+        ${this._isLoading ? '<div class="busy-overlay"><div class="spinner"></div><div style="font-weight:700;color:#1D2D3E;">' + this._esc(this._loadingText) + '</div></div>' : ''}
         ${this._renderHelpModal()}
 
         <div class="sap-header">
@@ -3255,25 +1958,21 @@ class ExcelUploaderPro extends HTMLElement {
               <div class="sap-subtitle">Multi-Sheet Consolidation, Alert Semaphores & Full/Delta Engine</div>
             </div>
           </div>
-          <div style="display:flex; align-items:center; gap:12px;">
-            <span class="sap-badge-env">SAP Analytics Cloud</span>
-            <button class="help-icon-btn" id="toggleHelpBtn" type="button" title="Help and usage instructions">
-              <span style="background:#0070F2; color:#FFF; width:18px; height:18px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:900;">?</span>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span class="sap-badge-env">☁️ SAP Analytics Cloud</span>
+            <button class="help-icon-btn" id="toggleHelpBtn" type="button" title="Interactive Help Guide">
+              <span style="background:#0070F2;color:#FFF;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;">?</span>
               <span>Help</span>
             </button>
           </div>
         </div>
 
-        ${this._toast ? `
-          <div class="toast-banner toast-${this._toast.type}">
-            <span>${this._esc(this._toast.msg)}</span>
-          </div>
-        ` : ''}
+        ${this._toast ? '<div class="toast-banner toast-' + this._toast.type + '"><span>' + this._esc(this._toast.msg) + '</span></div>' : ''}
 
         <div class="nav-tabs">
-          <div class="nav-tab ${this._activeTab === 'uploaderTab' ? 'active' : ''}" data-target="uploaderTab">Planning Upload Wizard</div>
+          <div class="nav-tab ${this._activeTab === 'uploaderTab' ? 'active' : ''}" data-target="uploaderTab">🚀 Planning Upload Wizard</div>
           <div class="nav-tab ${this._activeTab === 'rulesTab' ? 'active' : ''}" data-target="rulesTab">⚙️ Validation Rules & Assisted Code (${activeRulesCount})</div>
-          <div class="nav-tab ${this._activeTab === 'monitorTab' ? 'active' : ''}" data-target="monitorTab">Audit Monitor (${this._history.length})</div>
+          <div class="nav-tab ${this._activeTab === 'monitorTab' ? 'active' : ''}" data-target="monitorTab">🛡️ Audit Monitor (${this._history.length})</div>
         </div>
 
         <div id="uploaderTab" class="tab-content" style="display:${this._activeTab === 'uploaderTab' ? 'block' : 'none'};">
@@ -3281,31 +1980,31 @@ class ExcelUploaderPro extends HTMLElement {
             <div class="step-item ${this._step === 1 ? 'active' : (this._filesQueue.length > 0 ? 'completed' : '')}" data-step="1">
               <div class="step-num">${this._filesQueue.length > 0 && this._step > 1 ? '✓' : '1'}</div>
               <div>
-                <div class="step-label-title">Full/Delta & Files</div>
+                <div class="step-label-title">📂 Full/Delta & Files</div>
                 <div class="step-label-sub">Strategy, multi-Excel & CSV</div>
               </div>
             </div>
             <div class="step-item ${this._step === 2 ? 'active' : (this._step > 2 ? 'completed' : '')}" data-step="2">
               <div class="step-num">${this._step > 2 ? '✓' : '2'}</div>
               <div>
-                <div class="step-label-title">Sheets & Semaphores</div>
+                <div class="step-label-title">📑 Sheets & Semaphores</div>
                 <div class="step-label-sub">Tabs, scope & rules</div>
               </div>
             </div>
             <div class="step-item ${this._step === 3 ? 'active' : ''}" data-step="3">
               <div class="step-num">3</div>
               <div>
-                <div class="step-label-title">Grid & Auto-Fix</div>
+                <div class="step-label-title">✨ Grid & Auto-Fix</div>
                 <div class="step-label-sub">Resolution & SAC sync</div>
               </div>
             </div>
           </div>
 
           <div class="strategy-bar-card">
-            <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
               <div>
-                <div style="font-weight:800; color:#1D2D3E; font-size:13px;">🔄 Planning Load Mode</div>
-                <div style="font-size:11px; color:#556B82;">Select target data ingestion strategy for SAP Analytics Cloud</div>
+                <div style="font-weight:800;color:#1D2D3E;font-size:13px;">🔄 Planning Load Mode</div>
+                <div style="font-size:11px;color:#556B82;">Select target data ingestion strategy for SAP Analytics Cloud</div>
               </div>
               <div class="strategy-toggle-group">
                 <button class="strategy-btn ${this._loadStrategy === 'FULL' ? 'active' : ''}" data-strategy="FULL" type="button">
@@ -3324,13 +2023,9 @@ class ExcelUploaderPro extends HTMLElement {
                 </button>
               </div>
             </div>
-
             <label class="fiori-switch-wrap" title="Enable SAP Datasphere / SAC Artifact metadata synchronization">
-              <span class="fiori-switch">
-                <input type="checkbox" id="dspToggleChk" ${this._dspArtifactSync ? 'checked' : ''} />
-                <span class="fiori-slider"></span>
-              </span>
-              <span style="font-weight:700; font-size:12px; color:#1D2D3E;">DSP Artifact</span>
+              <span class="fiori-switch"><input type="checkbox" id="dspToggleChk" ${this._dspArtifactSync ? 'checked' : ''} /><span class="fiori-slider"></span></span>
+              <span style="font-weight:700;font-size:12px;color:#1D2D3E;">🔗 DSP Artifact</span>
             </label>
           </div>
 
@@ -3338,20 +2033,14 @@ class ExcelUploaderPro extends HTMLElement {
             ${this._renderFormatConfigBar(false)}
             <div class="drop-zone" id="dropZone">
               <div class="upload-icon-circle">☁️</div>
-              <h3 style="margin:0; color:#1D2D3E; font-size:16px;">Drag & drop two or more planning files here</h3>
-              <p style="margin:0; color:#556B82; font-size:12px; max-width:560px;">
-                Support for multiple workbooks, individual sheet selection, CSV/TXT delimiters, and scoped validation rules with semaphores.
-              </p>
+              <h3 style="margin:0;color:#1D2D3E;font-size:16px;">📥 Drag & drop two or more planning files here</h3>
+              <p style="margin:0;color:#556B82;font-size:12px;max-width:560px;">Support for multiple workbooks, individual sheet selection, CSV/TXT delimiters, and scoped validation rules with semaphores.</p>
               <div style="margin-top:8px;">
-                <label class="file-label-btn" for="fileInput">
-                  📂 Browse & Select Files
-                </label>
+                <label class="file-label-btn" for="fileInput">📂 Browse & Select Files</label>
                 <input type="file" id="fileInput" multiple accept=".xlsx, .xls, .xlsm, .csv, .txt" ${!this._xlsxReady ? 'disabled' : ''} style="display:none;" />
               </div>
               <div style="margin-top:6px;">
-                <button class="btn btn-ghost" id="downloadTemplateBtn" type="button" ${!this._xlsxReady ? 'disabled' : ''}>
-                  📥 Download Official Planning Template (.xlsx)
-                </button>
+                <button class="btn btn-ghost" id="downloadTemplateBtn" type="button" ${!this._xlsxReady ? 'disabled' : ''}>📥 Download Official Planning Template (.xlsx)</button>
               </div>
             </div>
           ` : ''}
@@ -3359,20 +2048,14 @@ class ExcelUploaderPro extends HTMLElement {
           ${this._step === 2 ? `
             <div>
               ${this._renderFormatConfigBar(true)}
-
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
                 <div>
-                  <h3 style="margin:0; color:#1D2D3E;">Loaded Workbooks & Sheet Selector (${this._filesQueue.length} file(s)) — Mode: <span style="color:#005CB9;">${this._loadStrategy}</span></h3>
-                  <span style="font-size:11px; color:#556B82;">Check or uncheck the sheets inside each workbook that you want to include in the consolidation:</span>
+                  <h3 style="margin:0;color:#1D2D3E;">📚 Loaded Workbooks & Sheet Selector (${this._filesQueue.length} file(s)) — Mode: <span style="color:#005CB9;">${this._loadStrategy}</span></h3>
+                  <span style="font-size:11px;color:#556B82;">Check or uncheck the sheets inside each workbook that you want to include in the consolidation:</span>
                 </div>
-                <div style="display:flex; gap:8px;">
-                  <label class="btn" for="fileInput" style="cursor:pointer;">
-                    + Add More Files
-                    <input type="file" id="fileInput" multiple accept=".xlsx, .xls, .xlsm, .csv, .txt" style="display:none;" />
-                  </label>
-                  ${this._filesQueue.length > 0 ? `
-                    <button class="btn btn-danger" id="clearAllFilesBtn" type="button">🗑️ Remove All Files</button>
-                  ` : ''}
+                <div style="display:flex;gap:8px;">
+                  <label class="btn" for="fileInput" style="cursor:pointer;">➕ Add More Files<input type="file" id="fileInput" multiple accept=".xlsx, .xls, .xlsm, .csv, .txt" style="display:none;" /></label>
+                  ${this._filesQueue.length > 0 ? '<button class="btn btn-danger" id="clearAllFilesBtn" type="button">🗑️ Remove All Files</button>' : ''}
                 </div>
               </div>
 
@@ -3382,35 +2065,24 @@ class ExcelUploaderPro extends HTMLElement {
                   const activeRowCount = (item.sheets || []).filter(s => s.selected).reduce((acc, s) => acc + s.rows.length, 0);
                   return `
                     <div class="file-card-item">
-                      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
                         <div>
-                          <div style="font-weight:800; color:#0064D9; font-size:13px;">
-                            📄 ${this._esc(item.file.name)}
-                            <span style="background:#EBF5FF; color:#005CB9; font-size:10px; padding:2px 6px; border-radius:4px; margin-left:6px;">${this._esc(item.ext)}</span>
-                          </div>
-                          <div style="font-size:11px; color:#556B82; margin-top:2px;">
-                            <strong>${activeSheetCount}</strong> of ${item.sheetCount} sheet(s) selected • <strong>${activeRowCount}</strong> active planning rows
-                          </div>
+                          <div style="font-weight:800;color:#0064D9;font-size:13px;">📄 ${this._esc(item.file.name)} <span style="background:#EBF5FF;color:#005CB9;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;">${this._esc(item.ext)}</span></div>
+                          <div style="font-size:11px;color:#556B82;margin-top:2px;"><strong>${activeSheetCount}</strong> of ${item.sheetCount} sheet(s) selected • <strong>${activeRowCount}</strong> active planning rows</div>
                         </div>
-                        <div style="display:flex; align-items:center; gap:8px;">
-                          <input type="text" class="input-std file-comment-input" style="width:250px;" data-index="${fIdx}" placeholder="Business audit comment for this file..." value="${this._esc(item.comment || '')}" />
-                          <button class="btn btn-danger remove-file-btn" data-index="${fIdx}" type="button" style="padding:6px 12px;">Remove File</button>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                          <input type="text" class="input-std file-comment-input" style="width:250px;" data-index="${fIdx}" placeholder="💬 Business audit comment..." value="${this._esc(item.comment || '')}" />
+                          <button class="btn btn-danger remove-file-btn" data-index="${fIdx}" type="button" style="padding:6px 12px;">✕ Remove</button>
                         </div>
                       </div>
-
-                      <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #D9E0E6; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-                        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-                          <span style="font-size:11px; font-weight:700; color:#1D2D3E; margin-right:4px;">📑 Sheets:</span>
-                          ${(item.sheets || []).map((sh, sIdx) => `
-                            <label class="sheet-pill-chk ${sh.selected ? 'sheet-active' : ''}">
-                              <input type="checkbox" class="sheet-toggle-chk" data-fidx="${fIdx}" data-sidx="${sIdx}" ${sh.selected ? 'checked' : ''} style="margin:0; cursor:pointer;" />
-                              <span>${this._esc(sh.name)} <strong>(${sh.rows.length})</strong></span>
-                            </label>
-                          `).join('')}
+                      <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #D9E0E6;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
+                          <span style="font-size:11px;font-weight:700;color:#1D2D3E;margin-right:4px;">📑 Sheets:</span>
+                          ${(item.sheets || []).map((sh, sIdx) => '<label class="sheet-pill-chk ' + (sh.selected ? 'sheet-active' : '') + '"><input type="checkbox" class="sheet-toggle-chk" data-fidx="' + fIdx + '" data-sidx="' + sIdx + '" ' + (sh.selected ? 'checked' : '') + ' style="margin:0;" /><span>' + this._esc(sh.name) + ' <strong>(' + sh.rows.length + ')</strong></span></label>').join('')}
                         </div>
-                        <div style="display:flex; gap:4px;">
-                          <button class="icon-btn select-all-sheets-btn" data-fidx="${fIdx}" data-mode="all" type="button">Select All</button>
-                          <button class="icon-btn select-all-sheets-btn" data-fidx="${fIdx}" data-mode="none" type="button">None</button>
+                        <div style="display:flex;gap:4px;">
+                          <button class="icon-btn select-all-sheets-btn" data-fidx="${fIdx}" data-mode="all" type="button">☑ Select All</button>
+                          <button class="icon-btn select-all-sheets-btn" data-fidx="${fIdx}" data-mode="none" type="button">☐ None</button>
                         </div>
                       </div>
                     </div>
@@ -3418,66 +2090,40 @@ class ExcelUploaderPro extends HTMLElement {
                 }).join('')}
               </div>
 
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px;">
-                <div style="background:#FFFFFF; border:1px solid #D9E0E6; border-radius:8px; padding:16px;">
-                  <div style="font-weight:700; color:#1D2D3E; margin-bottom:10px;">Active Model Columns (Required Schema):</div>
-                  <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;">
-                    ${this._requiredColumns.map(c => `
-                      <span class="col-pill">
-                        ${this._esc(c)}
-                        ${c !== 'ID' ? `<button class="remove-col-btn" data-col="${this._esc(c)}" title="Remove column">✕</button>` : ''}
-                      </span>
-                    `).join('')}
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+                <div style="background:#FFFFFF;border:1px solid #D9E0E6;border-radius:8px;padding:16px;">
+                  <div style="font-weight:700;color:#1D2D3E;margin-bottom:10px;">🧱 Active Model Columns (Required Schema):</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+                    ${this._requiredColumns.map(c => '<span class="col-pill">' + this._esc(c) + (c !== 'ID' ? '<button class="remove-col-btn" data-col="' + this._esc(c) + '" title="Remove column">✕</button>' : '') + '</span>').join('')}
                   </div>
-
-                  ${this._showAddColModal ? `
-                    <div style="display:flex; gap:8px; align-items:center;">
-                      <input type="text" id="newColInput" class="input-std" placeholder="COLUMN_NAME" />
-                      <button class="btn" id="confirmAddColBtn" type="button">Save Column</button>
-                      <button class="btn btn-ghost" id="cancelAddColBtn" type="button">Cancel</button>
-                    </div>
-                  ` : `
-                    <button class="btn btn-ghost" id="openAddColBtn" type="button">+ Add Mandatory Column</button>
-                  `}
+                  ${this._showAddColModal ? '<div style="display:flex;gap:8px;align-items:center;"><input type="text" id="newColInput" class="input-std" placeholder="COLUMN_NAME" /><button class="btn" id="confirmAddColBtn" type="button">Save</button><button class="btn btn-ghost" id="cancelAddColBtn" type="button">Cancel</button></div>' : '<button class="btn btn-ghost" id="openAddColBtn" type="button">➕ Add Mandatory Column</button>'}
                 </div>
 
-                <div style="background:#FFFFFF; border:1px solid #D9E0E6; border-radius:8px; padding:16px;">
-                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <div style="font-weight:700; color:#1D2D3E;">⚙️ Active Rules, Semaphores & Scopes (${activeRulesCount}):</div>
-                    <div style="display:flex; gap:6px;">
-                      <button class="btn btn-ghost" id="toggleInlineRuleBtn" type="button" style="padding:4px 10px; font-size:11px;">
-                        ${this._showInlineRuleCreator ? 'Close Form' : '+ New Rule'}
-                      </button>
-                      <button class="btn btn-ghost" id="goToRulesTabBtn" type="button" style="padding:4px 10px; font-size:11px;">
-                        Rules Manager →
-                      </button>
+                <div style="background:#FFFFFF;border:1px solid #D9E0E6;border-radius:8px;padding:16px;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <div style="font-weight:700;color:#1D2D3E;">🚦 Active Rules, Semaphores & Scopes (${activeRulesCount}):</div>
+                    <div style="display:flex;gap:6px;">
+                      <button class="btn btn-ghost" id="toggleInlineRuleBtn" type="button" style="padding:4px 10px;font-size:11px;">${this._showInlineRuleCreator ? 'Close Form' : '➕ New Rule'}</button>
+                      <button class="btn btn-ghost" id="goToRulesTabBtn" type="button" style="padding:4px 10px;font-size:11px;">⚙️ Rules Manager →</button>
                     </div>
                   </div>
-                  <div style="display:flex; flex-wrap:wrap; gap:6px;">
-                    ${this._validationRules.map(r => `
-                      <span style="display:inline-flex; align-items:center; gap:6px; background:#F8FAFC; border:1px solid #D9E0E6; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:600;">
-                        <input type="checkbox" class="toggle-rule-chk" data-rule-id="${this._esc(r.id)}" ${r.active ? 'checked' : ''} style="margin:0; cursor:pointer;" />
-                        ${this._renderSemaphoreDot(r.semaphore || 'RED')}
-                        <strong>${this._esc(r.col)}</strong> [${this._esc(r.scopeFiles || 'ALL')}]
-                        <button class="remove-col-btn delete-rule-btn" data-rule-id="${this._esc(r.id)}" title="Delete rule">✕</button>
-                      </span>
-                    `).join('')}
+                  <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                    ${this._validationRules.map(r => '<span style="display:inline-flex;align-items:center;gap:6px;background:#F8FAFC;border:1px solid #D9E0E6;padding:4px 8px;border-radius:6px;font-size:11px;font-weight:600;"><input type="checkbox" class="toggle-rule-chk" data-rule-id="' + this._esc(r.id) + '" ' + (r.active ? 'checked' : '') + ' style="margin:0;" />' + this._renderSemaphoreDot(r.semaphore || 'RED') + '<strong>' + this._esc(r.col) + '</strong> [' + this._esc(r.scopeFiles || 'ALL') + ']<button class="remove-col-btn delete-rule-btn" data-rule-id="' + this._esc(r.id) + '">✕</button></span>').join('')}
                   </div>
                 </div>
               </div>
-
               ${this._showInlineRuleCreator ? this._renderRuleCreatorForm() : ''}
             </div>
             <div class="wizard-footer">
               <button class="btn btn-ghost" id="prevStepBtn" type="button">← Back</button>
-              <button class="btn" id="nextStep3Btn" type="button">Validate & Edit ${totalRows} Rows →</button>
+              <button class="btn" id="nextStep3Btn" type="button">✨ Validate & Edit ${totalRows} Rows →</button>
             </div>
           ` : ''}
 
           ${this._step === 3 ? `
             <div>
               <div class="metrics-bar">
-                <div class="metric-box"><div class="metric-title">Strategy & Signal</div><div class="metric-val" style="font-size:12px; color:#0064D9; display:flex; align-items:center; margin-top:3px;">${this._renderSemaphoreDot(globalSemaphore)} ${this._loadStrategy} • ${globalSemaphoreText}</div></div>
+                <div class="metric-box"><div class="metric-title">🔄 Strategy & Signal</div><div class="metric-val" style="font-size:12px;color:#0064D9;display:flex;align-items:center;margin-top:3px;">${this._renderSemaphoreDot(globalSemaphore)} ${this._loadStrategy} • ${globalSemaphoreText}</div></div>
                 <div class="metric-box kpi-ok"><div class="metric-title">🟢 Clean Rows</div><div class="metric-val" style="color:#107E3E;">${stats.cleanRows}</div></div>
                 <div class="metric-box kpi-err"><div class="metric-title">🔴 Blocking</div><div class="metric-val" style="color:#BB0000;">${stats.blockingRows}</div></div>
                 <div class="metric-box kpi-prev"><div class="metric-title">🟡 Preventive</div><div class="metric-val" style="color:#E9730C;">${stats.preventiveRows}</div></div>
@@ -3485,60 +2131,38 @@ class ExcelUploaderPro extends HTMLElement {
                 <div class="metric-box"><div class="metric-title">🔵 Info</div><div class="metric-val" style="color:#0070F2;">${stats.infoRows}</div></div>
               </div>
 
-              <div class="dist-bar">
-                <div class="dist-ok" style="width: ${validPercent}%;"></div>
-              </div>
+              <div class="dist-bar"><div class="dist-ok" style="width:${validPercent}%;"></div></div>
 
               <div class="toolbar-box">
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <span style="font-weight:700; font-size:12px;">🔍 Quick Search:</span>
-                  <input type="text" id="searchInput" class="input-std" style="width:190px;" placeholder="Filter by ID, text, sheet..." value="${this._esc(this._searchQuery)}" />
-                </div>
-
-                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                  <span style="font-weight:700; font-size:12px;">⚡ Bulk Fill:</span>
-                  <select id="bulkColSelect" class="input-std">
-                    ${this._requiredColumns.map(c => `<option value="${this._esc(c)}" ${this._bulkCol === c ? 'selected' : ''}>${this._esc(c)}</option>`).join('')}
-                  </select>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="font-weight:700;font-size:12px;">🔍 Quick Search:</span><input type="text" id="searchInput" class="input-std" style="width:190px;" placeholder="Filter by ID, text, sheet..." value="${this._esc(this._searchQuery)}" /></div>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                  <span style="font-weight:700;font-size:12px;">⚡ Bulk Fill:</span>
+                  <select id="bulkColSelect" class="input-std">${this._requiredColumns.map(c => '<option value="' + this._esc(c) + '" ' + (this._bulkCol === c ? 'selected' : '') + '>' + this._esc(c) + '</option>').join('')}</select>
                   <input type="text" id="bulkValInput" class="input-std" style="width:110px;" placeholder="Value (e.g. 1000)" value="${this._esc(this._bulkVal)}" />
-                  <button class="btn btn-ghost" id="applyBulkEmptyBtn" type="button" style="padding:5px 10px; font-size:11px;">Fill Empty</button>
-                  <button class="btn btn-ghost" id="applyBulkAllBtn" type="button" style="padding:5px 10px; font-size:11px;">Overwrite Visible</button>
+                  <button class="btn btn-ghost" id="applyBulkEmptyBtn" type="button" style="padding:5px 10px;font-size:11px;">Fill Empty</button>
+                  <button class="btn btn-ghost" id="applyBulkAllBtn" type="button" style="padding:5px 10px;font-size:11px;">Overwrite Visible</button>
                 </div>
               </div>
 
-              ${this._showAddColModal ? `
-                <div class="toolbar-box" style="justify-content:flex-start;">
-                  <span style="font-weight:700;">Column Name:</span>
-                  <input type="text" id="newColInput" class="input-std" placeholder="E.g. CURRENCY" />
-                  <button class="btn" id="confirmAddColBtn" type="button">Add Column</button>
-                  <button class="btn btn-ghost" id="cancelAddColBtn" type="button">Cancel</button>
-                </div>
-              ` : ''}
-
+              ${this._showAddColModal ? '<div class="toolbar-box" style="justify-content:flex-start;"><span style="font-weight:700;">🧱 Column Name:</span><input type="text" id="newColInput" class="input-std" placeholder="E.g. CURRENCY" /><button class="btn" id="confirmAddColBtn" type="button">Add Column</button><button class="btn btn-ghost" id="cancelAddColBtn" type="button">Cancel</button></div>' : ''}
               ${this._showInlineRuleCreator ? this._renderRuleCreatorForm() : ''}
 
               <div class="chips-row">
                 <div class="chips-left">
-                  <div class="chip chip-all ${this._issueFilter === 'all' ? 'active-chip' : ''}" data-filter="all">All (${totalRows})</div>
+                  <div class="chip chip-all ${this._issueFilter === 'all' ? 'active-chip' : ''}" data-filter="all">📋 All (${totalRows})</div>
                   <div class="chip chip-ok ${this._issueFilter === 'correct' ? 'active-chip' : ''}" data-filter="correct">🟢 Clean (${stats.cleanRows})</div>
                   <div class="chip chip-err ${this._issueFilter === 'BLOCKING' ? 'active-chip' : ''}" data-filter="BLOCKING">🔴 Blocking (${stats.blockingRows})</div>
                   <div class="chip chip-prev ${this._issueFilter === 'PREVENTIVE' ? 'active-chip' : ''}" data-filter="PREVENTIVE">🟡 Preventive (${stats.preventiveRows})</div>
                   <div class="chip chip-chk ${this._issueFilter === 'CHECK' ? 'active-chip' : ''}" data-filter="CHECK">🟣 Check (${stats.checkRows})</div>
                   <div class="chip chip-info ${this._issueFilter === 'INFO' ? 'active-chip' : ''}" data-filter="INFO">🔵 Info (${stats.infoRows})</div>
                 </div>
-                <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                  ${stats.fixableCells > 0 ? `
-                    <button class="btn btn-success" id="autoFixAllBtn" type="button" style="font-size:11px; padding:6px 12px;">
-                      ✨ Auto-Fix All (${stats.fixableCells})
-                    </button>
-                  ` : ''}
-                  <button class="btn btn-ghost" id="addRowBtn" type="button" style="font-size:11px; padding:6px 12px;">+ Add Row</button>
-                  <button class="btn btn-ghost" id="openAddColBtn" type="button" style="font-size:11px; padding:6px 12px;">+ Add Column</button>
-                  <button class="btn btn-ghost" id="toggleInlineRuleBtn" type="button" style="font-size:11px; padding:6px 12px;">⚙️ + Rule</button>
-                  <button class="btn btn-ghost" id="exportCleanBtn" type="button" style="font-size:11px; padding:6px 12px;">📤 Export (.xlsx)</button>
-                  ${(stats.blockingRows + stats.preventiveRows + stats.checkRows + stats.infoRows) > 0 ? `
-                    <button class="btn btn-danger" id="downloadLogBtn" type="button" style="font-size:11px; padding:6px 12px;">📥 Alerts Log (.csv)</button>
-                  ` : ''}
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                  ${stats.fixableCells > 0 ? '<button class="btn btn-success" id="autoFixAllBtn" type="button" style="font-size:11px;padding:6px 12px;">✨ Auto-Fix All (' + stats.fixableCells + ')</button>' : ''}
+                  <button class="btn btn-ghost" id="addRowBtn" type="button" style="font-size:11px;padding:6px 12px;">➕ Add Row</button>
+                  <button class="btn btn-ghost" id="openAddColBtn" type="button" style="font-size:11px;padding:6px 12px;">🧱 Add Column</button>
+                  <button class="btn btn-ghost" id="toggleInlineRuleBtn" type="button" style="font-size:11px;padding:6px 12px;">⚙️ + Rule</button>
+                  <button class="btn btn-ghost" id="exportCleanBtn" type="button" style="font-size:11px;padding:6px 12px;">📤 Export (.xlsx)</button>
+                  ${(stats.blockingRows + stats.preventiveRows + stats.checkRows + stats.infoRows) > 0 ? '<button class="btn btn-danger" id="downloadLogBtn" type="button" style="font-size:11px;padding:6px 12px;">📥 Alerts Log (.csv)</button>' : ''}
                 </div>
               </div>
 
@@ -3547,29 +2171,17 @@ class ExcelUploaderPro extends HTMLElement {
                   <thead>
                     <tr>
                       <th style="width:28px;">#</th>
-                      <th style="width:76px; text-align:center;">Actions</th>
-                      <th>Source Workbook & Sheet</th>
-                      ${this._requiredColumns.map(h => `
-                        <th>
-                          <div class="th-content">
-                            <span>${this._esc(h)}</span>
-                            ${h !== 'ID' ? `<button class="remove-col-btn" data-col="${this._esc(h)}" title="Delete column">✕</button>` : ''}
-                          </div>
-                        </th>
-                      `).join('')}
+                      <th style="width:76px;text-align:center;">🛠️ Actions</th>
+                      <th>📂 Source Workbook & Sheet</th>
+                      ${this._requiredColumns.map(h => '<th><div class="th-content"><span>' + this._esc(h) + '</span>' + (h !== 'ID' ? '<button class="remove-col-btn" data-col="' + this._esc(h) + '">✕</button>' : '') + '</div></th>').join('')}
                     </tr>
                   </thead>
                   <tbody>
                     ${filteredRows.map(({ row, origIdx }) => `
                       <tr>
-                        <td style="color:#556B82; font-size:11px; font-weight:600;">${row._rowNum}</td>
-                        <td>
-                          <div class="row-actions">
-                            <button class="icon-btn dup-row-btn" data-orig-idx="${origIdx}" title="Clone row" type="button">⧉</button>
-                            <button class="icon-btn icon-btn-del remove-row-btn" data-orig-idx="${origIdx}" title="Delete row" type="button">✕</button>
-                          </div>
-                        </td>
-                        <td style="font-size:11px; color:#0064D9; font-weight:700;">${this._esc(row._sourceFile)}</td>
+                        <td style="color:#556B82;font-size:11px;font-weight:600;">${row._rowNum}</td>
+                        <td><div class="row-actions"><button class="icon-btn dup-row-btn" data-orig-idx="${origIdx}" title="Clone row" type="button">⧉</button><button class="icon-btn icon-btn-del remove-row-btn" data-orig-idx="${origIdx}" title="Delete row" type="button">✕</button></div></td>
+                        <td style="font-size:11px;color:#0064D9;font-weight:700;">${this._esc(row._sourceFile)}</td>
                         ${this._requiredColumns.map(col => {
                           const cellAlerts = (row._alerts && row._alerts[col]) || [];
                           const editedInfo = row._editedCols && row._editedCols[col];
@@ -3578,25 +2190,11 @@ class ExcelUploaderPro extends HTMLElement {
                           else if (cellAlerts.some(a => a.severity === 'PREVENTIVE')) topSev = 'PREVENTIVE';
                           else if (cellAlerts.some(a => a.severity === 'CHECK')) topSev = 'CHECK';
                           else if (cellAlerts.some(a => a.severity === 'INFO')) topSev = 'INFO';
-
-                          return `
-                            <td class="${topSev ? 'cell-sev-' + topSev : ''}" style="${!topSev && editedInfo ? 'background:#FFFBEB;' : ''}">
-                              <span class="editable-cell" contenteditable="true" data-orig-idx="${origIdx}" data-col="${this._esc(col)}">${this._esc(row[col] ?? '')}</span>
-                              ${cellAlerts.map(a => {
-                                const dotHtml = this._renderSemaphoreDot(a.semaphore);
-                                return `
-                                  <div class="alert-line alert-line-${a.severity}">
-                                    <span>${dotHtml} ${this._esc(a.msg)}</span>
-                                    <span style="display:inline-flex; gap:3px;">
-                                      ${a.autoFix ? `<button class="mini-fix-btn cell-autofix-btn" data-orig-idx="${origIdx}" data-col="${this._esc(col)}" data-rule-id="${this._esc(a.ruleId)}" type="button" title="Apply Auto-Fix">✨ Fix</button>` : ''}
-                                      ${(a.severity === 'CHECK' || a.severity === 'PREVENTIVE') ? `<button class="mini-chk-btn cell-check-ok-btn" data-orig-idx="${origIdx}" data-col="${this._esc(col)}" data-rule-id="${this._esc(a.ruleId)}" type="button" title="Approve Alert">✓ OK</button>` : ''}
-                                    </span>
-                                  </div>
-                                `;
-                              }).join('')}
-                              ${cellAlerts.length === 0 && editedInfo ? `<span style="display:block; font-size:9px; color:#B45309; font-weight:600; margin-top:2px;">✎ Edited (was: ${this._esc(editedInfo.from || 'Blank')})</span>` : ''}
-                            </td>
-                          `;
+                          return '<td class="' + (topSev ? 'cell-sev-' + topSev : '') + '" style="' + (!topSev && editedInfo ? 'background:#FFFBEB;' : '') + '">' +
+                            '<span class="editable-cell" contenteditable="true" data-orig-idx="' + origIdx + '" data-col="' + this._esc(col) + '">' + this._esc(row[col] ?? '') + '</span>' +
+                            cellAlerts.map(a => '<div class="alert-line alert-line-' + a.severity + '"><span>' + this._renderSemaphoreDot(a.semaphore) + ' ' + this._esc(a.msg) + '</span><span style="display:inline-flex;gap:3px;">' + (a.autoFix ? '<button class="mini-fix-btn cell-autofix-btn" data-orig-idx="' + origIdx + '" data-col="' + this._esc(col) + '" data-rule-id="' + this._esc(a.ruleId) + '" type="button">✨ Fix</button>' : '') + ((a.severity === 'CHECK' || a.severity === 'PREVENTIVE') ? '<button class="mini-chk-btn cell-check-ok-btn" data-orig-idx="' + origIdx + '" data-col="' + this._esc(col) + '" data-rule-id="' + this._esc(a.ruleId) + '" type="button">✓ OK</button>' : '') + '</span></div>').join('') +
+                            (cellAlerts.length === 0 && editedInfo ? '<span style="display:block;font-size:9px;color:#B45309;font-weight:600;margin-top:2px;">✎ Edited (was: ' + this._esc(editedInfo.from || 'Blank') + ')</span>' : '') +
+                            '</td>';
                         }).join('')}
                       </tr>
                     `).join('')}
@@ -3606,17 +2204,10 @@ class ExcelUploaderPro extends HTMLElement {
             </div>
             <div class="wizard-footer">
               <button class="btn btn-ghost" id="prevStepBtn" type="button">← Back</button>
-              <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
-                ${stats.blockingRows === 0 && (stats.preventiveRows > 0 || stats.checkRows > 0) ? `
-                  <label style="display:flex; align-items:center; gap:6px; background:#FFF8E6; border:1px solid #FCD34D; color:#B45309; padding:6px 12px; border-radius:6px; font-size:11px; font-weight:700; cursor:pointer;">
-                    <input type="checkbox" id="ackNonBlockingChk" ${this._acknowledgeNonBlocking ? 'checked' : ''} style="margin:0; cursor:pointer;" />
-                    <span>Confirm review of ${stats.preventiveRows} preventive and ${stats.checkRows} check alerts</span>
-                  </label>
-                ` : ''}
-                <button class="btn btn-ghost" id="exitBtn" type="button">Reset Queue</button>
-                <button class="btn" id="finishBtn" type="button" ${stats.blockingRows > 0 ? 'style="opacity:0.55;"' : ''}>
-                  🚀 Consolidate & Synchronize with SAC (${this._loadStrategy})
-                </button>
+              <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+                ${stats.blockingRows === 0 && (stats.preventiveRows > 0 || stats.checkRows > 0) ? '<label style="display:flex;align-items:center;gap:6px;background:#FFF8E6;border:1px solid #FCD34D;color:#B45309;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;"><input type="checkbox" id="ackNonBlockingChk" ' + (this._acknowledgeNonBlocking ? 'checked' : '') + ' style="margin:0;" /><span>Confirm review of ' + stats.preventiveRows + ' preventive and ' + stats.checkRows + ' check alerts</span></label>' : ''}
+                <button class="btn btn-ghost" id="exitBtn" type="button">🔄 Reset Queue</button>
+                <button class="btn" id="finishBtn" type="button" ${stats.blockingRows > 0 ? 'style="opacity:0.55;"' : ''}>🚀 Consolidate & Synchronize with SAC (${this._loadStrategy})</button>
               </div>
             </div>
           ` : ''}
