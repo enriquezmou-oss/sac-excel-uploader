@@ -10,7 +10,7 @@ class ExcelUploaderPro extends HTMLElement {
     super();
     this._shadow = this.attachShadow({ mode: 'open' });
     this._step = 1;
-    this._filesQueue = [];
+    this._filesQueue = []; // [{ file: File, comment: string }]
     this._rows = [];
     this._headers = [];
     this._currentUser = 'SAP User (Planning)';
@@ -42,6 +42,8 @@ class ExcelUploaderPro extends HTMLElement {
       fileInput.addEventListener('change', (e) => {
         if (e.target.files.length) {
           this._handleFilesSelection(e.target.files);
+          // Reset input to allow selecting the same file again if needed
+          e.target.value = '';
         }
       });
     }
@@ -181,15 +183,32 @@ class ExcelUploaderPro extends HTMLElement {
 
   _handleFilesSelection(fileList) {
     if (typeof XLSX === 'undefined') return;
-    this._isLoading = true;
-    this._loadingText = 'Processing and unifying Excel files...';
-    this._render();
+    
+    let addedCount = 0;
+    let duplicateNames = [];
 
     for (let i = 0; i < fileList.length; i++) {
-      this._filesQueue.push({ file: fileList[i], comment: '' });
+      const newFile = fileList[i];
+      // Validar si el nombre del fichero ya existe en la cola
+      const exists = this._filesQueue.some(item => item.file.name.toLowerCase() === newFile.name.toLowerCase());
+      if (exists) {
+        duplicateNames.push(newFile.name);
+      } else {
+        this._filesQueue.push({ file: newFile, comment: '' });
+        addedCount++;
+      }
     }
 
-    this._processAllFilesInQueue();
+    if (duplicateNames.length > 0) {
+      alert(`⚠️ The following file(s) were skipped because they are already in the queue: ${duplicateNames.join(', ')}`);
+    }
+
+    if (addedCount > 0) {
+      this._isLoading = true;
+      this._loadingText = 'Processing multiple sheets & Excel files...';
+      this._render();
+      this._processAllFilesInQueue();
+    }
   }
 
   _reprocessQueueFiles() {
@@ -207,37 +226,49 @@ class ExcelUploaderPro extends HTMLElement {
     let processedCount = 0;
     let allCombinedRows = [];
     let detectedHeaders = [];
+    let headersFound = false;
 
-    this._filesQueue.forEach((item, fileIndex) => {
+    this._filesQueue.forEach((item) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
           const data = new Uint8Array(e.target.result);
           const wb = XLSX.read(data, { type: 'array' });
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
+          
+          // RECORRER TODAS LAS PESTAÑAS (SHEETS) DEL FICHERO EXCEL
+          wb.SheetNames.forEach(sheetName => {
+            const ws = wb.Sheets[sheetName];
+            const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-          if (json.length > 0) {
-            if (fileIndex === 0) {
-              detectedHeaders = json[0].map(h => String(h).trim());
+            if (json.length > 0) {
+              const sheetHeaders = json[0].map(h => String(h).trim());
+              if (!headersFound && sheetHeaders.length > 0) {
+                detectedHeaders = sheetHeaders;
+                headersFound = true;
+              }
+
+              const rows = json.slice(1).map((row, idx) => {
+                const sourceLabel = `${item.file.name} [${sheetName}]`;
+                const obj = { _rowNum: allCombinedRows.length + idx + 2, _sourceFile: sourceLabel, _errors: {} };
+                
+                // Mapear columnas según los cabeceros detectados
+                const currentHeaders = sheetHeaders.length > 0 ? sheetHeaders : detectedHeaders;
+                currentHeaders.forEach((h, i) => {
+                  obj[h] = row[i] !== undefined ? row[i] : '';
+                });
+                return obj;
+              }).filter(r => Object.keys(r).some(k => k !== '_rowNum' && k !== '_sourceFile' && k !== '_errors' && r[k] !== ''));
+
+              allCombinedRows = allCombinedRows.concat(rows);
             }
-            const rows = json.slice(1).map((row, idx) => {
-              const obj = { _rowNum: allCombinedRows.length + idx + 2, _sourceFile: item.file.name, _errors: {} };
-              detectedHeaders.forEach((h, i) => {
-                obj[h] = row[i] !== undefined ? row[i] : '';
-              });
-              return obj;
-            }).filter(r => Object.values(r).some(v => v !== '' && v !== '_rowNum' && v !== '_sourceFile' && v !== '_errors'));
-
-            allCombinedRows = allCombinedRows.concat(rows);
-          }
+          });
         } catch (err) {
           console.error(`Error processing ${item.file.name}:`, err);
         }
 
         processedCount++;
         if (processedCount === this._filesQueue.length) {
-          this._headers = detectedHeaders;
+          this._headers = detectedHeaders.length > 0 ? detectedHeaders : this._requiredColumns;
           this._rows = allCombinedRows;
           this._validateRows();
           this._isLoading = false;
@@ -264,7 +295,7 @@ class ExcelUploaderPro extends HTMLElement {
         }
       });
 
-      const id = String(r.ID || '').trim();
+      const id = String(row.ID || '').trim();
       if (id && idCounts[id] > 1) {
         row._errors['ID'] = 'Duplicate value not allowed';
       }
@@ -341,10 +372,9 @@ class ExcelUploaderPro extends HTMLElement {
         .btn-danger { background: #FFF; color: #bb0000; border-color: #f5c6c6; }
         .btn-danger:hover { background: #feeaea; }
 
-        /* DROP ZONE NATIVA PARA EVITAR BLOQUEO DE NAVEGADOR */
-        .drop-zone { border: 2px dashed #0070F2; border-radius: 10px; padding: 45px; text-align: center; background: #FFFFFF; position: relative; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
-        .drop-zone:hover { background: rgba(0,112,242,0.02); border-color: #005cb9; }
-        .file-input-native { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 10; }
+        /* ZONA DE CARGA CON BOTÓN NATIVO VISIBLE Y ACCESIBLE */
+        .drop-zone { border: 2px dashed #0070F2; border-radius: 10px; padding: 40px; text-align: center; background: #FFFFFF; box-shadow: 0 2px 8px rgba(0,0,0,0.02); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+        .file-input-native { margin-top: 8px; font-size: 13px; color: #1d2d3e; }
 
         .metrics-bar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 16px; }
         .metric-box { background: #FFFFFF; border: 1px solid #cdd6df; padding: 12px 16px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
@@ -406,17 +436,16 @@ class ExcelUploaderPro extends HTMLElement {
 
         <div id="uploaderTab" class="tab-content">
           <div class="wizard-steps">
-            <div class="step-item ${this._step === 1 ? 'active' : ''}"><div class="step-num">1</div> Multi-File Upload</div>
+            <div class="step-item ${this._step === 1 ? 'active' : ''}"><div class="step-num">1</div> Multi-File & Multi-Sheet Upload</div>
             <div class="step-item ${this._step === 2 ? 'active' : ''}"><div class="step-num">2</div> Consolidation & Comments</div>
             <div class="step-item ${this._step === 3 ? 'active' : ''}"><div class="step-num">3</div> Global Validation & Edit</div>
           </div>
 
           ${this._step === 1 ? `
             <div class="drop-zone">
+              <h3 style="margin:0; color:#0070F2;">Select one or multiple planning Excel files</h3>
+              <p style="margin:0; color:#6a6d70; font-size:12px;">All sheets from each workbook will be automatically parsed and consolidated (.xlsx, .xls)</p>
               <input type="file" id="fileInput" class="file-input-native" multiple accept=".xlsx, .xls, .xlsm" />
-              <h3 style="margin:0 0 6px 0; color:#0070F2;">Drag and drop one or more planning Excel files</h3>
-              <p style="margin:0; color:#6a6d70; font-size:12px;">Click here or select multiple files simultaneously (.xlsx, .xls)</p>
-              <button class="btn" style="margin-top:14px; pointer-events:none;" type="button">Select Files</button>
             </div>
           ` : ''}
 
@@ -481,7 +510,7 @@ class ExcelUploaderPro extends HTMLElement {
                   <thead>
                     <tr>
                       <th style="width:30px;">#</th>
-                      <th>Source File</th>
+                      <th>Source File & Sheet</th>
                       ${this._requiredColumns.map(h => `<th>${h}</th>`).join('')}
                     </tr>
                   </thead>
