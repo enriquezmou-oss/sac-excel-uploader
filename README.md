@@ -1,41 +1,32 @@
-# [SheetJS](https://sheetjs.com)
+# Excel Planning Uploader Pro (SAP Analytics Cloud BTP)
 
-The SheetJS Community Edition offers battle-tested open-source solutions for
-extracting useful data from almost any complex spreadsheet and generating new
-spreadsheets that will work with legacy and modern software alike.
+> Enterprise-grade custom web component for SAP Analytics Cloud (SAC) featuring multi-file consolidation, master data cross-validation, inline cell editing, SAP Fiori Horizon design, and full audit logging.
 
-[SheetJS Pro](https://sheetjs.com/pro) offers solutions beyond data processing:
-Edit complex templates with ease; let out your inner Picasso with styling; make
-custom sheets with images/graphs/PivotTables; evaluate formula expressions and
-port calculations to web apps; automate common spreadsheet tasks, and much more!
+---
 
-## Documentation
+## 🚀 Architecture & Technical Stack
 
-- [API and Usage Documentation](https://docs.sheetjs.com)
+This widget is built as a **Native Web Component (Custom Element)** with encapsulated **Shadow DOM**, ensuring zero style leakage and seamless integration into SAC Analytic Stories.
 
-- [Downloadable Scripts and Modules](https://cdn.sheetjs.com)
+* **Local File Parsing**: Powered by **SheetJS (xlsx.full.min.js)** via official CDN.
+* **UI Design System**: Built with **SAP Fiori Horizon / SAP 72 Design Guidelines**.
+* **Multi-File Support**: Simultaneous selection and unification of multiple Excel planning templates.
+* **Smart Cross-Validation**: Real-time validation against simulated SAP SAC Master Data dictionaries (`COMPANY`, `COSTCENTER`).
+* **Data Governance**: Persistent mandatory fields via `localStorage` and interactive error logging export (`.csv`).
+* **Audit & Compliance**: Built-in BTP Audit Monitor tracking user sessions, rows processed, and timestamps.
 
-## Constellation
+---
 
-- <https://oss.sheetjs.com/notes/>: File Format Notes
+## 🛠️ Main Features
 
-- [`ssf`](packages/ssf): Format data using ECMA-376 spreadsheet format codes
+1. **Multi-File Upload Wizard**: Drag-and-drop or select multiple `.xlsx` planning files simultaneously.
+2. **Consolidation & Mapping**: Unified table preview with source file tracking (`Source File` column).
+3. **Inline Cell Correction**: Click-to-edit cells with instant re-validation and visual error tooltips.
+4. **Audit Monitor**: Dedicated tab tracking import history and corporate traceability.
 
-- [`xlsx-cli`](packages/xlsx-cli): NodeJS command-line tool for processing files
+---
 
-- [`cfb`](https://git.sheetjs.com/SheetJS/js-cfb): Container (OLE/ZIP) file
-processing library
+## 📦 Deployment & Integration
 
-- [`codepage`](https://git.sheetjs.com/SheetJS/js-codepage): Legacy text
-encodings for XLS and other legacy spreadsheet formats
-
-- [`dta`](packages/dta): Stata DTA file processor
-
-- [`test_files`](https://github.com/sheetjs/test_files): Test files and various
-plaintext baselines.
-
-## License
-
-Please consult the attached LICENSE file for details.  All rights not explicitly
-granted by the Apache 2.0 License are reserved by the Original Author.
-
+* Managed via GitHub (`enriquezmou-oss/sac-excel-uploader`).
+* Custom Web Component integrated into SAP Analytics Cloud stories.
