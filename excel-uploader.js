@@ -13,6 +13,10 @@ class ExcelUploaderPro extends HTMLElement {
     this._validatedDataJson = '[]';
     this._expectedSheetName = 'Sheet1';
     this._requiredColumns = 'ID,DESCRIPTION,H1,COMPANY,COSTCENTER,ASSET_CLASS,CAPITALIZED';
+    this._uniqueKeyColumns = 'ID';
+    this._numericColumns = '';
+    this._customRules = [];
+    this._history = [];
   }
 
   connectedCallback() {
@@ -20,6 +24,10 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   _addRule() {
+    var cols = this._requiredColumns ? this._requiredColumns.split(',') : [];
+    this._customRules.push({ name: 'Nueva regla', column: cols[0] || '', operator: 'no-vacío', value: '', severity: 'error' });
+    this._emitProp('customRulesJson', JSON.stringify(this._customRules));
+    this._activeTab = 'rules';
     this._render();
   }
 
@@ -31,7 +39,15 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   _render() {
-    this._shadow.innerHTML = `<style>:host { display: block; padding: 16px; font-family: Arial; }</style><div>Excel Planning Uploader Pro Loaded</div>`;
+    this._shadow.innerHTML = `
+      <style>
+        :host { display: block; font-family: Arial, sans-serif; padding: 16px; background: #F5F6F7; border: 1px solid #D1D7DD; border-radius: 4px; }
+        .title { font-size: 16px; font-weight: bold; color: #1D2D3E; margin-bottom: 12px; }
+        .status { padding: 4px 8px; background: #E6F0FF; color: #0064D9; border-radius: 10px; font-size: 12px; display: inline-block; }
+      </style>
+      <div class="title">Excel Planning Uploader Pro</div>
+      <div class="status">Estado: ${this._state}</div>
+    `;
   }
 }
 
