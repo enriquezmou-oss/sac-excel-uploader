@@ -1,11 +1,11 @@
 /**
  * ExcelUploaderPro — SAP Analytics Cloud Custom Widget
- * Version: 2.2.0
+ * Version: 2.2.1
  * Requires: SheetJS (loaded via CDN automatically if not present)
  * Tag:      <custom-excel-uploader-pro>
  *
  * Improvements in 2.2.0 (vs 2.1.0):
- *   • Removed DSP Artifact toggle (always-on internally)
+ *   • Removed DSP Artifact toggle from UI (sync always active)
  *   • Cleaner Full/Delta strategy bar with active badge
  *   • Visible scrollbars on all table wrappers and pre blocks
  *
@@ -117,7 +117,9 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   _storageSet(key, val) {
-    try { if (val === null) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+    try { if (val === null) localStorage.removeItem(key); else localStorage.setItem(key, JSON.stringify(val)); } catch (e) {
+      if (e && e.name !== 'QuotaExceededError') console.warn('[ExcelUploaderPro] localStorage write failed:', e.message);
+    }
   }
 
   _ensureXLSX() {
@@ -200,13 +202,12 @@ class ExcelUploaderPro extends HTMLElement {
   _evalAssistedCode(expr, row, colName, cacheKey) {
     const value = String(row[colName] ?? '').trim();
     const num = Number(value);
-    if (cacheKey) {
-      if (!this._compiledRules[cacheKey]) {
-        this._compiledRules[cacheKey] = new Function('value', 'num', 'row', '"use strict"; return (' + expr + ');');
-      }
-      return this._compiledRules[cacheKey](value, num, row);
+    // Always cache: use the provided key or fall back to the expression string itself
+    const key = cacheKey || ('__expr__' + expr);
+    if (!this._compiledRules[key]) {
+      this._compiledRules[key] = new Function('value', 'num', 'row', '"use strict"; return (' + expr + ');');
     }
-    return (new Function('value', 'num', 'row', '"use strict"; return (' + expr + ');'))(value, num, row);
+    return this._compiledRules[key](value, num, row);
   }
 
   _applyCellAutoFix(origIdx, colName, ruleId) {
@@ -230,6 +231,7 @@ class ExcelUploaderPro extends HTMLElement {
 
   _applyAllAutoFixes() {
     let fixedCount = 0;
+    let failedCount = 0;
     this._rows.forEach(row => {
       this._requiredColumns.forEach(col => {
         const fixable = ((row._alerts && row._alerts[col]) || []).find(a => a.autoFix);
@@ -242,14 +244,18 @@ class ExcelUploaderPro extends HTMLElement {
               this._recordCellModification(row, col, oldVal || '(Blank)', newVal);
               fixedCount++;
             }
-          } catch (e) {}
+          } catch (e) {
+            failedCount++;
+            console.warn('[ExcelUploaderPro] Auto-fix error — Row #' + row._rowNum + ' [' + col + ']:', e.message);
+          }
         }
       });
     });
     if (fixedCount > 0) {
       this._logAction('BULK_AUTO_FIX', 'Grid Auto-Fix (' + fixedCount + ' cells)', 'Executed Assisted Code Auto-Fix across all fixable alerts', fixedCount + ' alerts', 'FIXED');
       this._validateRows();
-      this._notify('Assisted Code repaired ' + fixedCount + ' cell(s) automatically!', 'success');
+      const failMsg = failedCount > 0 ? ' (' + failedCount + ' fix(es) failed — see console)' : '';
+      this._notify('Assisted Code repaired ' + fixedCount + ' cell(s) automatically!' + failMsg, 'success');
     } else {
       this._notify('No cells with Assisted Auto-Fix rules pending.', 'info');
     }
@@ -285,7 +291,7 @@ class ExcelUploaderPro extends HTMLElement {
       });
     });
 
-    // DSP Artifact sync is always active (toggle removed from UI)
+    // SAC Artifact sync is always active
 
     const fileInput = shadow.getElementById('fileInput');
     const dropZone = shadow.getElementById('dropZone');
@@ -2007,7 +2013,7 @@ class ExcelUploaderPro extends HTMLElement {
             <img class="sap-logo-img" src="${this._sapLogoUri}" alt="SAP Logo" />
             <div class="sap-title-wrap">
               <div class="sap-title">Excel Planning Uploader Pro</div>
-              <div class="sap-subtitle">Multi-Sheet Consolidation · Alert Semaphores · Full/Delta Engine · v2.2</div>
+              <div class="sap-subtitle">Multi-Sheet Consolidation · Alert Semaphores · Full/Delta Engine · v2.2.1</div>
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:12px;">
