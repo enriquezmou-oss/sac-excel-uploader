@@ -1,6 +1,6 @@
 /**
  * ExcelUploaderPro — SAP Analytics Cloud Custom Widget
- * Version: 2.3.0
+ * Version: 2.3.1.5
  * Requires: SheetJS (loaded via CDN automatically if not present)
  * Tag:      <custom-excel-uploader-pro>
  *
@@ -26,14 +26,16 @@ class ExcelUploaderPro extends HTMLElement {
     this._filesQueue = [];
     this._rows = [];
     this._headers = [];
-    this._currentUser = 'SAP User (Planning)';
+    this._currentUser = 'SAP User (Planning)'; // overridden by manifest property setter below
     this._isLoading = false;
     this._loadingText = 'Processing files...';
     this._xlsxReady = typeof XLSX !== 'undefined';
     this._showHelpModal = false;
 
-    this._loadStrategy = 'FULL';
+    this._loadStrategy  = 'FULL';
     this._dspArtifactSync = true;
+    this._targetVersion = this._storageGet('sac_target_version') || '';
+    this._targetDate    = this._storageGet('sac_target_date')    || '';
     this._parseConfig = { format: 'AUTO', delimiter: 'AUTO', numberFormat: 'STD', headerRow: 1 };
 
     const defaultCols = ['ID', 'DESCRIPTION', 'H1', 'COMPANY', 'COSTCENTER', 'ASSET_CLASS', 'CAPITALIZED'];
@@ -115,6 +117,18 @@ class ExcelUploaderPro extends HTMLElement {
     if (this._toastTimer) clearTimeout(this._toastTimer);
     if (this._searchRaf) cancelAnimationFrame(this._searchRaf);
     if (this._auditSearchRaf) cancelAnimationFrame(this._auditSearchRaf);
+  }
+
+  // ── SAC manifest property: currentUser ───────────────────────────────────────
+  // SAC sets this after the element is connected. The setter syncs _currentUser
+  // and triggers a re-render so the audit log always shows the real SAC user.
+  get currentUser() { return this._currentUser; }
+  set currentUser(val) {
+    const v = String(val || '').trim();
+    if (v && v !== this._currentUser) {
+      this._currentUser = v;
+      if (this._shadow && this._shadow.innerHTML) this._render();
+    }
   }
 
   _storageGet(key) {
@@ -285,8 +299,9 @@ class ExcelUploaderPro extends HTMLElement {
 
 
   // ── Persist transform config ─────────────────────────────────────────────────
-  _saveTransformMap() { this._storageSet('sac_transform_map_v1', this._transformMap); }
-  _saveConvTables()   { this._storageSet('sac_conv_tables_v1',   this._convTables);   }
+  _saveTransformMap()   { this._storageSet('sac_transform_map_v1',  this._transformMap); }
+  _saveConvTables()     { this._storageSet('sac_conv_tables_v1',    this._convTables);   }
+  _saveTargetConfig()   { this._storageSet('sac_target_version', this._targetVersion); this._storageSet('sac_target_date', this._targetDate); }
 
   // ── Core conversion resolver ─────────────────────────────────────────────────
   _applyConversionToValue(rawVal, rules) {
@@ -456,7 +471,7 @@ class ExcelUploaderPro extends HTMLElement {
           <div>
             <h3 style="margin:0;color:#1D2D3E;">🔄 Transform &amp; Convert Engine</h3>
             <p style="margin:4px 0 0;color:#556B82;font-size:12px;">
-              Map source columns → model dimensions and apply conversion rules (EXACT · SLICE · REGEX · PASSTHROUGH) <strong>before</strong> validation.
+              Map source columns → model dimensions and apply conversion rules (EXACT · SLICE · REGEX · PASSTHROUGH) <strong>before</strong> validation. <span style="color:#B45309;">⚠️ SLICE: to get last 6 chars of a 10-digit code → Start=4, End=empty (not End=6).</span>
               ${mappedDims > 0 || convertDims > 0 ? '<span style="color:#107E3E;font-weight:700;">Active: ' + mappedDims + ' mapping(s) · ' + convertDims + ' dimension(s) with conversion rules.</span>' : '<span style="color:#788FA6;">No rules configured yet.</span>'}
             </p>
           </div>
@@ -583,8 +598,8 @@ class ExcelUploaderPro extends HTMLElement {
             </select>
             <input type="text" class="input-std" id="newConvSrc" placeholder="Source pattern" style="width:150px;font-family:monospace;font-size:11px;" />
             <input type="text" class="input-std" id="newConvTgt" placeholder="Target value"   style="width:130px;font-family:monospace;font-size:11px;" />
-            <input type="number" class="input-std" id="newConvStart" placeholder="Slice from" style="width:76px;font-size:11px;" />
-            <input type="number" class="input-std" id="newConvEnd"   placeholder="Slice to"   style="width:76px;font-size:11px;" />
+            <input type="number" class="input-std" id="newConvStart" placeholder="Start (0=first)" style="width:88px;font-size:11px;" title="SLICE start index (0 = first char). To get LAST 6 of 10 digits: Start=4, End empty." />
+            <input type="number" class="input-std" id="newConvEnd"   placeholder="End (empty=last)" style="width:106px;font-size:11px;" title="SLICE end index — leave empty to take all chars from Start to end. Example last 6 of 10: Start=4, End empty." />
             <button class="btn" id="addConvRuleBtn" type="button" data-dim="${this._esc(activeDim)}">+ Add</button>
           </div>
         </div>
@@ -613,6 +628,29 @@ class ExcelUploaderPro extends HTMLElement {
     });
 
     // SAC Artifact sync is always active
+
+    // ── SAC Load Target: Version & Period ─────────────────────────────────────
+    const targetVersionInp = shadow.getElementById('targetVersionInp');
+    const targetDateInp    = shadow.getElementById('targetDateInp');
+    if (targetVersionInp) {
+      targetVersionInp.addEventListener('input', (e) => {
+        this._targetVersion = e.target.value.trim();
+        this._saveTargetConfig();
+        // Update badge without full re-render
+        const badge = shadow.querySelector('.sac-target-badge');
+        if (badge) badge.textContent = this._targetVersion && this._targetDate
+          ? '✅ ' + this._targetVersion + ' · ' + this._targetDate
+          : '⚠️ Configura Version y Period antes de sincronizar';
+      });
+      targetVersionInp.addEventListener('change', () => this._render());
+    }
+    if (targetDateInp) {
+      targetDateInp.addEventListener('input', (e) => {
+        this._targetDate = e.target.value.trim();
+        this._saveTargetConfig();
+      });
+      targetDateInp.addEventListener('change', () => this._render());
+    }
 
     const fileInput = shadow.getElementById('fileInput');
     const dropZone = shadow.getElementById('dropZone');
@@ -1195,6 +1233,10 @@ class ExcelUploaderPro extends HTMLElement {
     if (finishBtn) {
       finishBtn.addEventListener('click', () => {
         const stats = this._getAlertStats();
+        if (!this._targetVersion || !this._targetDate) {
+          this._notify('⚠️ Configura la Version y el Period (🎯 SAC Load Target) antes de sincronizar.', 'error');
+          return;
+        }
         if (stats.blockingRows > 0) { this._notify('Cannot synchronize: ' + stats.blockingRows + ' row(s) have BLOCKING alerts.', 'error'); return; }
         if ((stats.preventiveRows > 0 || stats.checkRows > 0) && !this._acknowledgeNonBlocking) {
           this._notify('Please confirm review of preventive and check alerts before synchronizing.', 'error'); return;
@@ -1238,7 +1280,7 @@ class ExcelUploaderPro extends HTMLElement {
         });
 
         const cleanPayloadArray = this._rows.map(r => {
-          const clean = { _loadStrategy: this._loadStrategy, _dspArtifactSync: this._dspArtifactSync };
+          const clean = { _loadStrategy: this._loadStrategy, _dspArtifactSync: this._dspArtifactSync, _targetVersion: this._targetVersion, _targetDate: this._targetDate };
           this._requiredColumns.forEach(c => { clean[c] = r[c] ?? ''; });
           return clean;
         });
@@ -1279,6 +1321,8 @@ class ExcelUploaderPro extends HTMLElement {
           bubbles: true, composed: true,
           detail: { properties: { validatedDataJson: JSON.stringify(cleanPayloadArray) } }
         }));
+        // Fire onDataReady — triggers SAC Analytics Designer event handler
+        this.dispatchEvent(new CustomEvent('dataReady', { bubbles: true, composed: true }));
 
         this._step = 1; this._filesQueue = []; this._rows = []; this._currentSessionLogs = [];
         this._acknowledgeNonBlocking = false; this._activeTab = 'monitorTab'; this._selectedAuditId = loadId;
@@ -2404,6 +2448,29 @@ class ExcelUploaderPro extends HTMLElement {
               ${this._loadStrategy === 'FULL'
                 ? '<span style="background:#EBF5FF;color:#005CB9;border:1px solid #B3D4FF;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">📦 Full — overwrites target slice</span>'
                 : '<span style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">⚡ Delta — appends records</span>'}
+            </div>
+            <div style="width:100%;display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding-top:12px;border-top:1px dashed #D9E0E6;margin-top:4px;">
+              <span style="font-weight:800;color:#1D2D3E;font-size:12px;padding-bottom:2px;">🎯 SAC Load Target:</span>
+              <div>
+                <label style="font-size:10px;font-weight:700;color:#556B82;display:block;margin-bottom:3px;">VERSION</label>
+                <input list="sacVersionList" id="targetVersionInp" class="input-std" style="width:170px;"
+                  placeholder="public.Actual" value="${this._esc(this._targetVersion)}" />
+                <datalist id="sacVersionList">
+                  <option value="public.Actual">
+                  <option value="public.Budget">
+                  <option value="public.Forecast">
+                  <option value="public.Plan">
+                </datalist>
+              </div>
+              <div>
+                <label style="font-size:10px;font-weight:700;color:#556B82;display:block;margin-bottom:3px;">PERIOD (YYYYMM)</label>
+                <input type="text" id="targetDateInp" class="input-std" style="width:110px;"
+                  placeholder="e.g. 202601" maxlength="7" value="${this._esc(this._targetDate)}" />
+              </div>
+              ${this._targetVersion && this._targetDate
+                ? '<span style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">✅ ' + this._esc(this._targetVersion) + ' · ' + this._esc(this._targetDate) + '</span>'
+                : '<span style="background:#FFF8E6;color:#B45309;border:1px solid #FCD34D;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">⚠️ Configura Version y Period antes de sincronizar</span>'
+              }
             </div>
           </div>
 
