@@ -2334,7 +2334,7 @@ class ExcelUploaderPro extends HTMLElement {
             <img class="sap-logo-img" src="${this._sapLogoUri}" alt="SAP Logo" />
             <div class="sap-title-wrap">
               <div class="sap-title">Excel Planning Uploader Pro</div>
-              <div class="sap-subtitle">Multi-Sheet Consolidation · Alert Semaphores · Full/Delta Engine · v2.2.1</div>
+              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.3.0</div>
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:12px;">
@@ -2609,6 +2609,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._bindEvents();
 
     // ── Transform & Convert handlers ──────────────────────────────────────────
+    const shadow = this._shadow;
     const runTransformBtn = shadow.getElementById('runTransformBtn');
     if (runTransformBtn) {
       runTransformBtn.addEventListener('click', () => {
