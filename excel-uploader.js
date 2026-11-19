@@ -1726,13 +1726,14 @@ class ExcelUploaderPro extends HTMLElement {
 
   _exportErrorLog() {
     const LF_CH = String.fromCharCode(10);
+    const csvCell = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
     let csv = 'SourceFile,Row,ID,Column,Alert Severity,Semaphore,Rule ID,Alert Description' + LF_CH;
     let count = 0;
     this._rows.forEach(r => {
       Object.keys(r._alerts || {}).forEach(col => {
         (r._alerts[col] || []).forEach(a => {
           count++;
-          csv += '"' + this._esc(r._sourceFile) + '",' + r._rowNum + ',"' + this._esc(r.ID || '') + '","' + col + '","' + a.severity + '","' + a.semaphore + '","' + a.ruleId + '","' + this._esc(a.msg) + '"' + LF_CH;
+          csv += [r._sourceFile, r._rowNum, r.ID || '', col, a.severity, a.semaphore, a.ruleId, a.msg].map(csvCell).join(',') + LF_CH;
         });
       });
     });
