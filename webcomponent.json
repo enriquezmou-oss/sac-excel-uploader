@@ -1,0 +1,36 @@
+{
+  "id": "com.sap.sac.exceluploaderpro",
+  "version": "2.3.0",
+  "name": "Excel Planning Uploader Pro",
+  "description": "Multi-Sheet Consolidation, Transform & Convert, Alert Semaphores for SAC Planning",
+  "newInstancePrefix": "ExcelUploaderPro_",
+  "icon": "",
+  "vendor": "SAP Planning",
+  "eula": "",
+  "license": "",
+  "webcomponents": [
+    {
+      "kind": "main",
+      "tag": "custom-excel-uploader-pro",
+      "url": "https://cdn.jsdelivr.net/gh/enriquezmou-oss/sac-excel-uploader@main/excel-uploader.js",
+      "integrity": "",
+      "ignoreIntegrity": true
+    }
+  ],
+  "properties": {
+    "validatedDataJson": {
+      "type": "string",
+      "default": ""
+    },
+    "currentUser": {
+      "type": "string",
+      "default": "SAP User (Planning)"
+    }
+  },
+  "methods": {},
+  "events": {
+    "dataReady": {
+      "description": "Triggered when the user clicks Synchronize on validated records"
+    }
+  }
+}
