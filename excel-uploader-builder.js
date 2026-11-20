@@ -58,6 +58,19 @@
       <input type="checkbox" id="allowUserRules" />
       <label for="allowUserRules" style="margin:0;">Allow business users to create custom rules</label>
     </div>
+
+    <hr />
+
+    <div class="group">
+      <label>SAC Planning Model ID ⭐</label>
+      <div class="hint">Technical name of the target planning model (e.g. SAP__BR_GEN_PLANNING). Required for DIS write-back.</div>
+      <input type="text" id="sacModelId" placeholder="SAP__BR_GEN_PLANNING" />
+    </div>
+    <div class="group">
+      <label>SAC Tenant URL (optional)</label>
+      <div class="hint">Leave blank — auto-detected from browser. Only set if running outside SAC context.</div>
+      <input type="text" id="sacTenantUrl" placeholder="https://mytenant.eu10.sapanalytics.cloud" />
+    </div>
   `;
 
   class ExcelUploaderBuilder extends HTMLElement {
@@ -69,7 +82,7 @@
     }
 
     _bindInputs() {
-      ["expectedSheetName", "requiredColumns", "uniqueKeyColumns", "numericColumns", "periodColumns"].forEach(id => {
+      ["expectedSheetName", "requiredColumns", "uniqueKeyColumns", "numericColumns", "periodColumns", "sacModelId", "sacTenantUrl"].forEach(id => {
         this._shadowRoot.getElementById(id).addEventListener("change", (e) => {
           this._emitChange(id, e.target.value);
         });
@@ -102,6 +115,8 @@
     set strictOrder(v) { this._shadowRoot.getElementById("strictOrder").checked = !!v; }
     set allowPartialUpload(v) { this._shadowRoot.getElementById("allowPartialUpload").checked = !!v; }
     set allowUserRules(v) { this._shadowRoot.getElementById("allowUserRules").checked = !!v; }
+    set sacModelId(v) { this._shadowRoot.getElementById("sacModelId").value = v || ""; }
+    set sacTenantUrl(v) { this._shadowRoot.getElementById("sacTenantUrl").value = v || ""; }
   }
 
   customElements.define("custom-excel-uploader-builder", ExcelUploaderBuilder);

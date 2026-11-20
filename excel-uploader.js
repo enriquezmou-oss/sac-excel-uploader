@@ -1,6 +1,6 @@
 /**
  * ExcelUploaderPro — SAP Analytics Cloud Custom Widget
- * Version: 2.4.0
+ * Version: 2.5.0
  * Requires: SheetJS (loaded via CDN automatically if not present)
  * Tag:      <custom-excel-uploader-pro>
  *
@@ -98,6 +98,9 @@ class ExcelUploaderPro extends HTMLElement {
     this._compiledRules = {};
     this._searchRaf = null;
     this._auditSearchRaf = null;
+    // ── SAC DIS connection ────────────────────────────────────────────────────
+    this._sacTenantUrl = this._storageGet('sac_dis_tenant_url') || '';
+    this._sacModelId   = this._storageGet('sac_dis_model_id')   || '';
     this._ensureXLSX();
     this._render();
   }
@@ -128,6 +131,26 @@ class ExcelUploaderPro extends HTMLElement {
     if (v && v !== this._currentUser) {
       this._currentUser = v;
       if (this._shadow && this._shadow.innerHTML) this._render();
+    }
+  }
+
+  // ── SAC DIS connection properties (set by SAC manifest or Analytics Designer) ─
+  get sacModelId() { return this._sacModelId; }
+  set sacModelId(val) {
+    const v = String(val || '').trim();
+    if (v !== this._sacModelId) {
+      this._sacModelId = v;
+      this._storageSet('sac_dis_model_id', v || null);
+      if (this._shadow && this._shadow.innerHTML) this._render();
+    }
+  }
+
+  get sacTenantUrl() { return this._sacTenantUrl; }
+  set sacTenantUrl(val) {
+    const v = String(val || '').trim().replace(/\/+$/, '');
+    if (v !== this._sacTenantUrl) {
+      this._sacTenantUrl = v;
+      this._storageSet('sac_dis_tenant_url', v || null);
     }
   }
 
@@ -302,6 +325,75 @@ class ExcelUploaderPro extends HTMLElement {
   _saveTransformMap()   { this._storageSet('sac_transform_map_v1',  this._transformMap); }
   _saveConvTables()     { this._storageSet('sac_conv_tables_v1',    this._convTables);   }
   _saveTargetConfig()   { this._storageSet('sac_target_version', this._targetVersion); this._storageSet('sac_target_date', this._targetDate); }
+
+  // ── SAC Data Import Service (DIS) REST API ────────────────────────────────
+  // Writes validated rows directly into the SAC planning model.
+  // Docs: /api/v1/dataimport/models/{modelId}/data
+  async _callDISApi(rows) {
+    const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
+    const modelPath = '/api/v1/dataimport/models/' + encodeURIComponent(this._sacModelId);
+
+    // 1. Fetch CSRF token — SAC requires x-csrf-token for all mutating calls
+    let csrfToken = '';
+    try {
+      const csrfResp = await fetch(base + modelPath, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json' }
+      });
+      if (!csrfResp.ok) {
+        throw new Error('Model endpoint returned HTTP ' + csrfResp.status + '. Verifica el Model ID "' + this._sacModelId + '".');
+      }
+      csrfToken = csrfResp.headers.get('x-csrf-token') || '';
+      if (!csrfToken) throw new Error('SAC no devolvió CSRF token. Verifica que el usuario esté autenticado en este tenant.');
+    } catch (e) {
+      if (e.message.startsWith('Model endpoint') || e.message.startsWith('SAC no')) throw e;
+      throw new Error('No se puede conectar con SAC DIS: ' + e.message + '. ¿Estás ejecutando el widget dentro de SAC?');
+    }
+
+    // 2. Build payload — column names must match SAC model dimension technical names
+    const disPayload = rows.map(r => {
+      const rec = {};
+      if (this._targetVersion) rec['Version'] = this._targetVersion;
+      if (this._targetDate)    rec['Date']    = String(this._targetDate);
+      this._requiredColumns.forEach(col => {
+        const v = String(r[col] ?? '').trim();
+        // Send numeric strings as numbers for measure dimensions
+        rec[col] = v !== '' && !isNaN(Number(v)) && v !== '' ? Number(v) : v;
+      });
+      return rec;
+    });
+
+    // 3. For FULL LOAD: SAC DIS uses defaultImportType to control replace vs. append
+    //    'deduplication' = upsert (update-or-insert by key dimensions) — works for both strategies
+    const importBody = {
+      data: disPayload,
+      ...(this._loadStrategy === 'FULL' ? { defaultImportType: 'deduplication' } : {})
+    };
+
+    // 4. POST data to DIS
+    const postResp = await fetch(base + modelPath + '/data', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-csrf-token': csrfToken,
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(importBody)
+    });
+
+    if (!postResp.ok) {
+      let errMsg = 'HTTP ' + postResp.status;
+      try {
+        const errBody = await postResp.json();
+        errMsg = (errBody.error && errBody.error.message) || errBody.message || JSON.stringify(errBody);
+      } catch (_) { try { errMsg += ' — ' + (await postResp.text()).slice(0, 300); } catch (_2) {} }
+      throw new Error(errMsg);
+    }
+
+    return postResp.json().catch(() => ({ ok: true }));
+  }
 
   // ── Core conversion resolver ─────────────────────────────────────────────────
   _applyConversionToValue(rawVal, rules) {
@@ -650,6 +742,16 @@ class ExcelUploaderPro extends HTMLElement {
         this._saveTargetConfig();
       });
       targetDateInp.addEventListener('change', () => this._render());
+    }
+
+    const sacModelIdInp = shadow.getElementById('sacModelIdInp');
+    if (sacModelIdInp) {
+      sacModelIdInp.addEventListener('input', (e) => {
+        const v = e.target.value.trim();
+        this._sacModelId = v;
+        this._storageSet('sac_dis_model_id', v || null);
+      });
+      sacModelIdInp.addEventListener('change', () => this._render());
     }
 
     const fileInput = shadow.getElementById('fileInput');
@@ -1231,7 +1333,7 @@ class ExcelUploaderPro extends HTMLElement {
     }
 
     if (finishBtn) {
-      finishBtn.addEventListener('click', () => {
+      finishBtn.addEventListener('click', async () => {
         const stats = this._getAlertStats();
         if (!this._targetVersion || !this._targetDate) {
           this._notify('⚠️ Configura la Version y el Period (🎯 SAC Load Target) antes de sincronizar.', 'error');
@@ -1323,6 +1425,23 @@ class ExcelUploaderPro extends HTMLElement {
         }));
         // Fire onDataReady — triggers SAC Analytics Designer event handler
         this.dispatchEvent(new CustomEvent('dataReady', { bubbles: true, composed: true }));
+
+        // ── SAC DIS write-back ─────────────────────────────────────────────
+        if (this._sacModelId) {
+          const rowCount = this._rows.length;
+          this._isLoading = true;
+          this._loadingText = 'Enviando ' + rowCount + ' filas al modelo ' + this._sacModelId + ' via SAC DIS…';
+          this._render();
+          try {
+            await this._callDISApi(this._rows);
+            this._isLoading = false;
+          } catch (err) {
+            this._isLoading = false;
+            this._notify('❌ SAC DIS Error: ' + err.message + ' — Audit guardado, puedes reintentar via Data Management.', 'error');
+            this._render();
+            return; // Keep state so user can retry; audit record already saved
+          }
+        }
 
         this._step = 1; this._filesQueue = []; this._rows = []; this._currentSessionLogs = [];
         this._acknowledgeNonBlocking = false; this._activeTab = 'monitorTab'; this._selectedAuditId = loadId;
@@ -2468,9 +2587,17 @@ class ExcelUploaderPro extends HTMLElement {
                 <input type="text" id="targetDateInp" class="input-std" style="width:110px;"
                   placeholder="e.g. 202601" maxlength="7" value="${this._esc(this._targetDate)}" />
               </div>
+              <div>
+                <label style="font-size:10px;font-weight:700;color:#556B82;display:block;margin-bottom:3px;">MODEL ID ⭐</label>
+                <input type="text" id="sacModelIdInp" class="input-std" style="width:200px;"
+                  placeholder="PLAN_CAPEX_PLANNING" value="${this._esc(this._sacModelId)}" title="SAC planning model technical name — required for DIS write-back" />
+              </div>
               ${this._targetVersion && this._targetDate
-                ? '<span style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">✅ ' + this._esc(this._targetVersion) + ' · ' + this._esc(this._targetDate) + '</span>'
-                : '<span style="background:#FFF8E6;color:#B45309;border:1px solid #FCD34D;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">⚠️ Configura Version y Period antes de sincronizar</span>'
+                ? (this._sacModelId
+                    ? '<span class="sac-target-badge" style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">✅ ' + this._esc(this._targetVersion) + ' · ' + this._esc(this._targetDate) + ' → ' + this._esc(this._sacModelId) + '</span>'
+                    : '<span class="sac-target-badge" style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">✅ ' + this._esc(this._targetVersion) + ' · ' + this._esc(this._targetDate) + ' <span style=\'color:#B45309\'>(sin Model ID — solo evento)</span></span>'
+                  )
+                : '<span class="sac-target-badge" style="background:#FFF8E6;color:#B45309;border:1px solid #FCD34D;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">⚠️ Configura Version y Period antes de sincronizar</span>'
               }
             </div>
           </div>
