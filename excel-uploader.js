@@ -332,16 +332,16 @@ class ExcelUploaderPro extends HTMLElement {
   _saveTargetConfig()   { this._storageSet('sac_target_version', this._targetVersion); this._storageSet('sac_target_date', this._targetDate); }
 
   // ── Fetch real model metadata from SAC DIS ───────────────────────────────
-  // Called whenever sacModelId changes; updates header badge with live name.
+  // Called whenever sacModelId changes; updates only the header subtitle inline.
   async _fetchModelInfo() {
     if (!this._sacModelId) {
       this._sacModelName  = '';
       this._sacModelState = '';
-      this._render();
+      this._updateHeaderSubtitle();
       return;
     }
     this._sacModelState = 'connecting';
-    this._render();
+    this._updateHeaderSubtitle();
     try {
       const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
       const resp = await fetch(base + '/api/v1/dataimport/models/' + encodeURIComponent(this._sacModelId), {
@@ -349,15 +349,27 @@ class ExcelUploaderPro extends HTMLElement {
         credentials: 'include',
         headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json' }
       });
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status + (resp.status === 404 ? ' — Model ID no encontrado' : resp.status === 401 || resp.status === 403 ? ' — Sin permisos' : ''));
       const meta = await resp.json().catch(() => ({}));
       this._sacModelName  = meta.description || meta.name || this._sacModelId;
       this._sacModelState = 'ok';
-    } catch (_) {
-      this._sacModelName  = '';
+    } catch (err) {
+      this._sacModelName  = err.message || 'Error de conexión';
       this._sacModelState = 'error';
     }
-    this._render();
+    this._updateHeaderSubtitle();
+  }
+
+  // Updates only the header subtitle span — avoids full re-render
+  _updateHeaderSubtitle() {
+    const sub = this._shadow && this._shadow.querySelector('.sap-subtitle');
+    if (!sub) return;
+    const badge =
+      this._sacModelState === 'connecting' ? ' &nbsp;|&nbsp; <span style="color:#A9B8C8;font-weight:600;">⏳ Conectando…</span>' :
+      this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
+      this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="' + this._esc(this._sacModelName) + '">⚠️ ' + this._esc(this._sacModelName.slice(0, 60)) + '</span>' :
+      '';
+    sub.innerHTML = 'Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.5.0' + badge;
   }
 
   // ── SAC Data Import Service (DIS) REST API ────────────────────────────────
@@ -1508,8 +1520,6 @@ class ExcelUploaderPro extends HTMLElement {
           bubbles: true, composed: true,
           detail: { properties: { validatedDataJson: JSON.stringify(cleanPayloadArray) } }
         }));
-        // Fire onDataReady — triggers SAC Analytics Designer event handler
-        this.dispatchEvent(new CustomEvent('dataReady', { bubbles: true, composed: true }));
 
         // ── SAC DIS write-back ─────────────────────────────────────────────
         if (this._sacModelId) {
@@ -1526,6 +1536,9 @@ class ExcelUploaderPro extends HTMLElement {
             return;
           }
         }
+
+        // Fire dataReady AFTER DIS completes so SAC table refresh sees the new data
+        this.dispatchEvent(new CustomEvent('dataReady', { bubbles: true, composed: true }));
 
         this._step = 1; this._filesQueue = []; this._rows = []; this._currentSessionLogs = [];
         this._acknowledgeNonBlocking = false; this._activeTab = 'monitorTab'; this._selectedAuditId = loadId;
@@ -2583,9 +2596,9 @@ class ExcelUploaderPro extends HTMLElement {
             <div class="sap-title-wrap">
               <div class="sap-title">Excel Planning Uploader Pro</div>
               <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.5.0${
-                this._sacModelState === 'connecting' ? ' &nbsp;|&nbsp; <span style="color:#A9B8C8;font-weight:600;">⏳ Conectando con SAC…</span>' :
+                this._sacModelState === 'connecting' ? ' &nbsp;|&nbsp; <span style="color:#A9B8C8;font-weight:600;">⏳ Conectando…</span>' :
                 this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
-                this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="No se puede conectar con el modelo SAC. Verifica el Model ID y la sesión.">⚠️ Modelo no encontrado</span>' :
+                this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="' + this._esc(this._sacModelName) + '">⚠️ ' + this._esc((this._sacModelName || 'Modelo no encontrado').slice(0, 60)) + '</span>' :
                 ''
               }</div>
             </div>
