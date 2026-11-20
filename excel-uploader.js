@@ -361,72 +361,103 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   // ── SAC Data Import Service (DIS) REST API ────────────────────────────────
-  // Writes validated rows directly into the SAC planning model.
-  // Docs: /api/v1/dataimport/models/{modelId}/data
+  // Full async job flow:
+  //   POST /data  → jobId
+  //   poll GET /jobs/{jobId} until finished_with_data
+  //   POST /jobs/{jobId}/run
+  //   poll GET /jobs/{jobId} until successful
   async _callDISApi(rows) {
-    const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
+    const base      = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
     const modelPath = '/api/v1/dataimport/models/' + encodeURIComponent(this._sacModelId);
 
-    // 1. Fetch CSRF token — SAC requires x-csrf-token for all mutating calls
-    let csrfToken = '';
-    try {
-      const csrfResp = await fetch(base + modelPath, {
-        method: 'GET',
-        credentials: 'include',
-        headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json' }
-      });
-      if (!csrfResp.ok) {
-        throw new Error('Model endpoint returned HTTP ' + csrfResp.status + '. Verifica el Model ID "' + this._sacModelId + '".');
-      }
-      csrfToken = csrfResp.headers.get('x-csrf-token') || '';
-      if (!csrfToken) throw new Error('SAC no devolvió CSRF token. Verifica que el usuario esté autenticado en este tenant.');
-    } catch (e) {
-      if (e.message.startsWith('Model endpoint') || e.message.startsWith('SAC no')) throw e;
-      throw new Error('No se puede conectar con SAC DIS: ' + e.message + '. ¿Estás ejecutando el widget dentro de SAC?');
-    }
+    // ── 1. Fetch CSRF token ──────────────────────────────────────────────────
+    const csrfResp = await fetch(base + modelPath, {
+      method: 'GET', credentials: 'include',
+      headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json' }
+    });
+    if (!csrfResp.ok) throw new Error('Model endpoint HTTP ' + csrfResp.status + ' — verifica el Model ID "' + this._sacModelId + '".');
+    const csrfToken = csrfResp.headers.get('x-csrf-token') || '';
+    if (!csrfToken) throw new Error('SAC no devolvió CSRF token. ¿Está el usuario autenticado?');
 
-    // 2. Build payload — column names must match SAC model dimension technical names
+    // ── 2. Build payload ─────────────────────────────────────────────────────
     const disPayload = rows.map(r => {
       const rec = {};
       if (this._targetVersion) rec['Version'] = this._targetVersion;
       if (this._targetDate)    rec['Date']    = String(this._targetDate);
       this._requiredColumns.forEach(col => {
         const v = String(r[col] ?? '').trim();
-        // Send numeric strings as numbers for measure dimensions
-        rec[col] = v !== '' && !isNaN(Number(v)) && v !== '' ? Number(v) : v;
+        rec[col] = (v !== '' && !isNaN(Number(v))) ? Number(v) : v;
       });
       return rec;
     });
 
-    // 3. For FULL LOAD: SAC DIS uses defaultImportType to control replace vs. append
-    //    'deduplication' = upsert (update-or-insert by key dimensions) — works for both strategies
     const importBody = {
       data: disPayload,
-      ...(this._loadStrategy === 'FULL' ? { defaultImportType: 'deduplication' } : {})
+      defaultImportType: this._loadStrategy === 'FULL' ? 'deduplication' : 'add'
     };
 
-    // 4. POST data to DIS
+    // ── 3. POST data — DIS returns a jobId (async) ───────────────────────────
+    const _setLoading = (txt) => {
+      this._loadingText = txt; this._render();
+    };
+    _setLoading('📤 Enviando ' + rows.length + ' filas a SAC DIS…');
+
     const postResp = await fetch(base + modelPath + '/data', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-csrf-token': csrfToken,
-        'Accept': 'application/json'
-      },
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken, 'Accept': 'application/json' },
       body: JSON.stringify(importBody)
     });
-
     if (!postResp.ok) {
-      let errMsg = 'HTTP ' + postResp.status;
-      try {
-        const errBody = await postResp.json();
-        errMsg = (errBody.error && errBody.error.message) || errBody.message || JSON.stringify(errBody);
-      } catch (_) { try { errMsg += ' — ' + (await postResp.text()).slice(0, 300); } catch (_2) {} }
-      throw new Error(errMsg);
+      let msg = 'HTTP ' + postResp.status;
+      try { const b = await postResp.json(); msg = b?.error?.message || b?.message || JSON.stringify(b); } catch (_) {}
+      throw new Error(msg);
+    }
+    const postBody = await postResp.json().catch(() => ({}));
+    const jobId = postBody.jobId || postBody.id;
+    if (!jobId) {
+      // Some DIS versions complete synchronously (no jobId) — treat as success
+      return postBody;
     }
 
-    return postResp.json().catch(() => ({ ok: true }));
+    // ── 4. Poll until finished_with_data ────────────────────────────────────
+    const jobUrl = base + '/api/v1/dataimport/jobs/' + jobId;
+    _setLoading('⏳ Validando datos en SAC (job ' + jobId + ')…');
+
+    await this._pollJobStatus(jobUrl, ['finished_with_data'], 60, 2000, _setLoading);
+
+    // ── 5. Run the job — applies data to the planning model ──────────────────
+    _setLoading('🚀 Aplicando datos al modelo ' + this._sacModelId + '…');
+    const runResp = await fetch(jobUrl + '/run', {
+      method: 'POST', credentials: 'include',
+      headers: { 'x-csrf-token': csrfToken, 'Accept': 'application/json' }
+    });
+    if (!runResp.ok) {
+      let msg = 'Run HTTP ' + runResp.status;
+      try { const b = await runResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
+      throw new Error(msg);
+    }
+
+    // ── 6. Poll until successful ─────────────────────────────────────────────
+    _setLoading('✅ Importando al modelo SAC…');
+    return await this._pollJobStatus(jobUrl, ['successful'], 120, 3000, _setLoading);
+  }
+
+  // Polls a DIS job URL until one of the target statuses is reached.
+  async _pollJobStatus(jobUrl, targetStatuses, maxAttempts, intervalMs, _setLoading) {
+    const failStatuses = ['failed', 'aborted', 'error'];
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(r => setTimeout(r, intervalMs));
+      const r = await fetch(jobUrl, { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/json' } });
+      if (!r.ok) continue;
+      const body = await r.json().catch(() => ({}));
+      const status = (body.status || body.jobStatus || '').toLowerCase();
+      if (targetStatuses.some(s => status.includes(s.toLowerCase()))) return body;
+      if (failStatuses.some(s => status.includes(s))) {
+        throw new Error('SAC DIS job ' + status + ': ' + (body.message || body.errorMessage || JSON.stringify(body)));
+      }
+      if (_setLoading) _setLoading('⏳ SAC DIS job: ' + (status || 'procesando') + '…');
+    }
+    throw new Error('Timeout esperando respuesta de SAC DIS (jobId: ' + jobUrl.split('/').pop() + ')');
   }
 
   // ── Core conversion resolver ─────────────────────────────────────────────────
@@ -1464,9 +1495,8 @@ class ExcelUploaderPro extends HTMLElement {
 
         // ── SAC DIS write-back ─────────────────────────────────────────────
         if (this._sacModelId) {
-          const rowCount = this._rows.length;
           this._isLoading = true;
-          this._loadingText = 'Enviando ' + rowCount + ' filas al modelo ' + this._sacModelId + ' via SAC DIS…';
+          this._loadingText = '📤 Iniciando importación a ' + this._sacModelId + '…';
           this._render();
           try {
             await this._callDISApi(this._rows);
@@ -1475,7 +1505,7 @@ class ExcelUploaderPro extends HTMLElement {
             this._isLoading = false;
             this._notify('❌ SAC DIS Error: ' + err.message + ' — Audit guardado, puedes reintentar via Data Management.', 'error');
             this._render();
-            return; // Keep state so user can retry; audit record already saved
+            return;
           }
         }
 
