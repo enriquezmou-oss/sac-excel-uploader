@@ -99,9 +99,12 @@ class ExcelUploaderPro extends HTMLElement {
     this._searchRaf = null;
     this._auditSearchRaf = null;
     // ── SAC DIS connection ────────────────────────────────────────────────────
-    this._sacTenantUrl = this._storageGet('sac_dis_tenant_url') || '';
-    this._sacModelId   = this._storageGet('sac_dis_model_id')   || '';
+    this._sacTenantUrl  = this._storageGet('sac_dis_tenant_url') || '';
+    this._sacModelId    = this._storageGet('sac_dis_model_id')   || '';
+    this._sacModelName  = '';   // display name fetched from SAC API
+    this._sacModelState = '';   // 'connecting' | 'ok' | 'error'
     this._ensureXLSX();
+    if (this._sacModelId) this._fetchModelInfo();
     this._render();
   }
 
@@ -139,9 +142,11 @@ class ExcelUploaderPro extends HTMLElement {
   set sacModelId(val) {
     const v = String(val || '').trim();
     if (v !== this._sacModelId) {
-      this._sacModelId = v;
+      this._sacModelId    = v;
+      this._sacModelName  = '';
+      this._sacModelState = v ? 'connecting' : '';
       this._storageSet('sac_dis_model_id', v || null);
-      if (this._shadow && this._shadow.innerHTML) this._render();
+      if (this._shadow && this._shadow.innerHTML) this._fetchModelInfo();
     }
   }
 
@@ -325,6 +330,35 @@ class ExcelUploaderPro extends HTMLElement {
   _saveTransformMap()   { this._storageSet('sac_transform_map_v1',  this._transformMap); }
   _saveConvTables()     { this._storageSet('sac_conv_tables_v1',    this._convTables);   }
   _saveTargetConfig()   { this._storageSet('sac_target_version', this._targetVersion); this._storageSet('sac_target_date', this._targetDate); }
+
+  // ── Fetch real model metadata from SAC DIS ───────────────────────────────
+  // Called whenever sacModelId changes; updates header badge with live name.
+  async _fetchModelInfo() {
+    if (!this._sacModelId) {
+      this._sacModelName  = '';
+      this._sacModelState = '';
+      this._render();
+      return;
+    }
+    this._sacModelState = 'connecting';
+    this._render();
+    try {
+      const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
+      const resp = await fetch(base + '/api/v1/dataimport/models/' + encodeURIComponent(this._sacModelId), {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json' }
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const meta = await resp.json().catch(() => ({}));
+      this._sacModelName  = meta.description || meta.name || this._sacModelId;
+      this._sacModelState = 'ok';
+    } catch (_) {
+      this._sacModelName  = '';
+      this._sacModelState = 'error';
+    }
+    this._render();
+  }
 
   // ── SAC Data Import Service (DIS) REST API ────────────────────────────────
   // Writes validated rows directly into the SAC planning model.
@@ -748,10 +782,12 @@ class ExcelUploaderPro extends HTMLElement {
     if (sacModelIdInp) {
       sacModelIdInp.addEventListener('input', (e) => {
         const v = e.target.value.trim();
-        this._sacModelId = v;
+        this._sacModelId    = v;
+        this._sacModelName  = '';
+        this._sacModelState = v ? 'connecting' : '';
         this._storageSet('sac_dis_model_id', v || null);
       });
-      sacModelIdInp.addEventListener('change', () => this._render());
+      sacModelIdInp.addEventListener('change', () => this._fetchModelInfo());
     }
 
     const fileInput = shadow.getElementById('fileInput');
@@ -2498,7 +2534,12 @@ class ExcelUploaderPro extends HTMLElement {
             <img class="sap-logo-img" src="${this._sapLogoUri}" alt="SAP Logo" />
             <div class="sap-title-wrap">
               <div class="sap-title">Excel Planning Uploader Pro</div>
-              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.5.0${this._sacModelId ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelId) + '</span>' : ''}</div>
+              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.5.0${
+                this._sacModelState === 'connecting' ? ' &nbsp;|&nbsp; <span style="color:#A9B8C8;font-weight:600;">⏳ Conectando con SAC…</span>' :
+                this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
+                this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="No se puede conectar con el modelo SAC. Verifica el Model ID y la sesión.">⚠️ Modelo no encontrado</span>' :
+                ''
+              }</div>
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:12px;">
