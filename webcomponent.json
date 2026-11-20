@@ -28,7 +28,7 @@
     },
     "sacModelId": {
       "type": "string",
-      "default": ""
+      "default": "PLAN_CAPEX_PLANNING"
     },
     "sacTenantUrl": {
       "type": "string",

@@ -100,7 +100,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._auditSearchRaf = null;
     // ── SAC DIS connection ────────────────────────────────────────────────────
     this._sacTenantUrl  = this._storageGet('sac_dis_tenant_url') || '';
-    this._sacModelId    = this._storageGet('sac_dis_model_id')   || '';
+    this._sacModelId    = this._storageGet('sac_dis_model_id')   || 'PLAN_CAPEX_PLANNING';
     this._sacModelName  = '';   // display name fetched from SAC API
     this._sacModelState = '';   // 'connecting' | 'ok' | 'error'
     this._ensureXLSX();
@@ -141,11 +141,13 @@ class ExcelUploaderPro extends HTMLElement {
   get sacModelId() { return this._sacModelId; }
   set sacModelId(val) {
     const v = String(val || '').trim();
-    if (v !== this._sacModelId) {
-      this._sacModelId    = v;
+    // If SAC passes empty string (old story with blank default), keep localStorage or built-in default
+    const effective = v || this._storageGet('sac_dis_model_id') || 'PLAN_CAPEX_PLANNING';
+    if (effective !== this._sacModelId) {
+      this._sacModelId    = effective;
       this._sacModelName  = '';
-      this._sacModelState = v ? 'connecting' : '';
-      this._storageSet('sac_dis_model_id', v || null);
+      this._sacModelState = 'connecting';
+      this._storageSet('sac_dis_model_id', effective);
       if (this._shadow && this._shadow.innerHTML) this._fetchModelInfo();
     }
   }
