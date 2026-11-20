@@ -1,6 +1,6 @@
 /**
  * ExcelUploaderPro — SAP Analytics Cloud Custom Widget
- * Version: 2.3.1.5
+ * Version: 2.4.0
  * Requires: SheetJS (loaded via CDN automatically if not present)
  * Tag:      <custom-excel-uploader-pro>
  *
@@ -2379,7 +2379,7 @@ class ExcelUploaderPro extends HTMLElement {
             <img class="sap-logo-img" src="${this._sapLogoUri}" alt="SAP Logo" />
             <div class="sap-title-wrap">
               <div class="sap-title">Excel Planning Uploader Pro</div>
-              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.3.0</div>
+              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.4.0</div>
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:12px;">
