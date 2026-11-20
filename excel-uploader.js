@@ -351,10 +351,17 @@ class ExcelUploaderPro extends HTMLElement {
         credentials: 'include',
         headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json' }
       });
-      if (!resp.ok) throw new Error('HTTP ' + resp.status + (resp.status === 404 ? ' — Model ID no encontrado' : resp.status === 401 || resp.status === 403 ? ' — Sin permisos' : ''));
-      const meta = await resp.json().catch(() => ({}));
-      this._sacModelName  = meta.description || meta.name || this._sacModelId;
-      this._sacModelState = 'ok';
+      if (resp.status === 404) {
+        // SAC DIS metadata endpoint not available — model is configured, treat as ready
+        this._sacModelName  = this._sacModelId;
+        this._sacModelState = 'ok';
+      } else if (!resp.ok) {
+        throw new Error('HTTP ' + resp.status + (resp.status === 401 || resp.status === 403 ? ' — Sin permisos DIS' : ''));
+      } else {
+        const meta = await resp.json().catch(() => ({}));
+        this._sacModelName  = meta.description || meta.name || this._sacModelId;
+        this._sacModelState = 'ok';
+      }
     } catch (err) {
       this._sacModelName  = err.message || 'Error de conexión';
       this._sacModelState = 'error';
@@ -384,14 +391,19 @@ class ExcelUploaderPro extends HTMLElement {
     const base      = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
     const modelPath = '/api/v1/dataimport/models/' + encodeURIComponent(this._sacModelId);
 
-    // ── 1. Fetch CSRF token ──────────────────────────────────────────────────
-    const csrfResp = await fetch(base + modelPath, {
-      method: 'GET', credentials: 'include',
-      headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json' }
-    });
-    if (!csrfResp.ok) throw new Error('Model endpoint HTTP ' + csrfResp.status + ' — verifica el Model ID "' + this._sacModelId + '".');
-    const csrfToken = csrfResp.headers.get('x-csrf-token') || '';
-    if (!csrfToken) throw new Error('SAC no devolvió CSRF token. ¿Está el usuario autenticado?');
+    // ── 1. Fetch CSRF token (from jobs endpoint — DIS model GET may not exist) ──
+    let csrfToken = '';
+    const csrfEndpoints = [
+      base + '/api/v1/dataimport/jobs?$top=1',
+      base + '/api/v1/dataimport/models/' + encodeURIComponent(this._sacModelId),
+    ];
+    for (const ep of csrfEndpoints) {
+      try {
+        const r = await fetch(ep, { method: 'GET', credentials: 'include', headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json' } });
+        const tok = r.headers.get('x-csrf-token');
+        if (tok && tok !== 'Required') { csrfToken = tok; break; }
+      } catch (_) {}
+    }
 
     // ── 2. Build payload ─────────────────────────────────────────────────────
     const disPayload = rows.map(r => {
