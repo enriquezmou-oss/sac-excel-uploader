@@ -764,6 +764,25 @@ class ExcelUploaderPro extends HTMLElement {
     `;
   }
 
+  // Updates only the badge span inline — avoids full re-render (which resets focus)
+  _refreshBadge(shadow) {
+    const badge = shadow.querySelector('.sac-target-badge');
+    if (!badge) return;
+    if (!this._targetVersion || !this._targetDate) {
+      badge.innerHTML = '⚠️ Configura Version y Period antes de sincronizar';
+      badge.style.cssText = 'background:#FFF8E6;color:#B45309;border:1px solid #FCD34D;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;';
+      return;
+    }
+    const base = '✅ ' + this._esc(this._targetVersion) + ' · ' + this._esc(this._targetDate);
+    if (this._sacModelId) {
+      badge.innerHTML = base + ' → <strong style="color:#5BBFFF;">' + this._esc(this._sacModelId) + '</strong>';
+      badge.style.cssText = 'background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;';
+    } else {
+      badge.innerHTML = base + ' <span style="color:#B45309;font-weight:600;">(sin Model ID — solo evento)</span>';
+      badge.style.cssText = 'background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;';
+    }
+  }
+
   _bindEvents() {
     const shadow = this._shadow;
 
@@ -793,18 +812,16 @@ class ExcelUploaderPro extends HTMLElement {
       targetVersionInp.addEventListener('input', (e) => {
         this._targetVersion = e.target.value.trim();
         this._saveTargetConfig();
-        // Update badge without full re-render
-        const badge = shadow.querySelector('.sac-target-badge');
-        if (badge) badge.textContent = this._targetVersion && this._targetDate
-          ? '✅ ' + this._targetVersion + ' · ' + this._targetDate
-          : '⚠️ Configura Version y Period antes de sincronizar';
+        this._refreshBadge(shadow);
       });
       targetVersionInp.addEventListener('change', () => this._render());
     }
     if (targetDateInp) {
       targetDateInp.addEventListener('input', (e) => {
         this._targetDate = e.target.value.trim();
+        this._targetDate = e.target.value.trim();
         this._saveTargetConfig();
+        this._refreshBadge(shadow);
       });
       targetDateInp.addEventListener('change', () => this._render());
     }
@@ -817,6 +834,7 @@ class ExcelUploaderPro extends HTMLElement {
         this._sacModelName  = '';
         this._sacModelState = v ? 'connecting' : '';
         this._storageSet('sac_dis_model_id', v || null);
+        this._refreshBadge(shadow);
       });
       sacModelIdInp.addEventListener('change', () => this._fetchModelInfo());
     }
