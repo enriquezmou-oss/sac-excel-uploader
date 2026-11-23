@@ -381,81 +381,88 @@ class ExcelUploaderPro extends HTMLElement {
     sub.innerHTML = 'Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.5.0' + badge;
   }
 
-  // ── SAC Data Import Service (DIS) REST API ────────────────────────────────
-  // Full async job flow:
-  //   POST /data  → jobId
-  //   poll GET /jobs/{jobId} until finished_with_data
-  //   POST /jobs/{jobId}/run
-  //   poll GET /jobs/{jobId} until successful
+  // ── SAC Data Import Service (DIS) REST API — official SAP 5-step flow ───────
+  // 1. CSRF  : GET /models (with x-sap-dis-request-source: fileUploadWidget)
+  // 2. Create: POST /models/{id}/factData → { jobID }
+  // 3. Upload: POST /jobs/{jobId}  Content-Type: text/csv
+  // 4. Run   : POST /jobs/{jobId}/run
+  // 5. Poll  : GET /jobs/{jobId}/status until COMPLETED / FAILED
   async _callDISApi(rows) {
-    const base      = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
-    const modelPath = '/api/v1/dataimport/models/' + encodeURIComponent(this._sacModelId);
+    const base       = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
+    const DIS        = base + '/api/v1/dataimport';
+    const DIS_HEADER = { 'x-sap-dis-request-source': 'fileUploadWidget' };
 
-    // ── 1. Fetch CSRF token (from jobs endpoint — DIS model GET may not exist) ──
-    let csrfToken = '';
-    const csrfEndpoints = [
-      base + '/api/v1/dataimport/jobs?$top=1',
-      base + '/api/v1/dataimport/models/' + encodeURIComponent(this._sacModelId),
-    ];
-    for (const ep of csrfEndpoints) {
-      try {
-        const r = await fetch(ep, { method: 'GET', credentials: 'include', headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json' } });
-        const tok = r.headers.get('x-csrf-token');
-        if (tok && tok !== 'Required') { csrfToken = tok; break; }
-      } catch (_) {}
-    }
+    const _setLoading = (txt) => { this._loadingText = txt; this._render(); };
 
-    // ── 2. Build payload ─────────────────────────────────────────────────────
-    const disPayload = rows.map(r => {
-      const rec = {};
-      if (this._targetVersion) rec['Version'] = this._targetVersion;
-      if (this._targetDate)    rec['Date']    = String(this._targetDate);
-      this._requiredColumns.forEach(col => {
-        const v = String(r[col] ?? '').trim();
-        rec[col] = (v !== '' && !isNaN(Number(v))) ? Number(v) : v;
-      });
-      return rec;
+    // ── 1. Fetch CSRF token from GET /models list ─────────────────────────
+    _setLoading('🔑 Obteniendo CSRF token de SAC DIS…');
+    const csrfResp = await fetch(DIS + '/models', {
+      method: 'GET', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': 'fetch', ...DIS_HEADER }
     });
+    const csrfToken = csrfResp.headers.get('x-csrf-token') || csrfResp.headers.get('X-Csrf-Token') || '';
 
-    const importBody = {
-      data: disPayload,
-      defaultImportType: this._loadStrategy === 'FULL' ? 'deduplication' : 'add'
-    };
+    // ── 2. Create import job: POST /models/{id}/factData ─────────────────
+    _setLoading('📋 Creando job de importación en SAC…');
+    const defaultValues = {};
+    if (this._targetVersion) defaultValues['Version'] = this._targetVersion;
+    if (this._targetDate)    defaultValues['Date']    = String(this._targetDate);
 
-    // ── 3. POST data — DIS returns a jobId (async) ───────────────────────────
-    const _setLoading = (txt) => {
-      this._loadingText = txt; this._render();
-    };
-    _setLoading('📤 Enviando ' + rows.length + ' filas a SAC DIS…');
-
-    const postResp = await fetch(base + modelPath + '/data', {
+    const jobCreateResp = await fetch(DIS + '/models/' + encodeURIComponent(this._sacModelId) + '/factData', {
       method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken, 'Accept': 'application/json' },
-      body: JSON.stringify(importBody)
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken, ...DIS_HEADER },
+      body: JSON.stringify({ Mapping: {}, DefaultValues: defaultValues, JobSettings: {} })
     });
-    if (!postResp.ok) {
-      let msg = 'HTTP ' + postResp.status;
-      try { const b = await postResp.json(); msg = b?.error?.message || b?.message || JSON.stringify(b); } catch (_) {}
+    if (!jobCreateResp.ok) {
+      let msg = 'Create job HTTP ' + jobCreateResp.status;
+      try { const b = await jobCreateResp.json(); msg = b?.error?.message || b?.message || JSON.stringify(b); } catch (_) {}
       throw new Error(msg);
     }
-    const postBody = await postResp.json().catch(() => ({}));
-    const jobId = postBody.jobId || postBody.id;
-    if (!jobId) {
-      // Some DIS versions complete synchronously (no jobId) — treat as success
-      return postBody;
+    const jobCreateBody = await jobCreateResp.json().catch(() => ({}));
+    const jobId = jobCreateBody.jobID || jobCreateBody.jobId || jobCreateBody.id;
+    if (!jobId) throw new Error('SAC DIS no devolvió jobID: ' + JSON.stringify(jobCreateBody));
+
+    // ── 3. Upload CSV data to job: POST /jobs/{jobId} ─────────────────────
+    _setLoading('📤 Subiendo ' + rows.length + ' filas a SAC DIS…');
+
+    // Build columns: required columns, with Version/Date prepended when set
+    const cols = [...this._requiredColumns];
+    if (this._targetVersion && !cols.includes('Version')) cols.unshift('Version');
+    if (this._targetDate    && !cols.includes('Date'))    cols.unshift('Date');
+
+    const csvLines = [cols.join(',')];
+    for (const r of rows) {
+      const vals = cols.map(col => {
+        let v;
+        if      (col === 'Version') v = this._targetVersion || '';
+        else if (col === 'Date')    v = this._targetDate ? String(this._targetDate) : '';
+        else                        v = r[col] ?? '';
+        v = String(v).trim();
+        if (v.includes(',') || v.includes('"') || v.includes('\n')) {
+          v = '"' + v.replace(/"/g, '""') + '"';
+        }
+        return v;
+      });
+      csvLines.push(vals.join(','));
+    }
+    const csvBody = csvLines.join('\n');
+
+    const csvResp = await fetch(DIS + '/jobs/' + jobId, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
+      body: csvBody
+    });
+    if (!csvResp.ok) {
+      let msg = 'Upload CSV HTTP ' + csvResp.status;
+      try { const b = await csvResp.json(); msg = b?.error?.message || b?.message || JSON.stringify(b); } catch (_) {}
+      throw new Error(msg);
     }
 
-    // ── 4. Poll until finished_with_data ────────────────────────────────────
-    const jobUrl = base + '/api/v1/dataimport/jobs/' + jobId;
-    _setLoading('⏳ Validando datos en SAC (job ' + jobId + ')…');
-
-    await this._pollJobStatus(jobUrl, ['finished_with_data'], 60, 2000, _setLoading);
-
-    // ── 5. Run the job — applies data to the planning model ──────────────────
+    // ── 4. Run the job: POST /jobs/{jobId}/run ────────────────────────────
     _setLoading('🚀 Aplicando datos al modelo ' + this._sacModelId + '…');
-    const runResp = await fetch(jobUrl + '/run', {
+    const runResp = await fetch(DIS + '/jobs/' + jobId + '/run', {
       method: 'POST', credentials: 'include',
-      headers: { 'x-csrf-token': csrfToken, 'Accept': 'application/json' }
+      headers: { 'x-csrf-token': csrfToken, ...DIS_HEADER }
     });
     if (!runResp.ok) {
       let msg = 'Run HTTP ' + runResp.status;
@@ -463,27 +470,34 @@ class ExcelUploaderPro extends HTMLElement {
       throw new Error(msg);
     }
 
-    // ── 6. Poll until successful ─────────────────────────────────────────────
-    _setLoading('✅ Importando al modelo SAC…');
-    return await this._pollJobStatus(jobUrl, ['successful'], 120, 3000, _setLoading);
+    // ── 5. Poll GET /jobs/{jobId}/status until COMPLETED ─────────────────
+    _setLoading('⏳ Esperando confirmación de SAC DIS…');
+    return await this._pollJobStatus(
+      DIS + '/jobs/' + jobId + '/status',
+      ['COMPLETED', 'COMPLETED_WITH_FAILURES'],
+      ['FAILED'],
+      120, 3000, _setLoading, DIS_HEADER
+    );
   }
 
-  // Polls a DIS job URL until one of the target statuses is reached.
-  async _pollJobStatus(jobUrl, targetStatuses, maxAttempts, intervalMs, _setLoading) {
-    const failStatuses = ['failed', 'aborted', 'error'];
+  // Polls a DIS /status URL until one of the target statuses is reached.
+  async _pollJobStatus(statusUrl, targetStatuses, failStatuses, maxAttempts, intervalMs, _setLoading, extraHeaders) {
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, intervalMs));
-      const r = await fetch(jobUrl, { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/json' } });
+      const r = await fetch(statusUrl, {
+        method: 'GET', credentials: 'include',
+        headers: { 'Accept': 'application/json', ...(extraHeaders || {}) }
+      });
       if (!r.ok) continue;
-      const body = await r.json().catch(() => ({}));
-      const status = (body.status || body.jobStatus || '').toLowerCase();
-      if (targetStatuses.some(s => status.includes(s.toLowerCase()))) return body;
-      if (failStatuses.some(s => status.includes(s))) {
+      const body   = await r.json().catch(() => ({}));
+      const status = (body.jobStatus || body.status || '').toUpperCase();
+      if (targetStatuses.some(s => status === s.toUpperCase())) return body;
+      if ((failStatuses || []).some(s => status === s.toUpperCase())) {
         throw new Error('SAC DIS job ' + status + ': ' + (body.message || body.errorMessage || JSON.stringify(body)));
       }
-      if (_setLoading) _setLoading('⏳ SAC DIS job: ' + (status || 'procesando') + '…');
+      if (_setLoading) _setLoading('⏳ SAC DIS: ' + (status || 'procesando') + '…');
     }
-    throw new Error('Timeout esperando respuesta de SAC DIS (jobId: ' + jobUrl.split('/').pop() + ')');
+    throw new Error('Timeout esperando SAC DIS (URL: ' + statusUrl + ')');
   }
 
   // ── Core conversion resolver ─────────────────────────────────────────────────
