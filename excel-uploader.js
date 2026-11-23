@@ -548,17 +548,21 @@ class ExcelUploaderPro extends HTMLElement {
     if (!jobId) throw new Error('SAC DIS no devolvió jobID: ' + JSON.stringify(jobCreateBody));
     console.log('[DIS] jobId:', jobId, '| importType:', usedImportType, '| body:', JSON.stringify(jobCreateBody));
 
-    // ── 4. Run the job ────────────────────────────────────────────────────────
+    // ── 4. Run the job (optional — some SAC tenants auto-run on POST) ─────────
     _setLoading('🚀 Aplicando datos al modelo ' + this._sacModelId + '…');
     const runResp = await fetch(DIS + '/jobs/' + jobId + '/run', {
       method: 'POST', credentials: 'include',
       headers: { 'x-csrf-token': csrfToken, ...DIS_HEADER }
     });
     console.log('[DIS] run HTTP:', runResp.status);
-    if (!runResp.ok) {
+    if (!runResp.ok && runResp.status !== 405) {
+      // 405 = this tenant auto-runs jobs on creation, skip silently
       let msg = 'Run HTTP ' + runResp.status;
       try { const b = await runResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
       throw new Error(msg);
+    }
+    if (runResp.status === 405) {
+      console.log('[DIS] run endpoint not available (405) — job auto-runs on this tenant, proceeding to poll');
     }
 
     // ── 5. Poll GET /jobs/{jobId} until successful ────────────────────────────
