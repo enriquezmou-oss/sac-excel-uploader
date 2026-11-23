@@ -5,6 +5,25 @@ Format: **[version] — date — summary**
 
 ---
 
+## [2.7.3] — 2026-11-23
+
+### What's New panel + single version constant
+
+- **What's New button** — new ★ button in the header (next to Help) opens a version history panel inline, without leaving the widget. Lists all versions with date, title, and bullet-point improvements. Latest version highlighted in green.
+- **Single version constant** — `_EPM_VERSION` now defined once at the top of the file. Subtitle, Help modal header, and changelog panel all reference it — no more manual updates in multiple places.
+- **Help / What's New mutual exclusion** — opening one automatically closes the other.
+
+---
+
+## [2.7.2] — 2026-11-23
+
+### Fix: ID column removal + dimension probe logging
+
+- **ID column ✕ button** — removed guard that prevented deleting the `ID` column from the grid schema. All columns can now be removed.
+- **Dimension probe logging** — added per-endpoint `[DIS] dim probe` console logs to diagnose which DIS API endpoint format is active on the tenant.
+
+---
+
 ## [2.7.1] — 2026-11-23
 
 ### Fix: Model Structure Validation — dimensions not loading on this tenant

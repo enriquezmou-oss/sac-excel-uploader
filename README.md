@@ -1,6 +1,6 @@
 # Excel Planning Uploader Pro — SAP Analytics Cloud Custom Widget
 
-> Enterprise-grade Web Component for SAP Analytics Cloud (SAC) **v2.7.1** — Multi-sheet Excel/CSV/TXT consolidation, configurable validation semaphores, Assisted Code Auto-Fix, Full/Delta load engine, **direct DIS write-back to SAC planning models**, drill-down Audit Monitor with multi-format exports, and SAP Fiori Horizon UX.
+> Enterprise-grade Web Component for SAP Analytics Cloud (SAC) **v2.7.3** — Multi-sheet Excel/CSV/TXT consolidation, configurable validation semaphores, Assisted Code Auto-Fix, Full/Delta load engine, **direct DIS write-back to SAC planning models**, drill-down Audit Monitor with multi-format exports, and SAP Fiori Horizon UX.
 
 **Vendor:** Jose Enriquez SixSevenGroup
 
@@ -84,8 +84,8 @@ Every successful synchronisation creates an immutable audit record containing:
 
 Custom export configurator: select exact column count, toggle business comments, toggle full audit trail.
 
-### ❓ Interactive Help Guide
-Built-in overlay (`? Help` button in the header) — step-by-step documentation without leaving the widget.
+### ❓ Interactive Help Guide & What's New
+Built-in overlays in the header — **? Help** shows step-by-step documentation; **★ What's New** shows version history with improvements. Both open inline without leaving the widget.
 
 ---
 
@@ -142,6 +142,18 @@ SheetJS is fetched from CDN on first load. If your SAC tenant blocks external CD
 ---
 
 ## Changelog
+
+### v2.7.3 — 2026-11-23
+- **What's New button** — ★ button in header opens version history panel inline. Latest version highlighted in green.
+- **Single version constant** — `_EPM_VERSION` defined once; subtitle, header, and changelog panel always in sync.
+- **Mutual exclusion** — opening What's New closes Help and vice versa.
+
+### v2.7.2 — 2026-11-23
+- **ID column removal** — ✕ button on the `ID` column in the Required Columns grid was incorrectly disabled; fixed.
+- **Dimension probe logging** — per-endpoint `[DIS] dim probe` console logs added for tenant diagnostics.
+
+### v2.7.1 — 2026-11-23
+- **Dimension fetch fix** — `_fetchModelDimensions()` tries 6 endpoint variants (CSRF, /dimensions, metadata) with GUID and technical name. `_parseDimensions()` now handles `columnID` / `columnType` SAC DIS field names.
 
 ### v2.6.1 — 2026-11-23
 - **Fix DIS run step (405)** — the `/jobs/{jobId}/run` endpoint returns 405 on this SAC tenant because the job is auto-executed on creation. The widget now detects this and skips the run call silently, proceeding directly to polling.
