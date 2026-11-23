@@ -17,6 +17,7 @@
  *   • User feedback (toast) when export functions have nothing to export
  *   • Cache invalidated automatically when rules are saved
  */
+if (typeof ExcelUploaderPro === 'undefined') {
 class ExcelUploaderPro extends HTMLElement {
   constructor() {
     super();
@@ -3276,3 +3277,4 @@ class ExcelUploaderPro extends HTMLElement {
 if (!customElements.get('custom-excel-uploader-pro')) {
   customElements.define('custom-excel-uploader-pro', ExcelUploaderPro);
 }
+} // end double-load guard
