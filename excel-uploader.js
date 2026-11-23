@@ -523,6 +523,7 @@ class ExcelUploaderPro extends HTMLElement {
     const jobId = jobCreateBody.jobID || jobCreateBody.jobId || jobCreateBody.id;
     if (!jobId) throw new Error('SAC DIS no devolvió jobID: ' + JSON.stringify(jobCreateBody));
     console.log('[DIS] jobId creado:', jobId, '| importType:', usedImportType);
+    console.log('[DIS] job create body completo:', JSON.stringify(jobCreateBody));
 
     // ── 3. Upload CSV data to job: POST /jobs/{jobId} ─────────────────────
     _setLoading('📤 Subiendo ' + rows.length + ' filas a SAC DIS…');
@@ -554,11 +555,15 @@ class ExcelUploaderPro extends HTMLElement {
       headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
       body: csvBody
     });
+    console.log('[DIS] upload CSV HTTP:', csvResp.status, '| URL:', DIS + '/jobs/' + jobId);
     if (!csvResp.ok) {
+      const rawBody = await csvResp.text().catch(() => '');
+      console.log('[DIS] upload error body:', rawBody);
       let msg = 'Upload CSV HTTP ' + csvResp.status;
-      try { const b = await csvResp.json(); msg = b?.error?.message || b?.message || JSON.stringify(b); } catch (_) {}
+      try { const b = JSON.parse(rawBody); msg = b?.error?.message || b?.message || JSON.stringify(b); } catch (_) {}
       throw new Error(msg);
     }
+
     console.log('[DIS] CSV subido OK — filas:', rows.length, '| tamaño CSV:', csvBody.length, 'bytes');
 
     // ── 3b. Wait for job to reach finished_with_data before run ──────────────
