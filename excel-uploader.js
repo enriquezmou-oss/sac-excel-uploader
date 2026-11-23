@@ -19,9 +19,14 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.0.1';
+const _EPM_VERSION = '3.1.0';
 
 const _EPM_CHANGELOG = [
+  { v: '3.1.0', date: '2026-11-23', title: 'Fix DIS two-step: endpoint correcto + abort si sin datos',
+    items: ['Cambia endpoint de upload de /jobs/{id}/data a /jobs/{id} (endpoint canónico SAP DIS SDK).',
+            'Fallback: si /jobs/{id} devuelve 405, intenta /jobs/{id}/data automáticamente.',
+            'Poll aborta a los 15s si el job sigue en READY_FOR_DATA (evita bloqueo infinito de UI).',
+            'Log mejorado: "[DIS] data upload jobId HTTP: X" y "[DIS] data upload jobId/data HTTP: X".'] },
   { v: '3.0.1', date: '2026-11-23', title: 'Bug fixes: double render, poll match, clear button',
     items: ['Fix double _render() after Transform & Convert — _notify() already re-renders.',
             'Fix DIS poll failure detection — uses startsWith instead of strict equality (catches UPLOAD_FAILED variants).',
@@ -787,9 +792,9 @@ class ExcelUploaderPro extends HTMLElement {
     if (!jobId) throw new Error('SAC DIS no devolvió jobID: ' + JSON.stringify(jobCreateBody));
     console.log('[DIS] jobId:', jobId, '| importType:', usedImportType, '| body:', JSON.stringify(jobCreateBody));
 
-    // ── 4. Upload CSV data if job is READY_FOR_DATA (two-step tenant) ──────────
-    // Some SAC tenants create the job first (empty) and require a separate data upload.
-    // Check job status; if READY_FOR_DATA, POST CSV to /jobs/{jobId}/data.
+    // ── 4. Upload CSV data (two-step tenant: job created empty) ──────────────
+    // Check initial job status; if READY_FOR_DATA the tenant requires a separate data upload.
+    // Try POST /jobs/{jobId} (SAP DIS SDK canonical) then /jobs/{jobId}/data as fallback.
     _setLoading('📤 Subiendo datos al job DIS…');
     const jobCheckResp = await fetch(DIS + '/jobs/' + jobId, {
       method: 'GET', credentials: 'include',
@@ -800,18 +805,21 @@ class ExcelUploaderPro extends HTMLElement {
     console.log('[DIS] job initial status:', jobInitStatus || '(unknown)');
 
     if (jobInitStatus === 'READY_FOR_DATA' || !jobInitStatus) {
-      // Need to POST CSV separately
-      const dataResp = await fetch(DIS + '/jobs/' + jobId + '/data', {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
-        body: csvBody
-      });
-      console.log('[DIS] data upload HTTP:', dataResp.status);
-      if (!dataResp.ok && dataResp.status !== 405) {
+      let dataUploaded = false;
+      for (const dataUrl of [DIS + '/jobs/' + jobId, DIS + '/jobs/' + jobId + '/data']) {
+        const dataResp = await fetch(dataUrl, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
+          body: csvBody
+        });
+        console.log('[DIS] data upload', dataUrl.endsWith('/data') ? 'jobId/data' : 'jobId', 'HTTP:', dataResp.status);
+        if (dataResp.ok) { dataUploaded = true; break; }
+        if (dataResp.status === 405 || dataResp.status === 404) continue;
         let msg = 'Data upload HTTP ' + dataResp.status;
         try { const b = await dataResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
         throw new Error(msg);
       }
+      if (!dataUploaded) console.warn('[DIS] data upload: neither endpoint accepted CSV');
     }
 
     // ── 5. Run the job ────────────────────────────────────────────────────────
@@ -857,6 +865,9 @@ class ExcelUploaderPro extends HTMLElement {
       if (targetStatuses.some(s => status === s || status.startsWith(s))) return body;
       if ((failStatuses || []).some(s => status.startsWith(s.toUpperCase()) || s.toUpperCase().startsWith(status))) {
         throw new Error('SAC DIS job ' + status + ': ' + (inner.message || inner.errorMessage || body.message || JSON.stringify(inner).slice(0, 200)));
+      }
+      if (status === 'READY_FOR_DATA' && i >= 4) {
+        throw new Error('SAC DIS: el job no recibió datos (sigue en READY_FOR_DATA tras ' + (i+1) + ' intentos). Revisa los permisos DIS o el nombre técnico del modelo.');
       }
       if (_setLoading) _setLoading('⏳ SAC DIS: ' + (status || 'procesando') + '…');
     }
