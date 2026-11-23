@@ -380,21 +380,14 @@ class ExcelUploaderPro extends HTMLElement {
       this._sacModelState = 'error';
     }
     this._updateHeaderSubtitle();
-    // re-render MODEL NAME field in SAC Load Target row
+    // update MODEL NAME input without full re-render
     const descEl = this._shadow && this._shadow.querySelector('#sacModelDescDisplay');
     if (descEl) {
       const desc = this._sacModelDesc || '';
       const id   = (this._sacModelId  || '').toUpperCase();
       const show = desc && desc.toUpperCase() !== id && !desc.toUpperCase().startsWith(id + ' ') && !desc.toUpperCase().startsWith(id + '-');
-      if (show) {
-        descEl.textContent = desc;
-        descEl.style.color = '#556B82';
-        descEl.style.fontStyle = 'normal';
-      } else {
-        descEl.textContent = 'Model name: —';
-        descEl.style.color = '#B0BEC5';
-        descEl.style.fontStyle = 'italic';
-      }
+      descEl.value = show ? desc : '';
+      descEl.style.color = show ? '#1D2D3E' : '#A9B8C8';
     }
   }
 
@@ -2924,23 +2917,31 @@ class ExcelUploaderPro extends HTMLElement {
                   placeholder="e.g. 202601" maxlength="7" value="${this._esc(this._targetDate)}" />
               </div>
               <div style="position:relative;">
-                <label style="font-size:10px;font-weight:700;color:#556B82;display:block;margin-bottom:3px;">MODEL ID ⭐</label>
-                <div style="display:flex;gap:4px;align-items:center;">
-                  <input type="text" id="sacModelIdInp" class="input-std" style="width:180px;"
-                    placeholder="PLAN_CAPEX_PLANNING" value="${this._esc(this._sacModelId)}" title="SAC planning model technical name — required for DIS write-back" />
-                  <button id="browseModelsBtn" class="btn btn-ghost" type="button" style="padding:5px 9px;font-size:11px;white-space:nowrap;" title="Buscar modelos disponibles en SAC">
-                    ${this._sacModelsLoading ? '⏳' : '🔍 SAC'}
-                  </button>
+                <div style="display:flex;gap:10px;align-items:flex-end;">
+                  <div>
+                    <label style="font-size:10px;font-weight:700;color:#556B82;display:block;margin-bottom:3px;">MODEL ID ⭐</label>
+                    <div style="display:flex;gap:4px;align-items:center;">
+                      <input type="text" id="sacModelIdInp" class="input-std" style="width:180px;"
+                        placeholder="PLAN_CAPEX_PLANNING" value="${this._esc(this._sacModelId)}" title="SAC planning model technical name — required for DIS write-back" />
+                      <button id="browseModelsBtn" class="btn btn-ghost" type="button" style="padding:5px 9px;font-size:11px;white-space:nowrap;" title="Browse available models in SAC">
+                        ${this._sacModelsLoading ? '⏳' : '🔍 SAC'}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label style="font-size:10px;font-weight:700;color:#556B82;display:block;margin-bottom:3px;">MODEL NAME</label>
+                    ${(() => {
+                      const desc = this._sacModelDesc || '';
+                      const id   = (this._sacModelId  || '').toUpperCase();
+                      const show = desc && desc.toUpperCase() !== id && !desc.toUpperCase().startsWith(id + ' ') && !desc.toUpperCase().startsWith(id + '-');
+                      return `<input type="text" id="sacModelDescDisplay" readonly
+                        style="width:200px;background:#F7F9FB;color:${show ? '#1D2D3E' : '#A9B8C8'};border:1px solid #D9E0E6;border-radius:4px;padding:5px 8px;font-size:12px;font-family:inherit;cursor:default;"
+                        value="${show ? this._esc(desc) : ''}"
+                        placeholder="—"
+                        title="${show ? this._esc(desc) : 'Model description will appear here after connecting to SAC DIS'}" />`;
+                    })()}
+                  </div>
                 </div>
-                ${(() => {
-                  // Only show description if it's meaningfully different from the technical name
-                  const desc = this._sacModelDesc || '';
-                  const id   = (this._sacModelId  || '').toUpperCase();
-                  const show = desc && desc.toUpperCase() !== id && !desc.toUpperCase().startsWith(id + ' ') && !desc.toUpperCase().startsWith(id + '-');
-                  return show
-                    ? `<div id="sacModelDescDisplay" style="margin-top:3px;font-size:10px;color:#556B82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;" title="${this._esc(desc)}">${this._esc(desc)}</div>`
-                    : `<div id="sacModelDescDisplay" style="margin-top:3px;font-size:10px;color:#B0BEC5;font-style:italic;">Model name: —</div>`;
-                })()}
                 ${this._showModelPicker ? (() => {
                   const filterTerm = (this._modelPickerFilter || '').toLowerCase();
                   const matches = (m) =>
