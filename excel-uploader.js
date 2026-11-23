@@ -408,7 +408,7 @@ class ExcelUploaderPro extends HTMLElement {
     if (this._targetVersion) defaultValues['Version'] = this._targetVersion;
     if (this._targetDate)    defaultValues['Date']    = String(this._targetDate);
 
-    const jobCreateResp = await fetch(DIS + '/models/' + encodeURIComponent(this._sacModelId) + '/factData', {
+    const jobCreateResp = await fetch(DIS + '/models/' + encodeURIComponent(this._sacModelId) + '/privateFactData', {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken, ...DIS_HEADER },
       body: JSON.stringify({ Mapping: {}, DefaultValues: defaultValues, JobSettings: {} })
@@ -2485,7 +2485,17 @@ class ExcelUploaderPro extends HTMLElement {
                 <td><strong>${h.rows}</strong> rows</td>
                 <td>${(h.editsCount || 0) > 0 ? '<span style="background:#FFF8E6;color:#B45309;border:1px solid #FCD34D;padding:2px 8px;border-radius:10px;font-weight:700;font-size:11px;">✎ ' + h.editsCount + ' action(s)</span>' : '<span style="color:#556B82;font-size:11px;">Direct (0 edits)</span>'}</td>
                 <td>${this._esc(h.timestamp)}</td>
-                <td><span style="background:#E6F9EC;color:#107E3E;padding:4px 10px;border-radius:12px;font-weight:700;font-size:11px;display:inline-flex;align-items:center;">${this._renderSemaphoreDot(h.semaphoreStatus || 'GREEN')} ${this._esc(h.status)}</span></td>
+                <td>
+                  ${h.disStatus === 'ERROR'
+                    ? `<span style="background:#FFF0F0;color:#BB0000;padding:4px 10px;border-radius:12px;font-weight:700;font-size:11px;display:inline-flex;align-items:center;">❌ ${this._esc(h.status)}</span>
+                       <div style="font-size:10px;color:#BB0000;margin-top:3px;max-width:260px;white-space:normal;line-height:1.3;">${this._esc(h.disError || 'Error DIS desconocido')}</div>`
+                    : h.disStatus === 'PARTIAL'
+                    ? `<span style="background:#FFF8E1;color:#7A5A00;padding:4px 10px;border-radius:12px;font-weight:700;font-size:11px;display:inline-flex;align-items:center;">⚠️ ${this._esc(h.status)}</span>`
+                    : h.disStatus === 'PENDING'
+                    ? `<span style="background:#F0F4FF;color:#0052CC;padding:4px 10px;border-radius:12px;font-weight:700;font-size:11px;display:inline-flex;align-items:center;">⏳ ${this._esc(h.status)}</span>`
+                    : `<span style="background:#E6F9EC;color:#107E3E;padding:4px 10px;border-radius:12px;font-weight:700;font-size:11px;display:inline-flex;align-items:center;">${this._renderSemaphoreDot(h.semaphoreStatus || 'GREEN')} ${this._esc(h.status)}</span>`
+                  }
+                </td>
                 <td style="text-align:right;white-space:nowrap;">
                   <button class="icon-btn direct-audit-exp-btn" data-fmt="XLSX" data-load-id="${this._esc(h.id)}" type="button" title="Export Excel .XLSX">📊 .XLSX</button>
                   <button class="icon-btn direct-audit-exp-btn" data-fmt="CSV" data-load-id="${this._esc(h.id)}" type="button" title="Export .CSV">📄 .CSV</button>
