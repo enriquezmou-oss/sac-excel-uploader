@@ -429,9 +429,9 @@ class ExcelUploaderPro extends HTMLElement {
             credentials: 'include',
             headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
           });
-          if (!r.ok) continue;
           const data = await r.json().catch(() => null);
-          if (!data) continue;
+          console.log('[DIS] dim probe', r.status, url.replace(base, ''), '→', JSON.stringify(data)?.slice(0, 300));
+          if (!r.ok || !data) continue;
           dims = this._parseDimensions(data);
           if (dims.length > 0) { console.log('[DIS] dimensions from:', url); break; }
         } catch (_) { continue; }
