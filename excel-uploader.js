@@ -22,13 +22,11 @@ if (typeof ExcelUploaderPro === 'undefined') {
 const _EPM_VERSION = '2.9.0';
 
 const _EPM_CHANGELOG = [
-  { v: '2.9.0', date: '2026-11-23', title: 'Column Mapping panel — simple text inputs, no model load',
-    items: ['New 🔗 Column Mapping panel: one text input per file column, type the SAC dimension name.',
-            'Leave blank = same name sent to DIS. ⊘ Excl. button marks a column as excluded.',
-            '⚡ Defaults button applies: ID→CAPEX_ITEM, H1→AMOUNT, DESCRIPTION→excluded.',
-            '💾 Apply saves all inputs to localStorage.',
-            'No model properties loaded — fast and simple.',
-            'Fix: OData sub-properties (COMPANY__ID, Date__YEAR…) filtered from dim parser.'] },
+  { v: '2.9.0', date: '2026-11-23', title: 'Column Mapping simple + fix DIS two-step upload',
+    items: ['New 🔗 Column Mapping panel: text inputs per file column, no model properties loaded.',
+            'Fix DIS upload: detect READY_FOR_DATA after job creation → POST CSV to /jobs/{jobId}/data.',
+            '⚡ Defaults: ID→CAPEX_ITEM, H1→AMOUNT, DESCRIPTION→excluded.',
+            '⊘ Excl. button per row to exclude a column from DIS upload.'] },
   { v: '2.8.0', date: '2026-11-23', title: 'Expanded dimension probe: OData, FPA REST, Planning API',
     items: ['6 new endpoint variants added to dimension probe: OData $metadata (XML), SAC FPA REST, Planning REST API.',
             'XML OData $metadata parsed to extract EntityType Properties as dimensions.',
@@ -781,7 +779,34 @@ class ExcelUploaderPro extends HTMLElement {
     if (!jobId) throw new Error('SAC DIS no devolvió jobID: ' + JSON.stringify(jobCreateBody));
     console.log('[DIS] jobId:', jobId, '| importType:', usedImportType, '| body:', JSON.stringify(jobCreateBody));
 
-    // ── 4. Run the job (optional — some SAC tenants auto-run on POST) ─────────
+    // ── 4. Upload CSV data if job is READY_FOR_DATA (two-step tenant) ──────────
+    // Some SAC tenants create the job first (empty) and require a separate data upload.
+    // Check job status; if READY_FOR_DATA, POST CSV to /jobs/{jobId}/data.
+    _setLoading('📤 Subiendo datos al job DIS…');
+    const jobCheckResp = await fetch(DIS + '/jobs/' + jobId, {
+      method: 'GET', credentials: 'include',
+      headers: { 'Accept': 'application/json', ...DIS_HEADER }
+    });
+    const jobCheckBody  = jobCheckResp.ok ? await jobCheckResp.json().catch(() => ({})) : {};
+    const jobInitStatus = ((jobCheckBody.d || jobCheckBody).jobStatus || (jobCheckBody.d || jobCheckBody).status || '').toUpperCase();
+    console.log('[DIS] job initial status:', jobInitStatus || '(unknown)');
+
+    if (jobInitStatus === 'READY_FOR_DATA' || !jobInitStatus) {
+      // Need to POST CSV separately
+      const dataResp = await fetch(DIS + '/jobs/' + jobId + '/data', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
+        body: csvBody
+      });
+      console.log('[DIS] data upload HTTP:', dataResp.status);
+      if (!dataResp.ok && dataResp.status !== 405) {
+        let msg = 'Data upload HTTP ' + dataResp.status;
+        try { const b = await dataResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
+        throw new Error(msg);
+      }
+    }
+
+    // ── 5. Run the job ────────────────────────────────────────────────────────
     _setLoading('🚀 Aplicando datos al modelo ' + this._sacModelId + '…');
     const runResp = await fetch(DIS + '/jobs/' + jobId + '/run', {
       method: 'POST', credentials: 'include',
@@ -789,16 +814,15 @@ class ExcelUploaderPro extends HTMLElement {
     });
     console.log('[DIS] run HTTP:', runResp.status);
     if (!runResp.ok && runResp.status !== 405 && runResp.status !== 412) {
-      // 405/412 = this tenant auto-runs jobs on creation, skip silently
       let msg = 'Run HTTP ' + runResp.status;
       try { const b = await runResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
       throw new Error(msg);
     }
     if (runResp.status === 405 || runResp.status === 412) {
-      console.log('[DIS] run endpoint returned', runResp.status, '— job auto-runs on this tenant, proceeding to poll');
+      console.log('[DIS] run endpoint returned', runResp.status, '— proceeding to poll');
     }
 
-    // ── 5. Poll GET /jobs/{jobId} until successful ────────────────────────────
+    // ── 6. Poll GET /jobs/{jobId} until successful ────────────────────────────
     _setLoading('⏳ Esperando confirmación de SAC DIS…');
     return await this._pollJobStatus(
       DIS + '/jobs/' + jobId,
