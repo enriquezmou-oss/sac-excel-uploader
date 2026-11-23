@@ -108,7 +108,8 @@ class ExcelUploaderPro extends HTMLElement {
     this._sacDISModelId   = '';  // resolved DIS internal GUID (≠ technical name)
     this._sacModels       = [];
     this._sacModelsLoading = false;
-    this._showModelPicker  = false;
+    this._showModelPicker   = false;
+    this._modelPickerFilter = '';
     this._ensureXLSX();
     if (this._sacModelId) this._fetchModelInfo();
     this._render();
@@ -389,9 +390,10 @@ class ExcelUploaderPro extends HTMLElement {
 
   // ── Fetch list of all models from SAC DIS ─────────────────────────────────
   async _fetchSacModels() {
-    this._sacModelsLoading = true;
-    this._showModelPicker  = true;
-    this._sacModels        = [];
+    this._sacModelsLoading  = true;
+    this._showModelPicker   = true;
+    this._modelPickerFilter = '';
+    this._sacModels         = [];
     this._render();
     try {
       const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
@@ -987,19 +989,33 @@ class ExcelUploaderPro extends HTMLElement {
       row.addEventListener('mouseenter', () => { row.style.background = '#EBF5FF'; });
       row.addEventListener('mouseleave', () => { row.style.background = ''; });
       row.addEventListener('click', () => {
-        const modelId    = row.dataset.modelId;
+        const disGuid    = row.dataset.modelId;    // internal GUID
+        const modelName  = row.dataset.modelName;  // technical name (preferred)
         const importType = row.dataset.importType || 'privateFactData';
-        this._sacModelId    = modelId;
+        this._sacModelId    = modelName || disGuid;  // store technical name
+        this._sacDISModelId = disGuid;               // cache GUID to skip resolve step
         this._sacImportType = importType;
         this._sacModelName  = '';
         this._sacModelState = 'connecting';
         this._showModelPicker = false;
-        this._storageSet('sac_dis_model_id', modelId);
+        this._modelPickerFilter = '';
+        this._storageSet('sac_dis_model_id', modelName || disGuid);
         this._storageSet('sac_import_type',  importType);
         this._fetchModelInfo();
         this._render();
       });
     });
+
+    const modelPickerFilterInp = shadow.getElementById('modelPickerFilterInp');
+    if (modelPickerFilterInp) {
+      modelPickerFilterInp.addEventListener('input', (e) => {
+        this._modelPickerFilter = e.target.value;
+        this._render();
+        // restore focus after re-render
+        const inp = this._shadow.getElementById('modelPickerFilterInp');
+        if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      });
+    }
 
     const fileInput = shadow.getElementById('fileInput');
     const dropZone = shadow.getElementById('dropZone');
@@ -2904,27 +2920,49 @@ class ExcelUploaderPro extends HTMLElement {
                     ${this._sacModelsLoading ? '⏳' : '🔍 SAC'}
                   </button>
                 </div>
-                ${this._showModelPicker ? `
-                  <div id="modelPickerDropdown" style="position:absolute;z-index:9999;top:calc(100% + 2px);left:0;min-width:360px;max-height:280px;overflow-y:auto;background:#fff;border:1px solid #0070F2;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);padding:4px 0;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid #E9EEF3;background:#F8FAFC;">
-                      <span style="font-weight:700;font-size:11px;color:#1D2D3E;">Modelos disponibles en SAC DIS</span>
+                ${this._showModelPicker ? (() => {
+                  const filterTerm = (this._modelPickerFilter || '').toLowerCase();
+                  const filtered = filterTerm
+                    ? this._sacModels.filter(m =>
+                        (m.name || '').toLowerCase().includes(filterTerm) ||
+                        (m.id   || '').toLowerCase().includes(filterTerm))
+                    : this._sacModels;
+                  return `
+                  <div id="modelPickerDropdown" style="position:absolute;z-index:9999;top:calc(100% + 2px);left:0;min-width:380px;max-height:320px;display:flex;flex-direction:column;background:#fff;border:1px solid #0070F2;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid #E9EEF3;background:#F8FAFC;border-radius:8px 8px 0 0;flex-shrink:0;">
+                      <span style="font-weight:700;font-size:11px;color:#1D2D3E;">Modelos SAC DIS (${this._sacModels.length})</span>
                       <button id="closeModelPickerBtn" type="button" style="background:none;border:none;cursor:pointer;font-size:14px;color:#556B82;padding:0 2px;">✕</button>
                     </div>
+                    <div style="padding:6px 10px;border-bottom:1px solid #E9EEF3;flex-shrink:0;">
+                      <input type="text" id="modelPickerFilterInp" placeholder="🔍 Buscar por nombre o ID…"
+                        value="${this._esc(this._modelPickerFilter)}"
+                        style="width:100%;box-sizing:border-box;border:1px solid #C0CDD8;border-radius:4px;padding:5px 8px;font-size:12px;outline:none;font-family:inherit;" />
+                    </div>
+                    <div style="overflow-y:auto;flex:1;">
                     ${this._sacModelsLoading
                       ? '<div style="padding:20px;text-align:center;color:#556B82;font-size:12px;">⏳ Cargando modelos…</div>'
-                      : this._sacModels.length === 0
-                        ? '<div style="padding:20px;text-align:center;color:#BB0000;font-size:12px;">Sin modelos disponibles o sin permisos DIS</div>'
-                        : this._sacModels.map(m => `
-                          <div class="sac-model-pick-row" data-model-id="${this._esc(m.id)}" data-import-type="${this._esc(m.importType || 'privateFactData')}"
-                            style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #F0F4F8;display:flex;justify-content:space-between;align-items:center;">
-                            <div>
-                              <div style="font-weight:700;font-size:12px;color:#0064D9;">${this._esc(m.id)}</div>
-                              ${m.name && m.name !== m.id ? `<div style="font-size:10px;color:#556B82;">${this._esc(m.name)}</div>` : ''}
-                            </div>
-                            ${m.importType ? `<span style="font-size:10px;background:#EBF5FF;color:#005CB9;padding:2px 7px;border-radius:10px;font-weight:600;">${this._esc(m.importType)}</span>` : ''}
-                          </div>`).join('')
+                      : filtered.length === 0
+                        ? `<div style="padding:20px;text-align:center;color:#BB0000;font-size:12px;">${filterTerm ? 'Sin resultados para "' + this._esc(filterTerm) + '"' : 'Sin modelos disponibles o sin permisos DIS'}</div>`
+                        : filtered.map(m => {
+                            const displayName = m.name || m.id;
+                            const showGuid    = m.name && m.name !== m.id;
+                            return `
+                            <div class="sac-model-pick-row"
+                              data-model-id="${this._esc(m.id)}"
+                              data-model-name="${this._esc(m.name || m.id)}"
+                              data-import-type="${this._esc(m.importType || 'privateFactData')}"
+                              style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #F0F4F8;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                              <div style="min-width:0;flex:1;">
+                                <div style="font-weight:700;font-size:12px;color:#0064D9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(displayName)}">${this._esc(displayName)}</div>
+                                ${showGuid ? `<div style="font-size:10px;color:#9BA8B3;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(m.id)}">${this._esc(m.id)}</div>` : ''}
+                              </div>
+                              ${m.importType ? `<span style="flex-shrink:0;font-size:10px;background:#EBF5FF;color:#005CB9;padding:2px 7px;border-radius:10px;font-weight:600;">${this._esc(m.importType)}</span>` : ''}
+                            </div>`;
+                          }).join('')
                     }
-                  </div>` : ''}
+                    </div>
+                  </div>`;
+                })() : ''}
               </div>
               ${this._targetVersion && this._targetDate
                 ? (this._sacModelId
