@@ -2366,6 +2366,13 @@ class ExcelUploaderPro extends HTMLElement {
               <div class="metric-box"><div class="metric-title">🛠️ Tracked Actions</div><div class="metric-val">${changeLog.length} events</div></div>
             </div>
 
+            ${rec.disStatus ? `<div style="margin:8px 0 4px;padding:10px 14px;border-radius:8px;font-size:12px;font-weight:600;border:1px solid ${rec.disStatus === 'OK' ? '#A3E6BF' : rec.disStatus === 'PARTIAL' ? '#FFD580' : '#F5B8B8'};background:${rec.disStatus === 'OK' ? '#E6F9EC' : rec.disStatus === 'PARTIAL' ? '#FFF8E1' : '#FFF0F0'};color:${rec.disStatus === 'OK' ? '#107E3E' : rec.disStatus === 'PARTIAL' ? '#7A5A00' : '#BB0000'};">
+              ${rec.disStatus === 'OK' ? '✅ SAC DIS: Datos grabados en el modelo' + (rec.disWrittenRows != null ? ' (' + rec.disWrittenRows + ' filas)' : '') : ''}
+              ${rec.disStatus === 'PARTIAL' ? '⚠️ SAC DIS: ' + (rec.disWrittenRows != null ? rec.disWrittenRows + ' grabadas, ' : '') + (rec.disFailedRows || '?') + ' rechazadas por el modelo' : ''}
+              ${rec.disStatus === 'ERROR' ? '❌ SAC DIS Error: ' + this._esc(rec.disError || 'Error desconocido') : ''}
+              ${rec.disStatus === 'PENDING' ? '⏳ SAC DIS: Pendiente de confirmación' : ''}
+            </div>` : ''}
+
             <div class="subtabs-bar">
               <button class="audit-subtab ${this._auditDetailSubTab === 'dataTab' ? 'active' : ''}" data-subtab="dataTab" type="button">📊 Consolidated Data Snapshot (${snapshotRows.length})</button>
               <button class="audit-subtab ${this._auditDetailSubTab === 'changesTab' ? 'active' : ''}" data-subtab="changesTab" type="button">🛠️ User Edits, Auto-Fixes & Checks (${changeLog.length})</button>
