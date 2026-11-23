@@ -19,9 +19,14 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.3.1';
+const _EPM_VERSION = '3.4.0';
 
 const _EPM_CHANGELOG = [
+  { v: '3.4.0', date: '2026-11-23', title: 'Detección de filas rechazadas por SAC DIS (invalidrecords)',
+    items: ['Tras COMPLETED, el widget consulta GET /jobs/{jobId}/invalidrecords.',
+            'Si hay filas rechazadas: estado cambia a "⚠️ CARGA PARCIAL", toast muestra el motivo.',
+            'El detalle del auditor muestra el mensaje de error DIS en un bloque monospace.',
+            'Detecta casos como "miembro de dimensión inválido" (ej: CC_FIN_02) que SAC DIS rechaza silenciosamente.'] },
   { v: '3.3.1', date: '2026-11-23', title: 'Fix: 3 bugs — doble render DIS error, doble render addConvRule, asignación duplicada targetDate',
     items: ['Elimina this._render() redundante tras this._notify() en el catch de DIS error (ya re-renderizaba).',
             'Elimina this._render() redundante tras this._notify() en el handler de addConvRuleBtn.',
@@ -868,12 +873,31 @@ class ExcelUploaderPro extends HTMLElement {
 
     // ── 6. Poll GET /jobs/{jobId} until successful ────────────────────────────
     _setLoading('⏳ Esperando confirmación de SAC DIS…');
-    return await this._pollJobStatus(
+    const pollResult = await this._pollJobStatus(
       DIS + '/jobs/' + jobId,
       ['SUCCESSFUL', 'SUCCESS', 'COMPLETED', 'COMPLETED_WITH_FAILURES', 'COMPLETE'],
       ['FAILED', 'UPLOADING_FAILED', 'UPLOADINGFAILED'],
       120, 3000, _setLoading, DIS_HEADER
     );
+
+    // ── 7. Fetch invalid records to detect silently-rejected rows ─────────────
+    try {
+      const invResp = await fetch(DIS + '/jobs/' + jobId + '/invalidrecords', {
+        method: 'GET', credentials: 'include',
+        headers: { 'Accept': 'application/json', ...DIS_HEADER }
+      });
+      if (invResp.ok) {
+        const invBody = await invResp.json().catch(() => ({}));
+        const records = invBody.value || invBody.invalidRecords || invBody.records || (Array.isArray(invBody) ? invBody : []);
+        if (records.length > 0) {
+          console.warn('[DIS] invalidrecords (' + records.length + '):', JSON.stringify(records).slice(0, 300));
+          pollResult._invalidRecords = records;
+          pollResult._invalidCount   = records.length;
+        }
+      }
+    } catch (_) {}
+
+    return pollResult;
   }
 
   // Polls a DIS /status URL until one of the target statuses is reached.
@@ -2104,20 +2128,27 @@ class ExcelUploaderPro extends HTMLElement {
           // Update audit with actual DIS result (rows written vs. rejected)
           const jobStatus  = (disResult?.jobStatus || disResult?.status || '').toUpperCase();
           const written    = disResult?.importedRecords ?? disResult?.writtenRecords ?? null;
-          const failed     = disResult?.failedRecords   ?? disResult?.rejectedRecords ?? 0;
+          const failed     = (disResult?.failedRecords ?? disResult?.rejectedRecords ?? 0) + (disResult?._invalidCount ?? 0);
+          const invRecs    = disResult?._invalidRecords || [];
           const idx = this._history.findIndex(h => h.id === loadId);
           if (idx !== -1) {
             if (failed > 0 || jobStatus === 'COMPLETED_WITH_FAILURES') {
               const writtenTxt = written != null ? written + ' grabadas, ' : '';
               this._history[idx].status    = '⚠️ CARGA PARCIAL — ' + writtenTxt + failed + ' rechazadas';
               this._history[idx].disStatus = 'PARTIAL';
+              if (invRecs.length > 0) {
+                // Store first error reason for display in audit detail
+                const firstErr = invRecs[0];
+                const reason   = firstErr?.errorMessage || firstErr?.message || firstErr?.error || JSON.stringify(firstErr).slice(0, 120);
+                this._history[idx].disError = failed + ' fila(s) rechazada(s) por SAC DIS: ' + reason;
+              }
             } else {
               const writtenTxt = written != null ? ' — ' + written + ' filas' : '';
               this._history[idx].status    = '🟢 CARGA COMPLETA' + writtenTxt;
               this._history[idx].disStatus = 'OK';
             }
             this._history[idx].disWrittenRows = written;
-            this._history[idx].disFailedRows  = failed;
+            this._history[idx].disFailedRows  = failed > 0 ? failed : null;
             this._saveHistory();
           }
         }
@@ -2136,7 +2167,8 @@ class ExcelUploaderPro extends HTMLElement {
           const infoRows = finalRec?.disWrittenRows != null ? ' — ' + finalRec.disWrittenRows + ' filas grabadas' : '';
           this._notify('🟢 CARGA COMPLETA — ' + loadId + ' · ' + this._loadStrategy + infoRows + ' → SAP Analytics Cloud ✅', 'success');
         } else if (finalRec?.disStatus === 'PARTIAL') {
-          this._notify('⚠️ CARGA PARCIAL — ' + loadId + ': ' + (finalRec.disWrittenRows || '0') + ' grabadas, ' + (finalRec.disFailedRows || '?') + ' rechazadas. Revisa la auditoría.', 'warning');
+          const reason = finalRec.disError ? ' · ' + finalRec.disError.slice(0, 120) : '';
+          this._notify('⚠️ CARGA PARCIAL — ' + loadId + ': ' + (finalRec.disWrittenRows || '0') + ' grabadas, ' + (finalRec.disFailedRows || '?') + ' rechazadas. Revisa la auditoría.' + reason, 'warning');
         }
       });
     }
@@ -2929,11 +2961,14 @@ class ExcelUploaderPro extends HTMLElement {
               <div class="metric-box"><div class="metric-title">🛠️ Tracked Actions</div><div class="metric-val">${changeLog.length} events</div></div>
             </div>
 
-            ${rec.disStatus ? `<div style="margin:8px 0 4px;padding:12px 16px;border-radius:8px;font-size:13px;font-weight:700;border:2px solid ${rec.disStatus === 'OK' ? '#107E3E' : rec.disStatus === 'PARTIAL' ? '#E9730C' : '#BB0000'};background:${rec.disStatus === 'OK' ? '#E6F9EC' : rec.disStatus === 'PARTIAL' ? '#FFF8E1' : '#FFF0F0'};color:${rec.disStatus === 'OK' ? '#107E3E' : rec.disStatus === 'PARTIAL' ? '#7A5A00' : '#BB0000'};display:flex;align-items:center;gap:10px;">
-              ${rec.disStatus === 'OK' ? this._renderSemaphoreDot('GREEN') + ' SAC DIS: CARGA COMPLETA' + (rec.disWrittenRows != null ? ' — <strong>' + rec.disWrittenRows + ' filas grabadas en el modelo</strong>' : '') : ''}
-              ${rec.disStatus === 'PARTIAL' ? this._renderSemaphoreDot('AMBER') + ' SAC DIS: CARGA PARCIAL — ' + (rec.disWrittenRows != null ? '<strong>' + rec.disWrittenRows + ' grabadas</strong>, ' : '') + '<strong>' + (rec.disFailedRows || '?') + ' rechazadas</strong> por el modelo' : ''}
-              ${rec.disStatus === 'ERROR' ? this._renderSemaphoreDot('RED') + ' SAC DIS ERROR: ' + this._esc(rec.disError || 'Error desconocido') : ''}
-              ${rec.disStatus === 'PENDING' ? this._renderSemaphoreDot('BLUE') + ' SAC DIS: Pendiente de confirmación' : ''}
+            ${rec.disStatus ? `<div style="margin:8px 0 4px;padding:12px 16px;border-radius:8px;font-size:13px;font-weight:700;border:2px solid ${rec.disStatus === 'OK' ? '#107E3E' : rec.disStatus === 'PARTIAL' ? '#E9730C' : '#BB0000'};background:${rec.disStatus === 'OK' ? '#E6F9EC' : rec.disStatus === 'PARTIAL' ? '#FFF8E1' : '#FFF0F0'};color:${rec.disStatus === 'OK' ? '#107E3E' : rec.disStatus === 'PARTIAL' ? '#7A5A00' : '#BB0000'};">
+              <div style="display:flex;align-items:center;gap:10px;">
+                ${rec.disStatus === 'OK' ? this._renderSemaphoreDot('GREEN') + ' SAC DIS: CARGA COMPLETA' + (rec.disWrittenRows != null ? ' — <strong>' + rec.disWrittenRows + ' filas grabadas en el modelo</strong>' : '') : ''}
+                ${rec.disStatus === 'PARTIAL' ? this._renderSemaphoreDot('AMBER') + ' SAC DIS: CARGA PARCIAL — ' + (rec.disWrittenRows != null ? '<strong>' + rec.disWrittenRows + ' grabadas</strong>, ' : '') + '<strong>' + (rec.disFailedRows || '?') + ' rechazadas</strong> por el modelo' : ''}
+                ${rec.disStatus === 'ERROR' ? this._renderSemaphoreDot('RED') + ' SAC DIS ERROR: ' + this._esc(rec.disError || 'Error desconocido') : ''}
+                ${rec.disStatus === 'PENDING' ? this._renderSemaphoreDot('BLUE') + ' SAC DIS: Pendiente de confirmación' : ''}
+              </div>
+              ${(rec.disStatus === 'PARTIAL' || rec.disStatus === 'ERROR') && rec.disError ? `<div style="margin-top:6px;padding:8px 10px;border-radius:6px;background:rgba(0,0,0,0.05);font-size:11px;font-weight:600;font-family:monospace;white-space:pre-wrap;line-height:1.5;">${this._esc(rec.disError)}</div>` : ''}
             </div>` : ''}
 
             <div class="subtabs-bar">
