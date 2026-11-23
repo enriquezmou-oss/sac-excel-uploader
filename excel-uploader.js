@@ -18,6 +18,40 @@
  *   • Cache invalidated automatically when rules are saved
  */
 if (typeof ExcelUploaderPro === 'undefined') {
+
+const _EPM_VERSION = '2.7.3';
+
+const _EPM_CHANGELOG = [
+  { v: '2.7.3', date: '2026-11-23', title: 'What\'s New panel + single version constant',
+    items: ['Added "What\'s New" button in header — shows version history inline without leaving the widget.',
+            'Version string now defined as a single constant (_EPM_VERSION) so subtitle, header and modal always stay in sync.',
+            'ID column can now be removed from Required Columns (✕ button was incorrectly disabled).'] },
+  { v: '2.7.2', date: '2026-11-23', title: 'Fix: ID column removal + dimension probe logging',
+    items: ['Removed guard that prevented deleting the "ID" column from the grid schema.',
+            'Added per-endpoint diagnostic logging ([DIS] dim probe) to identify DIS API response format.'] },
+  { v: '2.7.1', date: '2026-11-23', title: 'Fix: dimension fetch — CSRF endpoint chain + columnID parser',
+    items: ['_fetchModelDimensions now tries 6 endpoint variants (CSRF, /dimensions, metadata) with GUID and technical name.',
+            '_parseDimensions now handles SAC DIS "columns" array with "columnID" and "columnType" fields.',
+            'Added SIGNEDDATA to measure types. Better fallback message when no dimensions returned.'] },
+  { v: '2.7.0', date: '2026-11-23', title: 'Model Structure Validation panel',
+    items: ['Inline collapsible panel showing model dimensions with mapping status (✅ auto / ✅ mapped / ❌ missing).',
+            'Synchronize blocked when any ❌ missing dimension detected. "⚡ Add missing" button.',
+            'Dimension data fetched automatically from SAC DIS after model connects.'] },
+  { v: '2.6.1', date: '2026-11-23', title: 'Fix: 405 on /run step + MODEL NAME always visible',
+    items: ['POST /jobs/{jobId}/run returning 405 now skipped silently — job auto-executes on this tenant.',
+            'MODEL NAME field always rendered (placeholder "—" until description available).',
+            'MODEL NAME auto-populated from DIS metadata on connect.'] },
+  { v: '2.6.0', date: '2026-11-23', title: 'DIS single-step CSV + MODEL ID/NAME fields + redesigned picker',
+    items: ['DIS upload now single-step: POST CSV directly to /models/{GUID}/{importType}.',
+            'SAC Load Target: MODEL ID (editable) and MODEL NAME (readonly) shown side by side.',
+            'Model picker: technical name as primary label, description as subtitle, GUID in monospace.',
+            'Real-time search across name, description and GUID. Planning models listed first.'] },
+  { v: '2.5.0', date: '2026-11-22', title: 'Critical DIS fixes — GUID resolution + CSRF',
+    items: ['Automatic GUID resolution via _resolveDISModelId() — DIS requires internal GUID, not technical name.',
+            'Models list called without ?importType= parameter (caused 404 on this tenant).',
+            'CSRF token now fetched from model-specific endpoint. Double-load guard added.'] },
+];
+
 class ExcelUploaderPro extends HTMLElement {
   constructor() {
     super();
@@ -32,6 +66,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._loadingText = 'Processing files...';
     this._xlsxReady = typeof XLSX !== 'undefined';
     this._showHelpModal = false;
+    this._showChangelog = false;
 
     this._loadStrategy  = 'FULL';
     this._dspArtifactSync = true;
@@ -479,7 +514,7 @@ class ExcelUploaderPro extends HTMLElement {
       this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
       this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="' + this._esc(this._sacModelName) + '">⚠️ ' + this._esc(this._sacModelName.slice(0, 60)) + '</span>' :
       '';
-    sub.innerHTML = 'Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.7.2' + badge;
+    sub.innerHTML = 'Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v' + _EPM_VERSION + badge;
   }
 
   // ── Fetch list of all models from SAC DIS ─────────────────────────────────
@@ -1004,8 +1039,13 @@ class ExcelUploaderPro extends HTMLElement {
 
     const toggleHelpBtn = shadow.getElementById('toggleHelpBtn');
     const closeHelpModalBtn = shadow.getElementById('closeHelpModalBtn');
-    if (toggleHelpBtn) toggleHelpBtn.addEventListener('click', () => { this._showHelpModal = !this._showHelpModal; this._render(); });
+    if (toggleHelpBtn) toggleHelpBtn.addEventListener('click', () => { this._showHelpModal = !this._showHelpModal; this._showChangelog = false; this._render(); });
     if (closeHelpModalBtn) closeHelpModalBtn.addEventListener('click', () => { this._showHelpModal = false; this._render(); });
+
+    const toggleChangelogBtn = shadow.getElementById('toggleChangelogBtn');
+    const closeChangelogBtn = shadow.getElementById('closeChangelogBtn');
+    if (toggleChangelogBtn) toggleChangelogBtn.addEventListener('click', () => { this._showChangelog = !this._showChangelog; this._showHelpModal = false; this._render(); });
+    if (closeChangelogBtn) closeChangelogBtn.addEventListener('click', () => { this._showChangelog = false; this._render(); });
 
     shadow.querySelectorAll('.strategy-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -2309,6 +2349,43 @@ class ExcelUploaderPro extends HTMLElement {
     return '<span class="sev-badge sev-info">' + dot + ' Info</span>';
   }
 
+  _renderChangelogModal() {
+    if (!this._showChangelog) return '';
+    const rows = _EPM_CHANGELOG.map(entry => {
+      const isLatest = entry.v === _EPM_VERSION;
+      return `
+        <div style="border:1px solid ${isLatest ? '#107E3E' : '#D9E0E6'};border-radius:8px;padding:12px 14px;background:${isLatest ? '#F5FAF5' : '#FAFBFC'};">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="background:${isLatest ? '#107E3E' : '#556B82'};color:#FFF;border-radius:12px;padding:2px 10px;font-size:11px;font-weight:700;">v${entry.v}</span>
+            <span style="font-size:12px;color:#8A9BB0;">${entry.date}</span>
+            ${isLatest ? '<span style="background:#107E3E;color:#FFF;border-radius:8px;padding:1px 7px;font-size:10px;font-weight:600;">LATEST</span>' : ''}
+          </div>
+          <div style="font-size:13px;font-weight:600;color:#1D2D3E;margin-bottom:5px;">${this._esc(entry.title)}</div>
+          <ul style="margin:0;padding-left:16px;">
+            ${entry.items.map(i => `<li style="font-size:12px;color:#3D4F5F;line-height:1.5;">${this._esc(i)}</li>`).join('')}
+          </ul>
+        </div>`;
+    }).join('');
+    return `
+      <div class="help-modal-overlay">
+        <div class="help-modal-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #D9E0E6;padding-bottom:12px;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="background:#107E3E;color:#FFF;width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;">★</span>
+              <div>
+                <h3 style="margin:0;color:#1D2D3E;font-size:16px;">What's New — Excel Planning Uploader Pro</h3>
+                <span style="font-size:11px;color:#556B82;">Version history and improvements</span>
+              </div>
+            </div>
+            <button class="btn" id="closeChangelogBtn" type="button">✕ Close</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px;max-height:420px;overflow:auto;">
+            ${rows}
+          </div>
+        </div>
+      </div>`;
+  }
+
   _renderHelpModal() {
     if (!this._showHelpModal) return '';
     return `
@@ -2927,13 +3004,14 @@ class ExcelUploaderPro extends HTMLElement {
       <div class="main-card">
         ${this._isLoading ? '<div class="busy-overlay"><div class="spinner"></div><div style="font-weight:700;color:#1D2D3E;">' + this._esc(this._loadingText) + '</div></div>' : ''}
         ${this._renderHelpModal()}
+        ${this._renderChangelogModal()}
 
         <div class="sap-header">
           <div class="sap-brand">
             <img class="sap-logo-img" src="${this._sapLogoUri}" alt="SAP Logo" />
             <div class="sap-title-wrap">
               <div class="sap-title">Excel Planning Uploader Pro</div>
-              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.7.2${
+              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v${_EPM_VERSION}${
                 this._sacModelState === 'connecting' ? ' &nbsp;|&nbsp; <span style="color:#A9B8C8;font-weight:600;">⏳ Conectando…</span>' :
                 this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
                 this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="' + this._esc(this._sacModelName) + '">⚠️ ' + this._esc((this._sacModelName || 'Modelo no encontrado').slice(0, 60)) + '</span>' :
@@ -2943,6 +3021,10 @@ class ExcelUploaderPro extends HTMLElement {
           </div>
           <div style="display:flex;align-items:center;gap:12px;">
             <span class="sap-badge-env">☁️ SAP Analytics Cloud</span>
+            <button class="help-icon-btn" id="toggleChangelogBtn" type="button" title="What's New — version history">
+              <span style="background:#107E3E;color:#FFF;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;">★</span>
+              <span>What's New</span>
+            </button>
             <button class="help-icon-btn" id="toggleHelpBtn" type="button" title="Interactive Help Guide">
               <span style="background:#0070F2;color:#FFF;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;">?</span>
               <span>Help</span>
