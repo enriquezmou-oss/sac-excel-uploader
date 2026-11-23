@@ -383,8 +383,11 @@ class ExcelUploaderPro extends HTMLElement {
     // re-render MODEL NAME field in SAC Load Target row
     const descEl = this._shadow && this._shadow.querySelector('#sacModelDescDisplay');
     if (descEl) {
-      if (this._sacModelDesc) {
-        descEl.textContent = this._sacModelDesc;
+      const desc = this._sacModelDesc || '';
+      const id   = (this._sacModelId  || '').toUpperCase();
+      const show = desc && desc.toUpperCase() !== id && !desc.toUpperCase().startsWith(id + ' ') && !desc.toUpperCase().startsWith(id + '-');
+      if (show) {
+        descEl.textContent = desc;
         descEl.style.color = '#556B82';
         descEl.style.fontStyle = 'normal';
       } else {
@@ -2929,10 +2932,15 @@ class ExcelUploaderPro extends HTMLElement {
                     ${this._sacModelsLoading ? '⏳' : '🔍 SAC'}
                   </button>
                 </div>
-                ${this._sacModelDesc
-                  ? `<div id="sacModelDescDisplay" style="margin-top:3px;font-size:10px;color:#556B82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;" title="${this._esc(this._sacModelDesc)}">${this._esc(this._sacModelDesc)}</div>`
-                  : `<div id="sacModelDescDisplay" style="margin-top:3px;font-size:10px;color:#B0BEC5;font-style:italic;">Model name: —</div>`
-                }
+                ${(() => {
+                  // Only show description if it's meaningfully different from the technical name
+                  const desc = this._sacModelDesc || '';
+                  const id   = (this._sacModelId  || '').toUpperCase();
+                  const show = desc && desc.toUpperCase() !== id && !desc.toUpperCase().startsWith(id + ' ') && !desc.toUpperCase().startsWith(id + '-');
+                  return show
+                    ? `<div id="sacModelDescDisplay" style="margin-top:3px;font-size:10px;color:#556B82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;" title="${this._esc(desc)}">${this._esc(desc)}</div>`
+                    : `<div id="sacModelDescDisplay" style="margin-top:3px;font-size:10px;color:#B0BEC5;font-style:italic;">Model name: —</div>`;
+                })()}
                 ${this._showModelPicker ? (() => {
                   const filterTerm = (this._modelPickerFilter || '').toLowerCase();
                   const matches = (m) =>
