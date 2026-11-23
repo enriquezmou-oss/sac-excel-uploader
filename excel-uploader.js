@@ -442,6 +442,7 @@ class ExcelUploaderPro extends HTMLElement {
         return match.modelID;
       }
     } catch (_) {}
+    console.warn('[DIS] GUID no resuelto — usando nombre técnico como fallback:', this._sacModelId, '(puede causar [1003])');
     return this._sacModelId; // fallback: use as-is
   }
 
@@ -461,6 +462,7 @@ class ExcelUploaderPro extends HTMLElement {
     // ── 0. Resolve DIS internal GUID (SAC uses GUIDs, not technical names) ───
     _setLoading('🔍 Resolviendo ID del modelo en SAC DIS…');
     const disModelId = await this._resolveDISModelId();
+    console.log('[DIS] usando modelId:', disModelId, '| técnico:', this._sacModelId, '| GUID en caché:', this._sacDISModelId || '(vacío)');
 
     // ── 1. Fetch CSRF token from the model endpoint itself (official SAP pattern) ─
     _setLoading('🔑 Obteniendo CSRF token de SAC DIS…');
@@ -470,6 +472,7 @@ class ExcelUploaderPro extends HTMLElement {
       headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json', ...DIS_HEADER }
     });
     const csrfToken = csrfResp.headers.get('x-csrf-token') || csrfResp.headers.get('X-Csrf-Token') || '';
+    console.log('[DIS] CSRF:', csrfToken ? '✅ obtenido' : '❌ vacío (HTTP ' + csrfResp.status + ')');
 
     // ── 2. Create import job — auto-detect importType if needed ──────────────
     _setLoading('📋 Creando job de importación en SAC…');
@@ -519,8 +522,9 @@ class ExcelUploaderPro extends HTMLElement {
     const jobCreateBody = await jobCreateResp.json().catch(() => ({}));
     const jobId = jobCreateBody.jobID || jobCreateBody.jobId || jobCreateBody.id;
     if (!jobId) throw new Error('SAC DIS no devolvió jobID: ' + JSON.stringify(jobCreateBody));
+    console.log('[DIS] jobId creado:', jobId, '| importType:', usedImportType);
 
-    // ── 3. Upload CSV data to job: POST /jobs/{jobId} ─────────────────────
+    // ── 3. Upload CSV data to job: PUT /jobs/{jobId} ──────────────────────
     _setLoading('📤 Subiendo ' + rows.length + ' filas a SAC DIS…');
 
     // Build columns: required columns, with Version/Date prepended when set
@@ -546,7 +550,7 @@ class ExcelUploaderPro extends HTMLElement {
     const csvBody = csvLines.join('\n');
 
     const csvResp = await fetch(DIS + '/jobs/' + jobId, {
-      method: 'POST', credentials: 'include',
+      method: 'PUT', credentials: 'include',
       headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
       body: csvBody
     });
