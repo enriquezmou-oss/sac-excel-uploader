@@ -2659,7 +2659,7 @@ class ExcelUploaderPro extends HTMLElement {
         .fiori-switch input:checked + .fiori-slider { background-color:#0070F2; }
         .fiori-switch input:checked + .fiori-slider:before { transform:translateX(18px); }
         .toast-banner { display:flex; align-items:center; justify-content:space-between; padding:10px 24px; font-weight:600; font-size:12px; color:#FFFFFF; }
-        .toast-info { background:#0070F2; } .toast-success { background:#107E3E; } .toast-error { background:#BB0000; }
+        .toast-info { background:#0070F2; } .toast-success { background:#107E3E; } .toast-error { background:#BB0000; } .toast-warning { background:#E76500; }
         .nav-tabs { display:flex; background:#FFFFFF; border-bottom:1px solid #D9E0E6; padding:0 24px; gap:8px; }
         .nav-tab { padding:13px 18px; cursor:pointer; font-weight:700; color:#556B82; border-bottom:3px solid transparent; font-size:13px; transition:all 0.2s; display:inline-flex; align-items:center; gap:7px; }
         .nav-tab:hover { color:#0070F2; }
