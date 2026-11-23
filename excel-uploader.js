@@ -105,6 +105,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._sacImportType   = this._storageGet('sac_import_type')    || 'privateFactData';
     this._sacModelName    = '';
     this._sacModelState   = '';
+    this._sacDISModelId   = '';  // resolved DIS internal GUID (≠ technical name)
     this._sacModels       = [];
     this._sacModelsLoading = false;
     this._showModelPicker  = false;
@@ -394,71 +395,50 @@ class ExcelUploaderPro extends HTMLElement {
     this._render();
     try {
       const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
-      // Try multiple import types to find all accessible models
-      const importTypes = ['factData', 'privateFactData', 'masterData'];
-      const seen = new Set();
-      const all  = [];
-
-      for (const iType of importTypes) {
-        try {
-          const url  = base + '/api/v1/dataimport/models?importType=' + iType;
-          const resp = await fetch(url, {
-            method: 'GET', credentials: 'include',
-            headers: { 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
-          });
-          if (!resp.ok) continue;
-          const data = await resp.json().catch(() => null);
-          if (!data) continue;
-          console.log('[DIS models] importType=' + iType, data);
-          const raw = Array.isArray(data) ? data
-                    : (data?.d?.results || data?.value || data?.models || []);
-          raw.forEach(m => {
-            const id = m.id || m.modelId || m.resourceId || '';
-            if (id && !seen.has(id)) {
-              seen.add(id);
-              all.push({ id, name: m.name || m.modelName || m.description || id, importType: iType });
-            }
-          });
-        } catch (_) {}
-      }
-
-      // Fallback: try without importType param
-      if (all.length === 0) {
-        const resp = await fetch(base + '/api/v1/dataimport/models', {
-          method: 'GET', credentials: 'include',
-          headers: { 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
-        });
-        const statusTxt = resp.status + ' ' + resp.statusText;
-        const data = resp.ok ? await resp.json().catch(() => null) : null;
-        console.log('[DIS models] fallback status=' + statusTxt, data);
-        if (data) {
-          const raw = Array.isArray(data) ? data
-                    : (data?.d?.results || data?.value || data?.models || []);
-          raw.forEach(m => {
-            const id = m.id || m.modelId || m.resourceId || '';
-            if (id && !seen.has(id)) {
-              seen.add(id);
-              all.push({ id, name: m.name || m.modelName || m.description || id, importType: m.importType || '' });
-            }
-          });
-          if (raw.length === 0 && resp.ok) {
-            this._sacModels = [{ id: '__DEBUG__', name: 'HTTP ' + statusTxt + ' — respuesta vacía. Ver consola.', importType: '' }];
-            this._sacModelsLoading = false;
-            this._render();
-            return;
-          }
-        } else if (!resp.ok) {
-          throw new Error('HTTP ' + statusTxt);
-        }
-      }
-
-      this._sacModels = all;
+      const resp = await fetch(base + '/api/v1/dataimport/models', {
+        method: 'GET', credentials: 'include',
+        headers: { 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json().catch(() => null);
+      const raw  = Array.isArray(data) ? data : (data?.d?.results || data?.value || data?.models || []);
+      this._sacModels = raw.map(m => ({
+        id:         m.modelID   || m.id || m.modelId || '',
+        name:       m.modelName || m.name || '',
+        importType: m.importType || ''
+      })).filter(m => m.id);
     } catch (err) {
       this._sacModels = [];
       this._notify('Error listando modelos SAC: ' + err.message, 'error');
     }
     this._sacModelsLoading = false;
     this._render();
+  }
+
+  // Resolves the SAC technical name (e.g. PLAN_CAPEX_PLANNING) to the DIS internal GUID
+  async _resolveDISModelId() {
+    if (this._sacDISModelId) return this._sacDISModelId;
+    try {
+      const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
+      const resp = await fetch(base + '/api/v1/dataimport/models', {
+        credentials: 'include',
+        headers: { 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
+      });
+      if (!resp.ok) return this._sacModelId;
+      const data = await resp.json().catch(() => []);
+      const raw  = Array.isArray(data) ? data : (data?.d?.results || data?.value || []);
+      const match = raw.find(m =>
+        m.modelName === this._sacModelId ||
+        m.modelID   === this._sacModelId ||
+        (m.modelDescription || '').includes(this._sacModelId)
+      );
+      if (match?.modelID) {
+        this._sacDISModelId = match.modelID;
+        console.log('[DIS] resolved', this._sacModelId, '→', match.modelID);
+        return match.modelID;
+      }
+    } catch (_) {}
+    return this._sacModelId; // fallback: use as-is
   }
 
   // ── SAC Data Import Service (DIS) REST API — official SAP 5-step flow ───────
@@ -474,10 +454,14 @@ class ExcelUploaderPro extends HTMLElement {
 
     const _setLoading = (txt) => { this._loadingText = txt; this._render(); };
 
+    // ── 0. Resolve DIS internal GUID (SAC uses GUIDs, not technical names) ───
+    _setLoading('🔍 Resolviendo ID del modelo en SAC DIS…');
+    const disModelId = await this._resolveDISModelId();
+
     // ── 1. Fetch CSRF token from the model endpoint itself (official SAP pattern) ─
     _setLoading('🔑 Obteniendo CSRF token de SAC DIS…');
     const csrfImportType = this._sacImportType || 'privateFactData';
-    const csrfResp = await fetch(DIS + '/models/' + encodeURIComponent(this._sacModelId) + '/' + csrfImportType, {
+    const csrfResp = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + csrfImportType, {
       method: 'GET', credentials: 'include',
       headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json', ...DIS_HEADER }
     });
@@ -491,7 +475,7 @@ class ExcelUploaderPro extends HTMLElement {
     const jobBody = JSON.stringify({ Mapping: {}, DefaultValues: defaultValues, JobSettings: {} });
 
     const _tryCreateJob = async (importType) => {
-      const r = await fetch(DIS + '/models/' + encodeURIComponent(this._sacModelId) + '/' + importType, {
+      const r = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + importType, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken, ...DIS_HEADER },
         body: jobBody
