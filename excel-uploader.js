@@ -19,9 +19,18 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '2.8.0';
+const _EPM_VERSION = '2.9.0';
 
 const _EPM_CHANGELOG = [
+  { v: '2.9.0', date: '2026-11-23', title: 'Visual Column Mapping panel + auto-map',
+    items: ['New 🔗 Column Mapping panel replaces Model Structure panel.',
+            'Shows each file column with a dropdown to select the target SAC dimension.',
+            'Auto-map button matches exact names and known aliases (ID→CAPEX_ITEM, H1→AMOUNT).',
+            'Auto-map runs automatically when model dimensions load.',
+            'Each row has a ✕ clear button to reset that specific mapping.',
+            'Columns marked as Exclude from DIS shown with ⊘ badge.',
+            'Fix: OData sub-properties (COMPANY__ID, Date__YEAR, etc.) filtered from dimension list.',
+            'Synchronize blocked while any column remains unmapped.'] },
   { v: '2.8.0', date: '2026-11-23', title: 'Expanded dimension probe: OData, FPA REST, Planning API',
     items: ['6 new endpoint variants added to dimension probe: OData $metadata (XML), SAC FPA REST, Planning REST API.',
             'XML OData $metadata parsed to extract EntityType Properties as dimensions.',
@@ -543,6 +552,7 @@ class ExcelUploaderPro extends HTMLElement {
         } catch (_) { continue; }
       }
       this._sacModelDimensions = dims;
+      if (dims.length > 0) this._autoMapColumns();
       console.log('[DIS] model dimensions:', dims.map(d => d.id).join(', ') || '(none)');
       if (dims.length === 0) {
         this._sacDimError = 'Could not load model dimensions automatically. Configure column mapping manually.';
@@ -556,16 +566,21 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   _parseDimensionsFromXml(xml) {
-    // Parse OData $metadata XML — look for EntityType Properties
     const dims = [];
+    const seen = new Set();
     const propRx = /<Property[^>]+Name="([^"]+)"[^>]*Type="([^"]+)"[^>]*>/g;
     let m;
     while ((m = propRx.exec(xml)) !== null) {
       const id = m[1];
+      // Skip: system prefix, sub-attributes (contain __), time/version sub-properties
+      if (id.startsWith('_')) continue;
+      if (id.includes('__')) continue;
+      if (seen.has(id.toUpperCase())) continue;
+      seen.add(id.toUpperCase());
       const typeRaw = m[2].replace('Edm.', '').toUpperCase();
-      if (id.startsWith('_') || id === 'Version' || id === 'Date') continue;
-      const isMeasure = typeRaw === 'DECIMAL' || typeRaw === 'DOUBLE' || id.endsWith('_AMOUNT') || id.endsWith('_QTY');
-      dims.push({ id, description: id, type: typeRaw, isMeasure, isAuto: false });
+      const isAuto    = id.toUpperCase() === 'VERSION' || id.toUpperCase() === 'DATE';
+      const isMeasure = typeRaw === 'DECIMAL' || typeRaw === 'DOUBLE' || typeRaw === 'INT32' || typeRaw === 'INT64';
+      dims.push({ id, description: id, type: typeRaw, isMeasure, isAuto });
     }
     return dims;
   }
@@ -589,6 +604,34 @@ class ExcelUploaderPro extends HTMLElement {
         isAuto:      AUTO_TYPES.has(typeRaw),
       };
     }).filter(d => d.id);
+  }
+
+  _autoMapColumns() {
+    const sacDims = (this._sacModelDimensions || []).filter(d => !d.isAuto);
+    if (sacDims.length === 0) return;
+    const sacById = new Map(sacDims.map(d => [d.id.toUpperCase(), d.id]));
+    const ALIASES = { 'ID': 'CAPEX_ITEM', 'H1': 'AMOUNT', 'IMPORTE': 'AMOUNT', 'MONTO': 'AMOUNT' };
+    const EXCL_NAMES = new Set(['DESCRIPTION', 'DESCRIPCION', 'DESC', 'NOTES', 'NOTA', 'COMMENT']);
+    const mapping  = { ...(this._columnMapping || {}) };
+    const excluded = new Set(this._disExcludedCols || []);
+    for (const col of (this._requiredColumns || [])) {
+      const up = col.toUpperCase();
+      // Already mapped or excluded — keep it
+      if (mapping[col] || excluded.has(col)) continue;
+      // Known exclude names
+      if (EXCL_NAMES.has(up)) { excluded.add(col); continue; }
+      // Known alias
+      const alias = ALIASES[up];
+      if (alias && sacById.has(alias.toUpperCase())) {
+        mapping[col] = sacById.get(alias.toUpperCase()); continue;
+      }
+      // Exact match (identity) — no entry needed, same name works
+      if (sacById.has(up)) continue;
+    }
+    this._columnMapping   = mapping;
+    this._disExcludedCols = [...excluded];
+    this._storageSet('sac_column_mapping', mapping);
+    this._storageSet('sac_dis_excluded_cols', [...excluded]);
   }
 
   // Updates only the header subtitle span — avoids full re-render
@@ -1211,17 +1254,47 @@ class ExcelUploaderPro extends HTMLElement {
       });
     }
 
-    const applyDimsBtn = shadow.getElementById('applyDimsBtn');
-    if (applyDimsBtn) {
-      applyDimsBtn.addEventListener('click', () => {
-        const reqCols = new Set((this._requiredColumns || []).map(c => c.toUpperCase()));
-        const toAdd   = this._sacModelDimensions.filter(d => !d.isAuto && !reqCols.has(d.id.toUpperCase()));
-        if (toAdd.length === 0) return;
-        this._requiredColumns = [...(this._requiredColumns || []), ...toAdd.map(d => d.id)];
-        this._storageSet('sac_required_cols', JSON.stringify(this._requiredColumns));
+    const autoMapAllBtn = shadow.getElementById('autoMapAllBtn');
+    if (autoMapAllBtn) {
+      autoMapAllBtn.addEventListener('click', () => {
+        this._autoMapColumns();
         this._render();
       });
     }
+
+    const applyMappingBtn = shadow.getElementById('applyMappingBtn');
+    if (applyMappingBtn) {
+      applyMappingBtn.addEventListener('click', () => {
+        const selects = [...shadow.querySelectorAll('[data-mapping-col]')];
+        const newMapping = {};
+        const newExcluded = [];
+        for (const sel of selects) {
+          const col = sel.dataset.mappingCol;
+          const val = sel.value;
+          if (val === '__EXCLUDE__') { newExcluded.push(col); }
+          else if (val) { newMapping[col] = val; }
+        }
+        this._columnMapping   = newMapping;
+        this._disExcludedCols = newExcluded;
+        this._storageSet('sac_column_mapping', newMapping);
+        this._storageSet('sac_dis_excluded_cols', newExcluded);
+        this._render();
+      });
+    }
+
+    shadow.querySelectorAll('[data-clear-col]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const col = btn.dataset.clearCol;
+        const m = { ...(this._columnMapping || {}) };
+        delete m[col];
+        const ex = (this._disExcludedCols || []).filter(c => c !== col);
+        this._columnMapping   = m;
+        this._disExcludedCols = ex;
+        this._storageSet('sac_column_mapping', m);
+        this._storageSet('sac_dis_excluded_cols', ex);
+        this._render();
+      });
+    });
 
     const closeModelPickerBtn = shadow.getElementById('closeModelPickerBtn');
     if (closeModelPickerBtn) {
@@ -1855,12 +1928,19 @@ class ExcelUploaderPro extends HTMLElement {
         }
         if (this._rows.length === 0) { this._notify('No active data rows to load.', 'error'); return; }
 
-        // Block if model dimensions are loaded and some are unmapped
-        if (this._sacModelDimensions.length > 0) {
-          const reqCols = new Set((this._requiredColumns || []).map(c => c.toUpperCase()));
-          const missing = this._sacModelDimensions.filter(d => !d.isAuto && !reqCols.has(d.id.toUpperCase()));
-          if (missing.length > 0) {
-            this._notify('⚠️ ' + missing.length + ' model dimension(s) not mapped: ' + missing.map(d => d.id).join(', ') + '. Add them to Required Columns first.', 'error');
+        // Block if any required column is unmapped (not in column mapping and not an exact SAC dim match)
+        const sacDimsActive = (this._sacModelDimensions || []).filter(d => !d.isAuto);
+        if (sacDimsActive.length > 0) {
+          const mapping  = this._columnMapping || {};
+          const excluded = new Set(this._disExcludedCols || []);
+          const unmapped = (this._requiredColumns || []).filter(col => {
+            if (excluded.has(col)) return false;
+            if (mapping[col]) return false;
+            if (sacDimsActive.find(d => d.id.toUpperCase() === col.toUpperCase())) return false;
+            return true;
+          });
+          if (unmapped.length > 0) {
+            this._notify('⚠️ ' + unmapped.length + ' column(s) not mapped to SAC dimensions: ' + unmapped.join(', ') + '. Use the Column Mapping panel to map them first.', 'error');
             this._sacDimPanelOpen = true;
             this._render();
             return;
@@ -3301,72 +3381,94 @@ class ExcelUploaderPro extends HTMLElement {
                 })() : ''}
               </div>
             </div>
-            ${/* ── Model Structure Validation panel ── */ ''}
-            ${this._sacModelState === 'ok' ? (() => {
-              const dimTypeIcon = (t) => {
-                if (t === 'VERSION') return '🔁';
-                if (t === 'DATE' || t === 'FISCAL_YEAR' || t === 'FISCAL_PERIOD') return '📅';
-                if (t === 'MEASURE' || t === 'KPI' || t === 'AMOUNT' || t === 'QUANTITY') return '📊';
-                if (t === 'ACCOUNT') return '🔑';
-                return '🏷️';
+            ${/* ── Column Mapping Panel ── */ ''}
+            ${(this._sacModelState === 'ok' || this._sacDimLoading) ? (() => {
+              const mapping  = this._columnMapping || {};
+              const excluded = new Set(this._disExcludedCols || []);
+              const sacDims  = (this._sacModelDimensions || []).filter(d => !d.isAuto);
+              const reqCols  = this._requiredColumns || [];
+
+              const getRowStatus = (col) => {
+                if (excluded.has(col)) return { label:'⊘ excluded', color:'#005CB9', bg:'#EBF5FF', icon:'⊘' };
+                const mapped = mapping[col];
+                if (mapped) {
+                  const d = sacDims.find(x => x.id === mapped);
+                  return { label: mapped, color:'#107E3E', bg:'#E6F9EC', icon: d?.isMeasure ? '📊' : '🏷️' };
+                }
+                if (sacDims.find(d => d.id.toUpperCase() === col.toUpperCase()))
+                  return { label:'exact match', color:'#107E3E', bg:'#E6F9EC', icon:'✅' };
+                if (this._sacDimLoading) return { label:'loading…', color:'#556B82', bg:'#F4F5F7', icon:'⏳' };
+                if (sacDims.length === 0) return { label:'no model', color:'#B45309', bg:'#FFF8E6', icon:'⚠️' };
+                return { label:'unmapped', color:'#BB0000', bg:'#FFF0F0', icon:'❌' };
               };
-              const autoIds  = new Set(['VERSION', 'DATE']);
-              const reqCols  = new Set((this._requiredColumns || []).map(c => c.toUpperCase()));
 
-              const getDimStatus = (d) => {
-                if (d.isAuto) return { label: '✅ auto', color: '#107E3E', bg: '#E6F9EC', title: 'Handled automatically via VERSION / PERIOD fields' };
-                if (reqCols.has(d.id.toUpperCase())) return { label: '✅ mapped', color: '#107E3E', bg: '#E6F9EC', title: 'Column present in Required Columns' };
-                return { label: '❌ missing', color: '#BB0000', bg: '#FFF0F0', title: 'Not found in Required Columns — add it or Synchronize will be blocked' };
-              };
+              const mappedCnt  = reqCols.filter(c => !excluded.has(c) && (mapping[c] || sacDims.find(d => d.id.toUpperCase() === c.toUpperCase()))).length;
+              const excludedCnt= reqCols.filter(c => excluded.has(c)).length;
+              const unmappedCnt= reqCols.length - mappedCnt - excludedCnt;
 
-              const missingCount = this._sacModelDimensions.filter(d => !d.isAuto && !reqCols.has(d.id.toUpperCase())).length;
-              const headerColor  = this._sacDimLoading ? '#556B82' : missingCount > 0 ? '#BB0000' : '#107E3E';
-              const headerIcon   = this._sacDimLoading ? '⏳' : missingCount > 0 ? '⚠️' : '✅';
-              const headerLabel  = this._sacDimLoading
-                ? 'Loading model structure…'
-                : this._sacDimError
-                  ? '⚠️ Could not load model dimensions'
-                  : `${headerIcon} Model Structure — ${this._sacModelDimensions.length} dimensions, ${missingCount} unmapped`;
+              const hBorder = this._sacDimLoading ? '#D9E0E6' : unmappedCnt > 0 ? '#FCA5A5' : '#A3E6BF';
+              const hBg     = this._sacDimLoading ? '#F4F5F7' : unmappedCnt > 0 ? '#FFF5F5' : '#F0F9F0';
+              const hColor  = this._sacDimLoading ? '#556B82' : unmappedCnt > 0 ? '#BB0000' : '#107E3E';
+              const hLabel  = this._sacDimLoading
+                ? '⏳ Loading model dimensions…'
+                : `🔗 Column Mapping — ${reqCols.length} columns · ${mappedCnt} mapped · ${excludedCnt} excluded${unmappedCnt > 0 ? ' · <span style="color:#BB0000;font-weight:800;">⚠️ ' + unmappedCnt + ' unmapped</span>' : ''}`;
 
-              return `<div style="width:100%;margin-top:10px;border:1px solid ${missingCount > 0 ? '#FCA5A5' : '#D1E8D1'};border-radius:6px;overflow:hidden;background:#FAFBFC;">
+              const dimOptHtml = sacDims.length > 0
+                ? `<option value="">— same name —</option><option value="__EXCLUDE__">⊘ Exclude from DIS</option><option disabled>──────────────</option>${sacDims.map(d => `<option value="${this._esc(d.id)}">${d.isMeasure ? '📊' : '🏷️'} ${this._esc(d.id)}</option>`).join('')}`
+                : `<option value="">— connect model first —</option><option value="__EXCLUDE__">⊘ Exclude from DIS</option>`;
+
+              return `<div style="width:100%;margin-top:10px;border:1px solid ${hBorder};border-radius:6px;overflow:hidden;background:#FAFBFC;">
                 <div id="sacDimPanelHeader" data-open="${this._sacDimPanelOpen ? '1' : '0'}"
-                  style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:${missingCount > 0 ? '#FFF5F5' : '#F0F9F0'};cursor:pointer;user-select:none;">
-                  <span style="font-size:11px;font-weight:700;color:${headerColor};">${headerLabel}</span>
+                  style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:${hBg};cursor:pointer;user-select:none;">
+                  <span style="font-size:11px;font-weight:700;color:${hColor};">${hLabel}</span>
                   <span style="font-size:11px;color:#556B82;">${this._sacDimPanelOpen ? '▲ collapse' : '▼ expand'}</span>
                 </div>
-                ${this._sacDimPanelOpen ? `<div style="padding:0 0 6px 0;">
+                ${this._sacDimPanelOpen ? `<div>
                   ${this._sacDimLoading
-                    ? '<div style="padding:16px;text-align:center;color:#556B82;font-size:12px;">⏳ Fetching model dimensions from SAC DIS…</div>'
-                    : this._sacDimError
-                      ? `<div style="padding:12px 16px;font-size:11px;color:#BB0000;">${this._esc(this._sacDimError)}</div>`
-                      : this._sacModelDimensions.length === 0
-                        ? '<div style="padding:12px 16px;font-size:11px;color:#556B82;">No dimension metadata returned by this SAC tenant. Configure Required Columns manually.</div>'
-                        : `<table style="width:100%;border-collapse:collapse;font-size:11px;">
-                            <thead>
-                              <tr style="background:#F0F4F8;border-bottom:1px solid #D9E0E6;">
-                                <th style="padding:5px 10px;text-align:left;font-weight:700;color:#556B82;">Dimension ID</th>
-                                <th style="padding:5px 10px;text-align:left;font-weight:700;color:#556B82;">Description</th>
-                                <th style="padding:5px 10px;text-align:center;font-weight:700;color:#556B82;">Type</th>
-                                <th style="padding:5px 10px;text-align:center;font-weight:700;color:#556B82;">Status</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              ${this._sacModelDimensions.map((d, i) => {
-                                const st = getDimStatus(d);
-                                return `<tr style="border-bottom:1px solid #F0F4F8;background:${i % 2 === 0 ? '#fff' : '#FAFBFC'};">
-                                  <td style="padding:5px 10px;font-family:monospace;font-weight:700;color:#003F8A;">${this._esc(d.id)}</td>
-                                  <td style="padding:5px 10px;color:#1D2D3E;">${this._esc(d.description || '—')}</td>
-                                  <td style="padding:5px 10px;text-align:center;">${dimTypeIcon(d.type)} <span style="color:#556B82;">${this._esc(d.type)}</span></td>
-                                  <td style="padding:5px 10px;text-align:center;"><span style="background:${st.bg};color:${st.color};padding:2px 8px;border-radius:10px;font-weight:700;font-size:10px;" title="${st.title}">${st.label}</span></td>
-                                </tr>`;
-                              }).join('')}
-                            </tbody>
-                          </table>
-                          ${missingCount > 0 ? `<div style="padding:8px 10px;display:flex;align-items:center;gap:10px;border-top:1px solid #FCA5A5;background:#FFF5F5;">
-                            <span style="font-size:11px;color:#BB0000;font-weight:600;">⚠️ ${missingCount} dimension${missingCount > 1 ? 's' : ''} not mapped — Synchronize is blocked until resolved.</span>
-                            <button id="applyDimsBtn" class="btn btn-primary" type="button" style="font-size:11px;padding:4px 12px;white-space:nowrap;">⚡ Add missing to Required Columns</button>
-                          </div>` : '<div style="padding:7px 10px;border-top:1px solid #D1E8D1;background:#F0F9F0;font-size:11px;color:#107E3E;font-weight:600;">✅ All dimensions are mapped — ready to sync.</div>'}
-                        `
+                    ? '<div style="padding:16px;text-align:center;color:#556B82;font-size:12px;">⏳ Fetching model dimensions from SAC…</div>'
+                    : `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead>
+                          <tr style="background:#EBF2FA;border-bottom:2px solid #C5D9EB;">
+                            <th style="padding:6px 12px;text-align:left;font-weight:700;color:#1D2D3E;font-size:11px;width:38%;">📄 File Column</th>
+                            <th style="padding:6px 4px;text-align:center;color:#9CB0C4;font-size:13px;width:5%;">→</th>
+                            <th style="padding:6px 8px;text-align:left;font-weight:700;color:#1D2D3E;font-size:11px;width:37%;">📊 SAC Dimension</th>
+                            <th style="padding:6px 8px;text-align:center;font-weight:700;color:#1D2D3E;font-size:11px;width:14%;">Status</th>
+                            <th style="width:5%;padding:6px 4px;"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${reqCols.map((col, i) => {
+                            const st  = getRowStatus(col);
+                            const isExcl = excluded.has(col);
+                            const selVal = isExcl ? '__EXCLUDE__' : (mapping[col] || '');
+                            const opts  = dimOptHtml.replace(`value="${this._esc(selVal)}"`, `value="${this._esc(selVal)}" selected`);
+                            return `<tr style="border-bottom:1px solid #F0F4F8;background:${i % 2 === 0 ? '#fff' : '#F7FAFD'};">
+                              <td style="padding:5px 12px;">
+                                <span style="display:inline-block;background:#E8F4FF;color:#003F8A;font-family:monospace;font-weight:700;font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid #B8D8F8;letter-spacing:.3px;">${this._esc(col)}</span>
+                              </td>
+                              <td style="padding:5px 4px;text-align:center;color:#9CB0C4;font-size:17px;">→</td>
+                              <td style="padding:3px 8px;">
+                                <select data-mapping-col="${this._esc(col)}" style="width:100%;border:1px solid #C0CDD8;border-radius:4px;padding:4px 6px;font-size:11px;font-family:monospace;background:#FFF;color:#1D2D3E;cursor:pointer;outline:none;">${opts}</select>
+                              </td>
+                              <td style="padding:5px 8px;text-align:center;">
+                                <span style="display:inline-block;background:${st.bg};color:${st.color};padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap;">${st.icon} ${this._esc(st.label)}</span>
+                              </td>
+                              <td style="padding:3px 6px;text-align:center;">
+                                ${(mapping[col] || isExcl) ? `<button type="button" data-clear-col="${this._esc(col)}" title="Clear mapping" style="background:none;border:1px solid #DDE3E9;border-radius:3px;cursor:pointer;padding:2px 5px;font-size:10px;color:#556B82;line-height:1;transition:border-color .15s;">✕</button>` : ''}
+                              </td>
+                            </tr>`;
+                          }).join('')}
+                        </tbody>
+                      </table>
+                      <div style="padding:8px 10px;display:flex;align-items:center;gap:10px;border-top:1px solid #D9E0E6;background:#F0F4F8;flex-wrap:wrap;">
+                        ${unmappedCnt > 0
+                          ? `<span style="font-size:11px;color:#BB0000;font-weight:700;">⚠️ ${unmappedCnt} column${unmappedCnt > 1 ? 's' : ''} unmapped — Synchronize is blocked.</span>`
+                          : `<span style="font-size:11px;color:#107E3E;font-weight:700;">✅ All columns mapped — ready to synchronize.</span>`}
+                        <div style="margin-left:auto;display:flex;gap:8px;">
+                          <button id="autoMapAllBtn" class="btn btn-secondary" type="button" style="font-size:11px;padding:4px 12px;white-space:nowrap;" title="Auto-detect mappings from SAC dimension names">⚡ Auto-map</button>
+                          <button id="applyMappingBtn" class="btn btn-primary" type="button" style="font-size:11px;padding:4px 12px;white-space:nowrap;">💾 Apply Mapping</button>
+                        </div>
+                      </div>`
                   }
                 </div>` : ''}
               </div>`;
