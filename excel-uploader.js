@@ -19,9 +19,13 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.1.0';
+const _EPM_VERSION = '3.1.1';
 
 const _EPM_CHANGELOG = [
+  { v: '3.1.1', date: '2026-11-23', title: 'Usar jobURL de SAP para upload de datos',
+    items: ['Extrae jobURL del body de la respuesta de creación del job.',
+            'Intenta POST al jobURL primero (lo que SAP mismo devuelve como URL canónica).',
+            'Fallback: /jobs/{id} y /jobs/{id}/data si jobURL falla con 404/405.'] },
   { v: '3.1.0', date: '2026-11-23', title: 'Fix DIS two-step: endpoint correcto + abort si sin datos',
     items: ['Cambia endpoint de upload de /jobs/{id}/data a /jobs/{id} (endpoint canónico SAP DIS SDK).',
             'Fallback: si /jobs/{id} devuelve 405, intenta /jobs/{id}/data automáticamente.',
@@ -788,9 +792,10 @@ class ExcelUploaderPro extends HTMLElement {
     }
 
     const jobCreateBody = await jobCreateResp.json().catch(() => ({}));
-    const jobId = jobCreateBody.jobID || jobCreateBody.jobId || jobCreateBody.id;
+    const jobId  = jobCreateBody.jobID || jobCreateBody.jobId || jobCreateBody.id;
+    const jobUrl = jobCreateBody.jobURL || jobCreateBody.jobUrl || '';
     if (!jobId) throw new Error('SAC DIS no devolvió jobID: ' + JSON.stringify(jobCreateBody));
-    console.log('[DIS] jobId:', jobId, '| importType:', usedImportType, '| body:', JSON.stringify(jobCreateBody));
+    console.log('[DIS] jobId:', jobId, '| jobURL:', jobUrl || '(none)', '| importType:', usedImportType);
 
     // ── 4. Upload CSV data (two-step tenant: job created empty) ──────────────
     // Check initial job status; if READY_FOR_DATA the tenant requires a separate data upload.
@@ -806,20 +811,23 @@ class ExcelUploaderPro extends HTMLElement {
 
     if (jobInitStatus === 'READY_FOR_DATA' || !jobInitStatus) {
       let dataUploaded = false;
-      for (const dataUrl of [DIS + '/jobs/' + jobId, DIS + '/jobs/' + jobId + '/data']) {
+      // Try SAP-provided jobURL first, then canonical /jobs/{id}, then /jobs/{id}/data
+      const dataUrls = [jobUrl, DIS + '/jobs/' + jobId, DIS + '/jobs/' + jobId + '/data'].filter(Boolean);
+      for (const dataUrl of dataUrls) {
         const dataResp = await fetch(dataUrl, {
           method: 'POST', credentials: 'include',
           headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
           body: csvBody
         });
-        console.log('[DIS] data upload', dataUrl.endsWith('/data') ? 'jobId/data' : 'jobId', 'HTTP:', dataResp.status);
+        const label = dataUrl === jobUrl ? 'jobURL' : (dataUrl.endsWith('/data') ? 'jobId/data' : 'jobId');
+        console.log('[DIS] data upload', label, 'HTTP:', dataResp.status);
         if (dataResp.ok) { dataUploaded = true; break; }
         if (dataResp.status === 405 || dataResp.status === 404) continue;
         let msg = 'Data upload HTTP ' + dataResp.status;
         try { const b = await dataResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
         throw new Error(msg);
       }
-      if (!dataUploaded) console.warn('[DIS] data upload: neither endpoint accepted CSV');
+      if (!dataUploaded) console.warn('[DIS] data upload: ningún endpoint aceptó el CSV (', dataUrls.join(', '), ')');
     }
 
     // ── 5. Run the job ────────────────────────────────────────────────────────
