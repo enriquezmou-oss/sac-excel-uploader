@@ -1,6 +1,6 @@
 /**
  * ExcelUploaderPro — SAP Analytics Cloud Custom Widget
- * Version: 2.5.0
+ * Version: 2.6.0
  * Requires: SheetJS (loaded via CDN automatically if not present)
  * Tag:      <custom-excel-uploader-pro>
  *
@@ -385,7 +385,7 @@ class ExcelUploaderPro extends HTMLElement {
       this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
       this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="' + this._esc(this._sacModelName) + '">⚠️ ' + this._esc(this._sacModelName.slice(0, 60)) + '</span>' :
       '';
-    sub.innerHTML = 'Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.5.0' + badge;
+    sub.innerHTML = 'Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.6.0' + badge;
   }
 
   // ── Fetch list of all models from SAC DIS ─────────────────────────────────
@@ -2818,7 +2818,7 @@ class ExcelUploaderPro extends HTMLElement {
             <img class="sap-logo-img" src="${this._sapLogoUri}" alt="SAP Logo" />
             <div class="sap-title-wrap">
               <div class="sap-title">Excel Planning Uploader Pro</div>
-              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.5.0${
+              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.6.0${
                 this._sacModelState === 'connecting' ? ' &nbsp;|&nbsp; <span style="color:#A9B8C8;font-weight:600;">⏳ Conectando…</span>' :
                 this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
                 this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="' + this._esc(this._sacModelName) + '">⚠️ ' + this._esc((this._sacModelName || 'Modelo no encontrado').slice(0, 60)) + '</span>' :
