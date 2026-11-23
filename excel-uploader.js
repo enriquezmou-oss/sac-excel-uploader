@@ -1535,7 +1535,10 @@ class ExcelUploaderPro extends HTMLElement {
           rows: this._rows.length,
           editsCount: manualEditsCount,
           timestamp: new Date().toLocaleString(),
-          status: stats.preventiveRows > 0 || stats.checkRows > 0 ? this._loadStrategy + ' (Approved Alerts)' : this._loadStrategy + ' Synchronized',
+          status: this._sacModelId
+            ? this._loadStrategy + ' (DIS Pendiente…)'
+            : (stats.preventiveRows > 0 || stats.checkRows > 0 ? this._loadStrategy + ' (Approved Alerts)' : this._loadStrategy + ' Synchronized'),
+          disStatus: this._sacModelId ? 'PENDING' : null,
           snapshotRows,
           changeLog: [...this._currentSessionLogs],
           payloadJson: JSON.stringify(cleanPayloadArray, null, 2)
@@ -1554,14 +1557,43 @@ class ExcelUploaderPro extends HTMLElement {
           this._isLoading = true;
           this._loadingText = '📤 Iniciando importación a ' + this._sacModelId + '…';
           this._render();
+          let disResult;
           try {
-            await this._callDISApi(this._rows);
+            disResult = await this._callDISApi(this._rows);
             this._isLoading = false;
           } catch (err) {
             this._isLoading = false;
-            this._notify('❌ SAC DIS Error: ' + err.message + ' — Audit guardado, puedes reintentar via Data Management.', 'error');
+            // Update audit record with real DIS error — do NOT show "Synchronized"
+            const idx = this._history.findIndex(h => h.id === loadId);
+            if (idx !== -1) {
+              this._history[idx].status   = this._loadStrategy + ' ❌ Error DIS';
+              this._history[idx].disStatus = 'ERROR';
+              this._history[idx].disError  = err.message;
+              this._saveHistory();
+            }
+            this._notify('❌ SAC DIS Error: ' + err.message, 'error');
             this._render();
             return;
+          }
+
+          // Update audit with actual DIS result (rows written vs. rejected)
+          const jobStatus  = (disResult?.jobStatus || disResult?.status || '').toUpperCase();
+          const written    = disResult?.importedRecords ?? disResult?.writtenRecords ?? null;
+          const failed     = disResult?.failedRecords   ?? disResult?.rejectedRecords ?? 0;
+          const idx = this._history.findIndex(h => h.id === loadId);
+          if (idx !== -1) {
+            if (failed > 0 || jobStatus === 'COMPLETED_WITH_FAILURES') {
+              const writtenTxt = written != null ? written + ' grabadas, ' : '';
+              this._history[idx].status    = this._loadStrategy + ' ⚠️ DIS: ' + writtenTxt + failed + ' rechazadas';
+              this._history[idx].disStatus = 'PARTIAL';
+            } else {
+              const writtenTxt = written != null ? ' (' + written + ' filas)' : '';
+              this._history[idx].status    = this._loadStrategy + ' Synchronized ✅' + writtenTxt;
+              this._history[idx].disStatus = 'OK';
+            }
+            this._history[idx].disWrittenRows = written;
+            this._history[idx].disFailedRows  = failed;
+            this._saveHistory();
           }
         }
 
@@ -1572,7 +1604,14 @@ class ExcelUploaderPro extends HTMLElement {
         this._acknowledgeNonBlocking = false; this._activeTab = 'monitorTab'; this._selectedAuditId = loadId;
         this._syncExportColumnsWithSchema(auditRecord.columns);
         this._auditDetailSubTab = 'dataTab';
-        this._notify('Load ' + loadId + ' (' + this._loadStrategy + ') synchronized successfully with SAP Analytics Cloud!', 'success');
+
+        // Final notification — only "success" if DIS actually wrote the data
+        const finalRec = this._history.find(h => h.id === loadId);
+        if (!this._sacModelId || finalRec?.disStatus === 'OK') {
+          this._notify('Load ' + loadId + ' (' + this._loadStrategy + ') synchronized successfully with SAP Analytics Cloud!', 'success');
+        } else if (finalRec?.disStatus === 'PARTIAL') {
+          this._notify('⚠️ Load ' + loadId + ': ' + (finalRec.disFailedRows || '?') + ' filas rechazadas por SAC DIS. Revisa la auditoría.', 'warning');
+        }
       });
     }
   }
