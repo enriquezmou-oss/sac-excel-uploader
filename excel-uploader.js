@@ -104,6 +104,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._sacModelId      = this._storageGet('sac_dis_model_id')   || 'PLAN_CAPEX_PLANNING';
     this._sacImportType   = this._storageGet('sac_import_type')    || 'privateFactData';
     this._sacModelName    = '';
+    this._sacModelDesc    = this._storageGet('sac_dis_model_desc') || '';  // friendly description
     this._sacModelState   = '';
     this._sacDISModelId   = this._storageGet('sac_dis_guid') || '';  // resolved DIS internal GUID — persisted
     this._sacModels       = [];
@@ -446,93 +447,26 @@ class ExcelUploaderPro extends HTMLElement {
     return this._sacModelId; // fallback: use as-is
   }
 
-  // ── SAC Data Import Service (DIS) REST API — official SAP 5-step flow ───────
-  // 1. CSRF  : GET /models (with x-sap-dis-request-source: fileUploadWidget)
-  // 2. Create: POST /models/{id}/factData → { jobID }
-  // 3. Upload: POST /jobs/{jobId}  Content-Type: text/csv
-  // 4. Run   : POST /jobs/{jobId}/run
-  // 5. Poll  : GET /jobs/{jobId}/status until COMPLETED / FAILED
+  // SAC DIS REST API — 3-step flow:
+  // 1. CSRF  : GET /models/{GUID}/{importType} with x-csrf-token: fetch
+  // 2. Create + Upload: POST /models/{GUID}/{importType} with CSV body → { jobID }
+  // 3. Run   : POST /jobs/{jobId}/run
+  // 4. Poll  : GET /jobs/{jobId} until successful
   async _callDISApi(rows) {
     const base       = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
     const DIS        = base + '/api/v1/dataimport';
     const DIS_HEADER = { 'x-sap-dis-request-source': 'fileUploadWidget' };
-
     const _setLoading = (txt) => { this._loadingText = txt; this._render(); };
 
-    // ── 0. Resolve DIS internal GUID (SAC uses GUIDs, not technical names) ───
+    // ── 0. Resolve DIS internal GUID ─────────────────────────────────────────
     _setLoading('🔍 Resolviendo ID del modelo en SAC DIS…');
     const disModelId = await this._resolveDISModelId();
     console.log('[DIS] usando modelId:', disModelId, '| técnico:', this._sacModelId, '| GUID en caché:', this._sacDISModelId || '(vacío)');
 
-    // ── 1. Fetch CSRF token from the model endpoint itself (official SAP pattern) ─
-    _setLoading('🔑 Obteniendo CSRF token de SAC DIS…');
-    const csrfImportType = this._sacImportType || 'privateFactData';
-    const csrfResp = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + csrfImportType, {
-      method: 'GET', credentials: 'include',
-      headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json', ...DIS_HEADER }
-    });
-    const csrfToken = csrfResp.headers.get('x-csrf-token') || csrfResp.headers.get('X-Csrf-Token') || '';
-    console.log('[DIS] CSRF:', csrfToken ? '✅ obtenido' : '❌ vacío (HTTP ' + csrfResp.status + ')');
-
-    // ── 2. Create import job — auto-detect importType if needed ──────────────
-    _setLoading('📋 Creando job de importación en SAC…');
-    const defaultValues = {};
-    if (this._targetVersion) defaultValues['Version'] = this._targetVersion;
-    if (this._targetDate)    defaultValues['Date']    = String(this._targetDate);
-    const jobBody = JSON.stringify({ Mapping: {}, DefaultValues: defaultValues, JobSettings: {} });
-
-    const _tryCreateJob = async (importType) => {
-      const r = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + importType, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken, ...DIS_HEADER },
-        body: jobBody
-      });
-      return r;
-    };
-
-    const importTypesToTry = this._sacImportType
-      ? [this._sacImportType, this._sacImportType === 'privateFactData' ? 'factData' : 'privateFactData']
-      : ['privateFactData', 'factData'];
-
-    let jobCreateResp, usedImportType;
-    for (const iType of importTypesToTry) {
-      jobCreateResp = await _tryCreateJob(iType);
-      if (jobCreateResp.ok) { usedImportType = iType; break; }
-      let errBody = {};
-      try { errBody = await jobCreateResp.clone().json(); } catch (_) {}
-      const errMsg = JSON.stringify(errBody);
-      // only retry on "model does not exist" (1704-1801-3304) or 404
-      if (jobCreateResp.status !== 404 && !errMsg.includes('1704-1801-3304')) {
-        const msg = errBody?.error?.message || errBody?.message || 'Create job HTTP ' + jobCreateResp.status;
-        throw new Error(msg);
-      }
-    }
-    if (!jobCreateResp.ok) {
-      let msg = 'Create job HTTP ' + jobCreateResp.status;
-      try { const b = await jobCreateResp.json(); msg = b?.error?.message || b?.message || JSON.stringify(b); } catch (_) {}
-      throw new Error(msg + ' — Verifica el nombre técnico del modelo en SAC Modeler');
-    }
-    // persist the working importType for future calls
-    if (usedImportType && usedImportType !== this._sacImportType) {
-      this._sacImportType = usedImportType;
-      this._storageSet('sac_import_type', usedImportType);
-      console.log('[DIS] auto-detected importType:', usedImportType);
-    }
-
-    const jobCreateBody = await jobCreateResp.json().catch(() => ({}));
-    const jobId = jobCreateBody.jobID || jobCreateBody.jobId || jobCreateBody.id;
-    if (!jobId) throw new Error('SAC DIS no devolvió jobID: ' + JSON.stringify(jobCreateBody));
-    console.log('[DIS] jobId creado:', jobId, '| importType:', usedImportType);
-    console.log('[DIS] job create body completo:', JSON.stringify(jobCreateBody));
-
-    // ── 3. Upload CSV data to job: POST /jobs/{jobId} ─────────────────────
-    _setLoading('📤 Subiendo ' + rows.length + ' filas a SAC DIS…');
-
-    // Build columns: required columns, with Version/Date prepended when set
+    // ── 1. Build CSV (columns + data rows) ───────────────────────────────────
     const cols = [...this._requiredColumns];
     if (this._targetVersion && !cols.includes('Version')) cols.unshift('Version');
     if (this._targetDate    && !cols.includes('Date'))    cols.unshift('Date');
-
     const csvLines = [cols.join(',')];
     for (const r of rows) {
       const vals = cols.map(col => {
@@ -550,49 +484,71 @@ class ExcelUploaderPro extends HTMLElement {
     }
     const csvBody = csvLines.join('\n');
 
-    const csvResp = await fetch(DIS + '/jobs/' + jobId, {
-      method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
-      body: csvBody
+    // ── 2. CSRF token ─────────────────────────────────────────────────────────
+    _setLoading('🔑 Obteniendo CSRF token de SAC DIS…');
+    const importType = this._sacImportType || 'privateFactData';
+    const csrfResp = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + importType, {
+      method: 'GET', credentials: 'include',
+      headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json', ...DIS_HEADER }
     });
-    console.log('[DIS] upload CSV HTTP:', csvResp.status, '| URL:', DIS + '/jobs/' + jobId);
-    if (!csvResp.ok) {
-      const rawBody = await csvResp.text().catch(() => '');
-      console.log('[DIS] upload error body:', rawBody);
-      let msg = 'Upload CSV HTTP ' + csvResp.status;
-      try { const b = JSON.parse(rawBody); msg = b?.error?.message || b?.message || JSON.stringify(b); } catch (_) {}
-      throw new Error(msg);
+    const csrfToken = csrfResp.headers.get('x-csrf-token') || csrfResp.headers.get('X-Csrf-Token') || '';
+    console.log('[DIS] CSRF:', csrfToken ? '✅ obtenido' : '❌ vacío (HTTP ' + csrfResp.status + ')');
+
+    // ── 3. Create job + upload CSV in one POST (body = text/csv) ──────────────
+    _setLoading('📤 Enviando ' + rows.length + ' filas a SAC DIS…');
+    const importTypesToTry = [importType, importType === 'privateFactData' ? 'factData' : 'privateFactData'];
+    let jobCreateResp, usedImportType;
+    for (const iType of importTypesToTry) {
+      const r = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + iType, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
+        body: csvBody
+      });
+      if (r.ok) { jobCreateResp = r; usedImportType = iType; break; }
+      let errBody = {};
+      try { errBody = await r.clone().json(); } catch (_) {}
+      const errMsg = JSON.stringify(errBody);
+      if (r.status !== 404 && !errMsg.includes('1704-1801-3304')) {
+        const msg = errBody?.error?.message || errBody?.message || 'Upload+Create HTTP ' + r.status;
+        throw new Error(msg);
+      }
+      jobCreateResp = r;
+    }
+    if (!jobCreateResp?.ok) {
+      let msg = 'Upload+Create HTTP ' + (jobCreateResp?.status || '?');
+      try { const b = await jobCreateResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
+      throw new Error(msg + ' — Verifica el nombre técnico del modelo en SAC Modeler');
+    }
+    if (usedImportType && usedImportType !== this._sacImportType) {
+      this._sacImportType = usedImportType;
+      this._storageSet('sac_import_type', usedImportType);
+      console.log('[DIS] auto-detected importType:', usedImportType);
     }
 
-    console.log('[DIS] CSV subido OK — filas:', rows.length, '| tamaño CSV:', csvBody.length, 'bytes');
+    const jobCreateBody = await jobCreateResp.json().catch(() => ({}));
+    const jobId = jobCreateBody.jobID || jobCreateBody.jobId || jobCreateBody.id;
+    if (!jobId) throw new Error('SAC DIS no devolvió jobID: ' + JSON.stringify(jobCreateBody));
+    console.log('[DIS] jobId:', jobId, '| importType:', usedImportType, '| body:', JSON.stringify(jobCreateBody));
 
-    // ── 3b. Wait for job to reach finished_with_data before run ──────────────
-    _setLoading('⏳ SAC procesando datos…');
-    await this._pollJobStatus(
-      DIS + '/jobs/' + jobId,
-      ['FINISHED_WITH_DATA', 'FINISHEDWITHDATA', 'FINISHED'],
-      ['UPLOADING_FAILED', 'UPLOADINGFAILED', 'FAILED'],
-      30, 2000, null, DIS_HEADER
-    );
-
-    // ── 4. Run the job: POST /jobs/{jobId}/run ────────────────────────────
+    // ── 4. Run the job ────────────────────────────────────────────────────────
     _setLoading('🚀 Aplicando datos al modelo ' + this._sacModelId + '…');
     const runResp = await fetch(DIS + '/jobs/' + jobId + '/run', {
       method: 'POST', credentials: 'include',
       headers: { 'x-csrf-token': csrfToken, ...DIS_HEADER }
     });
+    console.log('[DIS] run HTTP:', runResp.status);
     if (!runResp.ok) {
       let msg = 'Run HTTP ' + runResp.status;
       try { const b = await runResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
       throw new Error(msg);
     }
 
-    // ── 5. Poll GET /jobs/{jobId} until successful ────────────────────────
+    // ── 5. Poll GET /jobs/{jobId} until successful ────────────────────────────
     _setLoading('⏳ Esperando confirmación de SAC DIS…');
     return await this._pollJobStatus(
       DIS + '/jobs/' + jobId,
       ['SUCCESSFUL', 'SUCCESS', 'COMPLETED', 'COMPLETED_WITH_FAILURES', 'COMPLETE'],
-      ['FAILED', 'UPLOADING_FAILED'],
+      ['FAILED', 'UPLOADING_FAILED', 'UPLOADINGFAILED'],
       120, 3000, _setLoading, DIS_HEADER
     );
   }
@@ -1015,17 +971,20 @@ class ExcelUploaderPro extends HTMLElement {
       row.addEventListener('click', () => {
         const disGuid    = row.dataset.modelId;    // internal GUID
         const modelName  = row.dataset.modelName;  // technical name (preferred)
+        const modelDesc  = row.dataset.modelDesc  || '';
         const importType = row.dataset.importType || 'privateFactData';
         this._sacModelId    = modelName || disGuid;  // store technical name
         this._sacDISModelId = disGuid;               // cache GUID to skip resolve step
         this._sacImportType = importType;
+        this._sacModelDesc  = modelDesc;
         this._sacModelName  = '';
         this._sacModelState = 'connecting';
         this._showModelPicker = false;
         this._modelPickerFilter = '';
-        this._storageSet('sac_dis_model_id', modelName || disGuid);
-        this._storageSet('sac_dis_guid',     disGuid);
-        this._storageSet('sac_import_type',  importType);
+        this._storageSet('sac_dis_model_id',   modelName || disGuid);
+        this._storageSet('sac_dis_guid',        disGuid);
+        this._storageSet('sac_import_type',     importType);
+        this._storageSet('sac_dis_model_desc',  modelDesc);
         this._fetchModelInfo();
         this._render();
       });
@@ -2945,6 +2904,7 @@ class ExcelUploaderPro extends HTMLElement {
                     ${this._sacModelsLoading ? '⏳' : '🔍 SAC'}
                   </button>
                 </div>
+                ${this._sacModelDesc ? `<div style="margin-top:3px;font-size:10px;color:#556B82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;" title="${this._esc(this._sacModelDesc)}">${this._esc(this._sacModelDesc)}</div>` : ''}
                 ${this._showModelPicker ? (() => {
                   const filterTerm = (this._modelPickerFilter || '').toLowerCase();
                   const matches = (m) =>
@@ -2958,8 +2918,6 @@ class ExcelUploaderPro extends HTMLElement {
                   const other    = filtered.filter(m => m.importType !== 'privateFactData');
 
                   const renderRow = (m) => {
-                    const label    = m.description || m.name || m.id;
-                    const subLabel = m.description && m.name && m.name !== m.description ? m.name : '';
                     const isActive = (m.name || m.id) === this._sacModelId;
                     const badge    = m.importType === 'privateFactData'
                       ? '<span style="flex-shrink:0;font-size:10px;background:#E8F5E9;color:#2E7D32;padding:2px 7px;border-radius:10px;font-weight:600;">Planning</span>'
@@ -2971,11 +2929,12 @@ class ExcelUploaderPro extends HTMLElement {
                     return `<div class="sac-model-pick-row"
                         data-model-id="${this._esc(m.id)}"
                         data-model-name="${this._esc(m.name || m.id)}"
+                        data-model-desc="${this._esc(m.description || '')}"
                         data-import-type="${this._esc(m.importType || 'privateFactData')}"
                         style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #F0F4F8;display:flex;justify-content:space-between;align-items:center;gap:8px;${isActive ? 'background:#EBF5FF;' : ''}">
                         <div style="min-width:0;flex:1;">
-                          <div style="font-weight:${isActive ? '800' : '700'};font-size:12px;color:${isActive ? '#003F8A' : '#0064D9'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(label)}">${isActive ? '✓ ' : ''}${this._esc(label)}</div>
-                          ${subLabel ? `<div style="font-size:10px;color:#556B82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(subLabel)}">${this._esc(subLabel)}</div>` : ''}
+                          <div style="font-weight:${isActive ? '800' : '700'};font-size:12px;color:${isActive ? '#003F8A' : '#0064D9'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(m.name || m.id)}">${isActive ? '✓ ' : ''}${this._esc(m.name || m.id)}</div>
+                          ${m.description ? `<div style="font-size:11px;color:#556B82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(m.description)}">${this._esc(m.description)}</div>` : ''}
                           <div style="font-size:9px;color:#B0BEC5;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(m.id)}">${this._esc(m.id)}</div>
                         </div>
                         ${badge}

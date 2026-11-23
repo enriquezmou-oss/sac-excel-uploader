@@ -108,10 +108,10 @@ Built-in overlay (`? Help` button in the header) — step-by-step documentation 
 El widget escribe directamente en un modelo de planificación SAC nativo mediante la **Data Import Service (DIS) REST API**:
 
 1. **Resolución de GUID** — el nombre técnico (`PLAN_CAPEX_PLANNING`) se resuelve automáticamente al GUID interno (`C9qfcbu7dll3q7ao78qsq5e9h4o`) llamando a `GET /api/v1/dataimport/models`.
-2. **CSRF token** — se obtiene del endpoint del modelo específico (`/models/{GUID}/{importType}` con `x-csrf-token: fetch`).
-3. **Creación de job** — `POST /models/{GUID}/privateFactData` → devuelve `jobId`.
-4. **Upload CSV** — `PUT /jobs/{jobId}` con los datos en CSV.
-5. **Run & poll** — `POST /jobs/{jobId}/run` → `GET /jobs/{jobId}` hasta `successful`.
+2. **CSRF token** — se obtiene del endpoint del modelo específico (`GET /models/{GUID}/{importType}` con `x-csrf-token: fetch`).
+3. **Creación + Upload CSV** — `POST /models/{GUID}/privateFactData` con `Content-Type: text/csv` y el CSV en el body → devuelve `{ jobID }`.
+4. **Run** — `POST /jobs/{jobId}/run`.
+5. **Poll** — `GET /jobs/{jobId}` hasta `SUCCESSFUL`.
 
 **Autenticación:** cookies de sesión SAC (`credentials: 'include'`). No requiere OAuth Bearer token.
 
@@ -136,12 +136,13 @@ SheetJS is fetched from CDN on first load. If your SAC tenant blocks external CD
 ## Changelog
 
 ### v2.6.0 — 2026-11-23
-- **Model Picker rediseñado** — nombre técnico como título (antes mostraba GUID críptico)
-- **Búsqueda en tiempo real** — filtra por descripción, nombre técnico o GUID
+- **Fix crítico DIS**: flujo de un solo paso — POST CSV directamente a `/models/{GUID}/{importType}` con `Content-Type: text/csv` (el upload separado a `/jobs/{jobId}` devolvía 405)
+- **MODEL NAME**: campo de descripción amistosa debajo del campo MODEL ID, se rellena al seleccionar en el picker
+- **Model Picker rediseñado** — nombre técnico como título principal (antes mostraba descripción); descripción como subtítulo; GUID en letra pequeña
+- **Búsqueda en tiempo real** — filtra por nombre técnico, descripción o GUID
 - **Grupos** — 📋 Planning (privateFactData) primero · 📊 Actual/Otros (factData) después
 - **Modelo activo** marcado con ✓ y fondo azul
-- Al seleccionar se guarda el nombre técnico (no el GUID) en MODEL ID
-- GUID cacheado en `_sacDISModelId` — evita round-trip extra en el siguiente Synchronize
+- Al seleccionar se guarda el nombre técnico en MODEL ID y el GUID en caché (evita round-trip adicional)
 
 ### v2.5.0 — 2026-11-22
 - **Fix crítico DIS**: resolución automática de GUID interno (`_resolveDISModelId`)
