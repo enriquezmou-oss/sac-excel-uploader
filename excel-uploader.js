@@ -19,9 +19,13 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '2.7.9';
+const _EPM_VERSION = '2.8.0';
 
 const _EPM_CHANGELOG = [
+  { v: '2.8.0', date: '2026-11-23', title: 'Expanded dimension probe: OData, FPA REST, Planning API',
+    items: ['6 new endpoint variants added to dimension probe: OData $metadata (XML), SAC FPA REST, Planning REST API.',
+            'XML OData $metadata parsed to extract EntityType Properties as dimensions.',
+            'Total of 12 endpoint variants tried on connect — higher chance of auto-detecting model structure.'] },
   { v: '2.7.9', date: '2026-11-23', title: 'Fix: 412 on /run step handled silently',
     items: ['POST /jobs/{jobId}/run returning 412 (Precondition Failed) now skipped silently — same behaviour as 405.',
             'Job was already auto-executing on creation; widget proceeds directly to polling.'] },
@@ -499,35 +503,49 @@ class ExcelUploaderPro extends HTMLElement {
     try {
       const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
       const iType = this._sacImportType || 'privateFactData';
-      // Try endpoints in order — stop at the first one that returns parseable dimensions.
-      // The CSRF endpoint (/models/{id}/{importType}) always works on this tenant and
-      // returns a "columns" array in its body with the valid import columns.
       const attempts = [
+        // DIS endpoints (tried first — tenant-specific)
         base + '/api/v1/dataimport/models/' + encodeURIComponent(guid) + '/' + iType,
         base + '/api/v1/dataimport/models/' + encodeURIComponent(tech) + '/' + iType,
         base + '/api/v1/dataimport/models/' + encodeURIComponent(guid) + '/dimensions',
         base + '/api/v1/dataimport/models/' + encodeURIComponent(tech) + '/dimensions',
         base + '/api/v1/dataimport/models/' + encodeURIComponent(guid),
         base + '/api/v1/dataimport/models/' + encodeURIComponent(tech),
+        // OData Export API — returns EntityType with Properties (dimensions + measures)
+        base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(tech) + '/$metadata',
+        base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guid) + '/$metadata',
+        // SAC FPA REST API — model structure
+        base + '/sap/fpa/services/rest/epm/models/' + encodeURIComponent(tech),
+        base + '/sap/fpa/services/rest/epm/models/' + encodeURIComponent(guid),
+        // Planning REST API
+        base + '/api/v1/planning/models/' + encodeURIComponent(tech),
+        base + '/api/v1/planning/models/' + encodeURIComponent(guid),
       ];
       let dims = [];
       for (const url of attempts) {
         try {
           const r = await fetch(url, {
             credentials: 'include',
-            headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
+            headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json,application/xml,*/*', 'x-sap-dis-request-source': 'fileUploadWidget' }
           });
-          const data = await r.json().catch(() => null);
-          console.log('[DIS] dim probe', r.status, url.replace(base, ''), '→', JSON.stringify(data)?.slice(0, 300));
-          if (!r.ok || !data) continue;
-          dims = this._parseDimensions(data);
+          const ct = r.headers.get('content-type') || '';
+          let data = null;
+          if (ct.includes('xml')) {
+            const xml = await r.text().catch(() => null);
+            console.log('[DIS] dim probe', r.status, url.replace(base, ''), '→ XML', xml?.slice(0, 400));
+            if (r.ok && xml) { dims = this._parseDimensionsFromXml(xml); }
+          } else {
+            data = await r.json().catch(() => null);
+            console.log('[DIS] dim probe', r.status, url.replace(base, ''), '→', JSON.stringify(data)?.slice(0, 300));
+            if (r.ok && data) { dims = this._parseDimensions(data); }
+          }
           if (dims.length > 0) { console.log('[DIS] dimensions from:', url); break; }
         } catch (_) { continue; }
       }
       this._sacModelDimensions = dims;
       console.log('[DIS] model dimensions:', dims.map(d => d.id).join(', ') || '(none)');
       if (dims.length === 0) {
-        this._sacDimError = 'DIS did not return column metadata for this model. Configure Required Columns manually.';
+        this._sacDimError = 'Could not load model dimensions automatically. Configure column mapping manually.';
       }
     } catch (err) {
       this._sacDimError = 'Could not load model dimensions: ' + err.message;
@@ -535,6 +553,21 @@ class ExcelUploaderPro extends HTMLElement {
     }
     this._sacDimLoading = false;
     this._render();
+  }
+
+  _parseDimensionsFromXml(xml) {
+    // Parse OData $metadata XML — look for EntityType Properties
+    const dims = [];
+    const propRx = /<Property[^>]+Name="([^"]+)"[^>]*Type="([^"]+)"[^>]*>/g;
+    let m;
+    while ((m = propRx.exec(xml)) !== null) {
+      const id = m[1];
+      const typeRaw = m[2].replace('Edm.', '').toUpperCase();
+      if (id.startsWith('_') || id === 'Version' || id === 'Date') continue;
+      const isMeasure = typeRaw === 'DECIMAL' || typeRaw === 'DOUBLE' || id.endsWith('_AMOUNT') || id.endsWith('_QTY');
+      dims.push({ id, description: id, type: typeRaw, isMeasure, isAuto: false });
+    }
+    return dims;
   }
 
   _parseDimensions(data) {
