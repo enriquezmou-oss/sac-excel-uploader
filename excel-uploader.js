@@ -19,9 +19,12 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '2.7.8';
+const _EPM_VERSION = '2.7.9';
 
 const _EPM_CHANGELOG = [
+  { v: '2.7.9', date: '2026-11-23', title: 'Fix: 412 on /run step handled silently',
+    items: ['POST /jobs/{jobId}/run returning 412 (Precondition Failed) now skipped silently — same behaviour as 405.',
+            'Job was already auto-executing on creation; widget proceeds directly to polling.'] },
   { v: '2.7.8', date: '2026-11-23', title: 'MODEL NAME editable + auto-populated from models list',
     items: ['MODEL NAME field is now editable — type the name and it is saved to localStorage.',
             'When DIS metadata endpoint returns 404, widget automatically searches the models list to find the model description.',
@@ -726,14 +729,14 @@ class ExcelUploaderPro extends HTMLElement {
       headers: { 'x-csrf-token': csrfToken, ...DIS_HEADER }
     });
     console.log('[DIS] run HTTP:', runResp.status);
-    if (!runResp.ok && runResp.status !== 405) {
-      // 405 = this tenant auto-runs jobs on creation, skip silently
+    if (!runResp.ok && runResp.status !== 405 && runResp.status !== 412) {
+      // 405/412 = this tenant auto-runs jobs on creation, skip silently
       let msg = 'Run HTTP ' + runResp.status;
       try { const b = await runResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
       throw new Error(msg);
     }
-    if (runResp.status === 405) {
-      console.log('[DIS] run endpoint not available (405) — job auto-runs on this tenant, proceeding to poll');
+    if (runResp.status === 405 || runResp.status === 412) {
+      console.log('[DIS] run endpoint returned', runResp.status, '— job auto-runs on this tenant, proceeding to poll');
     }
 
     // ── 5. Poll GET /jobs/{jobId} until successful ────────────────────────────
