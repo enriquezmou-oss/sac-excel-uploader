@@ -455,7 +455,8 @@ class ExcelUploaderPro extends HTMLElement {
     }).filter(d => d.id);
   }
 
-
+  // Updates only the header subtitle span — avoids full re-render
+  _updateHeaderSubtitle() {
     const sub = this._shadow && this._shadow.querySelector('.sap-subtitle');
     if (!sub) return;
     const badge =
