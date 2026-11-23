@@ -393,23 +393,68 @@ class ExcelUploaderPro extends HTMLElement {
     this._render();
     try {
       const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
-      const resp = await fetch(base + '/api/v1/dataimport/models', {
-        method: 'GET', credentials: 'include',
-        headers: { 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
-      });
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      const data = await resp.json().catch(() => ({}));
-      // Handle OData v2, v4, plain array formats
-      const raw = Array.isArray(data) ? data
-                : (data?.d?.results || data?.value || data?.models || []);
-      this._sacModels = raw.map(m => ({
-        id:         m.id         || m.modelId      || m.resourceId || '',
-        name:       m.name       || m.modelName    || m.description || m.id || '',
-        importType: m.importType || m.type         || ''
-      })).filter(m => m.id);
+      // Try multiple import types to find all accessible models
+      const importTypes = ['factData', 'privateFactData', 'masterData'];
+      const seen = new Set();
+      const all  = [];
+
+      for (const iType of importTypes) {
+        try {
+          const url  = base + '/api/v1/dataimport/models?importType=' + iType;
+          const resp = await fetch(url, {
+            method: 'GET', credentials: 'include',
+            headers: { 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
+          });
+          if (!resp.ok) continue;
+          const data = await resp.json().catch(() => null);
+          if (!data) continue;
+          console.log('[DIS models] importType=' + iType, data);
+          const raw = Array.isArray(data) ? data
+                    : (data?.d?.results || data?.value || data?.models || []);
+          raw.forEach(m => {
+            const id = m.id || m.modelId || m.resourceId || '';
+            if (id && !seen.has(id)) {
+              seen.add(id);
+              all.push({ id, name: m.name || m.modelName || m.description || id, importType: iType });
+            }
+          });
+        } catch (_) {}
+      }
+
+      // Fallback: try without importType param
+      if (all.length === 0) {
+        const resp = await fetch(base + '/api/v1/dataimport/models', {
+          method: 'GET', credentials: 'include',
+          headers: { 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
+        });
+        const statusTxt = resp.status + ' ' + resp.statusText;
+        const data = resp.ok ? await resp.json().catch(() => null) : null;
+        console.log('[DIS models] fallback status=' + statusTxt, data);
+        if (data) {
+          const raw = Array.isArray(data) ? data
+                    : (data?.d?.results || data?.value || data?.models || []);
+          raw.forEach(m => {
+            const id = m.id || m.modelId || m.resourceId || '';
+            if (id && !seen.has(id)) {
+              seen.add(id);
+              all.push({ id, name: m.name || m.modelName || m.description || id, importType: m.importType || '' });
+            }
+          });
+          if (raw.length === 0 && resp.ok) {
+            this._sacModels = [{ id: '__DEBUG__', name: 'HTTP ' + statusTxt + ' — respuesta vacía. Ver consola.', importType: '' }];
+            this._sacModelsLoading = false;
+            this._render();
+            return;
+          }
+        } else if (!resp.ok) {
+          throw new Error('HTTP ' + statusTxt);
+        }
+      }
+
+      this._sacModels = all;
     } catch (err) {
       this._sacModels = [];
-      this._notify('No se pudo obtener modelos de SAC: ' + err.message, 'error');
+      this._notify('Error listando modelos SAC: ' + err.message, 'error');
     }
     this._sacModelsLoading = false;
     this._render();
