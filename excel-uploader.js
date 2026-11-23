@@ -19,9 +19,13 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.3.0';
+const _EPM_VERSION = '3.3.1';
 
 const _EPM_CHANGELOG = [
+  { v: '3.3.1', date: '2026-11-23', title: 'Fix: 3 bugs — doble render DIS error, doble render addConvRule, asignación duplicada targetDate',
+    items: ['Elimina this._render() redundante tras this._notify() en el catch de DIS error (ya re-renderizaba).',
+            'Elimina this._render() redundante tras this._notify() en el handler de addConvRuleBtn.',
+            'Elimina asignación duplicada de this._targetDate en el listener del campo PERIOD.'] },
   { v: '3.3.0', date: '2026-11-23', title: 'MODEL NAME siempre visible + mensajes de auditoría con semáforos',
     items: ['MODEL NAME siempre muestra la descripción sin filtrado por similitud con el ID.',
             '_updateModelDesc() y la plantilla eliminan la lógica "show" — siempre se muestra.',
@@ -1262,7 +1266,6 @@ class ExcelUploaderPro extends HTMLElement {
     if (targetDateInp) {
       targetDateInp.addEventListener('input', (e) => {
         this._targetDate = e.target.value.trim();
-        this._targetDate = e.target.value.trim();
         this._saveTargetConfig();
         this._refreshBadge(shadow);
       });
@@ -2095,7 +2098,6 @@ class ExcelUploaderPro extends HTMLElement {
               this._saveHistory();
             }
             this._notify('❌ SAC DIS Error: ' + err.message, 'error');
-            this._render();
             return;
           }
 
@@ -3831,7 +3833,6 @@ class ExcelUploaderPro extends HTMLElement {
         this._convTables[dim].push(newRule);
         this._saveConvTables();
         this._notify('Rule added for ' + dim + '.', 'success');
-        this._render();
       });
     }
 
