@@ -524,7 +524,7 @@ class ExcelUploaderPro extends HTMLElement {
     if (!jobId) throw new Error('SAC DIS no devolvió jobID: ' + JSON.stringify(jobCreateBody));
     console.log('[DIS] jobId creado:', jobId, '| importType:', usedImportType);
 
-    // ── 3. Upload CSV data to job: PUT /jobs/{jobId} ──────────────────────
+    // ── 3. Upload CSV data to job: POST /jobs/{jobId} ─────────────────────
     _setLoading('📤 Subiendo ' + rows.length + ' filas a SAC DIS…');
 
     // Build columns: required columns, with Version/Date prepended when set
@@ -550,7 +550,7 @@ class ExcelUploaderPro extends HTMLElement {
     const csvBody = csvLines.join('\n');
 
     const csvResp = await fetch(DIS + '/jobs/' + jobId, {
-      method: 'PUT', credentials: 'include',
+      method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
       body: csvBody
     });
