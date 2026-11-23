@@ -481,22 +481,51 @@ class ExcelUploaderPro extends HTMLElement {
     });
     const csrfToken = csrfResp.headers.get('x-csrf-token') || csrfResp.headers.get('X-Csrf-Token') || '';
 
-    // ── 2. Create import job: POST /models/{id}/factData ─────────────────
+    // ── 2. Create import job — auto-detect importType if needed ──────────────
     _setLoading('📋 Creando job de importación en SAC…');
     const defaultValues = {};
     if (this._targetVersion) defaultValues['Version'] = this._targetVersion;
     if (this._targetDate)    defaultValues['Date']    = String(this._targetDate);
+    const jobBody = JSON.stringify({ Mapping: {}, DefaultValues: defaultValues, JobSettings: {} });
 
-    const jobCreateResp = await fetch(DIS + '/models/' + encodeURIComponent(this._sacModelId) + '/' + (this._sacImportType || 'privateFactData'), {
-      method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken, ...DIS_HEADER },
-      body: JSON.stringify({ Mapping: {}, DefaultValues: defaultValues, JobSettings: {} })
-    });
+    const _tryCreateJob = async (importType) => {
+      const r = await fetch(DIS + '/models/' + encodeURIComponent(this._sacModelId) + '/' + importType, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken, ...DIS_HEADER },
+        body: jobBody
+      });
+      return r;
+    };
+
+    const importTypesToTry = this._sacImportType
+      ? [this._sacImportType, this._sacImportType === 'privateFactData' ? 'factData' : 'privateFactData']
+      : ['privateFactData', 'factData'];
+
+    let jobCreateResp, usedImportType;
+    for (const iType of importTypesToTry) {
+      jobCreateResp = await _tryCreateJob(iType);
+      if (jobCreateResp.ok) { usedImportType = iType; break; }
+      let errBody = {};
+      try { errBody = await jobCreateResp.clone().json(); } catch (_) {}
+      const errMsg = JSON.stringify(errBody);
+      // only retry on "model does not exist" (1704-1801-3304) or 404
+      if (jobCreateResp.status !== 404 && !errMsg.includes('1704-1801-3304')) {
+        const msg = errBody?.error?.message || errBody?.message || 'Create job HTTP ' + jobCreateResp.status;
+        throw new Error(msg);
+      }
+    }
     if (!jobCreateResp.ok) {
       let msg = 'Create job HTTP ' + jobCreateResp.status;
       try { const b = await jobCreateResp.json(); msg = b?.error?.message || b?.message || JSON.stringify(b); } catch (_) {}
-      throw new Error(msg);
+      throw new Error(msg + ' — Verifica el nombre técnico del modelo en SAC Modeler');
     }
+    // persist the working importType for future calls
+    if (usedImportType && usedImportType !== this._sacImportType) {
+      this._sacImportType = usedImportType;
+      this._storageSet('sac_import_type', usedImportType);
+      console.log('[DIS] auto-detected importType:', usedImportType);
+    }
+
     const jobCreateBody = await jobCreateResp.json().catch(() => ({}));
     const jobId = jobCreateBody.jobID || jobCreateBody.jobId || jobCreateBody.id;
     if (!jobId) throw new Error('SAC DIS no devolvió jobID: ' + JSON.stringify(jobCreateBody));
