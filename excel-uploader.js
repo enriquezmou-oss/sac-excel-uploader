@@ -19,9 +19,12 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '2.7.4';
+const _EPM_VERSION = '2.7.5';
 
 const _EPM_CHANGELOG = [
+  { v: '2.7.5', date: '2026-11-23', title: 'Fix: auto-migrate old column names from localStorage',
+    items: ['On startup, ID → CAPEX_ITEM and H1 → AMOUNT automatically in any saved schema.',
+            'DESCRIPTION removed automatically if present. No manual localStorage reset needed.'] },
   { v: '2.7.4', date: '2026-11-23', title: 'Fix: default columns match PLAN_CAPEX_PLANNING model',
     items: ['Default Required Columns updated to match the actual SAC model dimensions: CAPEX_ITEM, COMPANY, COSTCENTER, ASSET_CLASS, CAPITALIZED, AMOUNT.',
             'ID → CAPEX_ITEM (dimension key). H1 → AMOUNT (measure). DESCRIPTION removed (not a DIS upload column).'] },
@@ -79,7 +82,10 @@ class ExcelUploaderPro extends HTMLElement {
 
     const defaultCols = ['CAPEX_ITEM', 'COMPANY', 'COSTCENTER', 'ASSET_CLASS', 'CAPITALIZED', 'AMOUNT'];
     const savedCols = this._storageGet('sac_required_cols');
-    this._requiredColumns = Array.isArray(savedCols) && savedCols.length > 0 ? savedCols : defaultCols;
+    let cols = Array.isArray(savedCols) && savedCols.length > 0 ? savedCols : defaultCols;
+    // Migrate old generic column names to model-specific names
+    cols = cols.map(c => c === 'ID' ? 'CAPEX_ITEM' : c === 'H1' ? 'AMOUNT' : c).filter(c => c !== 'DESCRIPTION');
+    this._requiredColumns = cols;
 
     this._auditExportConfig = {
       open: false,
