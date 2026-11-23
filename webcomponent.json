@@ -12,7 +12,7 @@
     {
       "kind": "main",
       "tag": "custom-excel-uploader-pro",
-      "url": "https://cdn.jsdelivr.net/gh/enriquezmou-oss/sac-excel-uploader@cca3ff9591250dcfa024867859c94d550a919d70/excel-uploader.js",
+      "url": "https://cdn.jsdelivr.net/gh/enriquezmou-oss/sac-excel-uploader@5ab6d3b59ef1b7597938c04e0a3aec4cba384f09/excel-uploader.js",
       "integrity": "",
       "ignoreIntegrity": true
     }
