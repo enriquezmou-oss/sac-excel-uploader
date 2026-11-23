@@ -19,9 +19,13 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '2.7.7';
+const _EPM_VERSION = '2.7.8';
 
 const _EPM_CHANGELOG = [
+  { v: '2.7.8', date: '2026-11-23', title: 'MODEL NAME editable + auto-populated from models list',
+    items: ['MODEL NAME field is now editable — type the name and it is saved to localStorage.',
+            'When DIS metadata endpoint returns 404, widget automatically searches the models list to find the model description.',
+            'MODEL NAME auto-populated without needing to use the picker.'] },
   { v: '2.7.7', date: '2026-11-23', title: 'Fix: DESCRIPTION excluded from DIS + restored as default column',
     items: ['DESCRIPTION column now shows in the grid (useful to identify items) but is excluded from the CSV sent to DIS.',
             'Default Required Columns restored to match the Excel template: ID, DESCRIPTION, H1, COMPANY, COSTCENTER, ASSET_CLASS, CAPITALIZED.',
@@ -423,9 +427,31 @@ class ExcelUploaderPro extends HTMLElement {
         headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json' }
       });
       if (resp.status === 404) {
-        // SAC DIS metadata endpoint not available — model is configured, treat as ready
-        this._sacModelName  = this._sacModelId;
+        // SAC DIS metadata endpoint not available — try to find description in models list
         this._sacModelState = 'ok';
+        this._sacModelName  = this._sacModelId;
+        if (!this._sacModelDesc) {
+          const listResp = await fetch(base + '/api/v1/dataimport/models', {
+            credentials: 'include',
+            headers: { 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
+          }).catch(() => null);
+          if (listResp && listResp.ok) {
+            const listData = await listResp.json().catch(() => null);
+            const list = listData?.value || listData?.d?.results || (Array.isArray(listData) ? listData : []);
+            const match = list.find(m => (m.modelName || m.name || '') === this._sacModelId ||
+                                         (m.id || '') === this._sacModelId ||
+                                         (m.id || '') === this._sacDISModelId);
+            if (match) {
+              const desc = match.description || match.modelDescription || '';
+              if (desc) {
+                this._sacModelDesc = desc;
+                this._storageSet('sac_dis_model_desc', desc);
+                const descEl = this._shadow && this._shadow.querySelector('#sacModelDescDisplay');
+                if (descEl) { descEl.value = desc; descEl.style.color = '#1D2D3E'; }
+              }
+            }
+          }
+        }
       } else if (!resp.ok) {
         throw new Error('HTTP ' + resp.status + (resp.status === 401 || resp.status === 403 ? ' — Sin permisos DIS' : ''));
       } else {
@@ -1125,6 +1151,15 @@ class ExcelUploaderPro extends HTMLElement {
         this._refreshBadge(shadow);
       });
       sacModelIdInp.addEventListener('change', () => this._fetchModelInfo());
+    }
+
+    const sacModelDescInp = shadow.getElementById('sacModelDescDisplay');
+    if (sacModelDescInp) {
+      sacModelDescInp.addEventListener('change', (e) => {
+        const v = e.target.value.trim();
+        this._sacModelDesc = v;
+        this._storageSet('sac_dis_model_desc', v || null);
+      });
     }
 
     const browseModelsBtn = shadow.getElementById('browseModelsBtn');
@@ -3159,11 +3194,11 @@ class ExcelUploaderPro extends HTMLElement {
                       const desc = this._sacModelDesc || '';
                       const id   = (this._sacModelId  || '').toUpperCase();
                       const show = desc && desc.toUpperCase() !== id && !desc.toUpperCase().startsWith(id + ' ') && !desc.toUpperCase().startsWith(id + '-');
-                      return `<input type="text" id="sacModelDescDisplay" readonly
-                        style="width:200px;background:#F7F9FB;color:${show ? '#1D2D3E' : '#A9B8C8'};border:1px solid #D9E0E6;border-radius:4px;padding:5px 8px;font-size:12px;font-family:inherit;cursor:default;"
+                      return `<input type="text" id="sacModelDescDisplay"
+                        style="width:200px;background:#FFF;color:${show ? '#1D2D3E' : '#A9B8C8'};border:1px solid #D9E0E6;border-radius:4px;padding:5px 8px;font-size:12px;font-family:inherit;"
                         value="${show ? this._esc(desc) : ''}"
-                        placeholder="—"
-                        title="${show ? this._esc(desc) : 'Model description will appear here after connecting to SAC DIS'}" />`;
+                        placeholder="Enter model name…"
+                        title="Model friendly name — editable, saved locally" />`;
                     })()}
                   </div>
                 </div>
