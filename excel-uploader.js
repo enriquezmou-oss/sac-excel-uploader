@@ -19,9 +19,13 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.0.0';
+const _EPM_VERSION = '3.0.1';
 
 const _EPM_CHANGELOG = [
+  { v: '3.0.1', date: '2026-11-23', title: 'Bug fixes: double render, poll match, clear button',
+    items: ['Fix double _render() after Transform & Convert — _notify() already re-renders.',
+            'Fix DIS poll failure detection — uses startsWith instead of strict equality (catches UPLOAD_FAILED variants).',
+            '✕ Clear button now visible in mapping rows — removes custom name or exclusion for that column.'] },
   { v: '3.0.0', date: '2026-11-23', title: 'Mapping feedback + toast confirmations',
     items: ['💾 Apply Mapping shows toast: "✅ Mapeo guardado — X columnas mapeadas" and scrolls to Step 1 if no rows loaded.',
             '⚡ Defaults shows toast: "⚡ Mapeo por defecto aplicado" after auto-mapping.',
@@ -851,7 +855,7 @@ class ExcelUploaderPro extends HTMLElement {
       const status = (inner.jobStatus || inner.status || body.jobStatus || body.status || '').toUpperCase();
       console.log('[DIS poll] attempt', i+1, '— status:', status || '(vacío)', JSON.stringify(inner).slice(0, 120));
       if (targetStatuses.some(s => status === s || status.startsWith(s))) return body;
-      if ((failStatuses || []).some(s => status === s.toUpperCase())) {
+      if ((failStatuses || []).some(s => status.startsWith(s.toUpperCase()) || s.toUpperCase().startsWith(status))) {
         throw new Error('SAC DIS job ' + status + ': ' + (inner.message || inner.errorMessage || body.message || JSON.stringify(inner).slice(0, 200)));
       }
       if (_setLoading) _setLoading('⏳ SAC DIS: ' + (status || 'procesando') + '…');
@@ -3435,9 +3439,10 @@ class ExcelUploaderPro extends HTMLElement {
                                   style="width:100%;border:1px solid #C0CDD8;border-radius:4px;padding:4px 8px;font-size:11px;font-family:monospace;background:#FFF;color:#1D2D3E;outline:none;box-sizing:border-box;" />`
                             }
                           </td>
-                          <td style="padding:3px 6px;text-align:center;">
+                          <td style="padding:3px 6px;text-align:center;white-space:nowrap;">
                             <button type="button" data-toggle-excl-col="${this._esc(col)}" title="${isExcl ? 'Include in DIS' : 'Exclude from DIS'}"
                               style="background:none;border:1px solid ${isExcl ? '#B3D4F0' : '#DDE3E9'};border-radius:3px;cursor:pointer;padding:2px 5px;font-size:10px;color:${isExcl ? '#005CB9' : '#556B82'};line-height:1;white-space:nowrap;">${isExcl ? '+ Include' : '⊘ Excl.'}</button>
+                            ${val || isExcl ? `<button type="button" data-clear-col="${this._esc(col)}" title="Clear mapping/exclusion" style="background:none;border:1px solid #FFBDBC;border-radius:3px;cursor:pointer;padding:2px 5px;font-size:10px;color:#BB0000;margin-left:3px;line-height:1;">✕</button>` : ''}
                           </td>
                         </tr>`;
                       }).join('')}
@@ -3673,7 +3678,6 @@ class ExcelUploaderPro extends HTMLElement {
         this._applyTransformAndConvert();
         this._validateRows();
         this._notify('Transform & Convert applied to ' + this._rows.length + ' row(s).', 'success');
-        this._render();
       });
     }
 
