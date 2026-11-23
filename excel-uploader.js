@@ -105,7 +105,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._sacImportType   = this._storageGet('sac_import_type')    || 'privateFactData';
     this._sacModelName    = '';
     this._sacModelState   = '';
-    this._sacDISModelId   = '';  // resolved DIS internal GUID (≠ technical name)
+    this._sacDISModelId   = this._storageGet('sac_dis_guid') || '';  // resolved DIS internal GUID — persisted
     this._sacModels       = [];
     this._sacModelsLoading = false;
     this._showModelPicker   = false;
@@ -437,6 +437,7 @@ class ExcelUploaderPro extends HTMLElement {
       );
       if (match?.modelID) {
         this._sacDISModelId = match.modelID;
+        this._storageSet('sac_dis_guid', match.modelID);
         console.log('[DIS] resolved', this._sacModelId, '→', match.modelID);
         return match.modelID;
       }
@@ -1010,6 +1011,7 @@ class ExcelUploaderPro extends HTMLElement {
         this._showModelPicker = false;
         this._modelPickerFilter = '';
         this._storageSet('sac_dis_model_id', modelName || disGuid);
+        this._storageSet('sac_dis_guid',     disGuid);
         this._storageSet('sac_import_type',  importType);
         this._fetchModelInfo();
         this._render();
