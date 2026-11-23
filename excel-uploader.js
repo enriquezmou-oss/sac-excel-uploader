@@ -405,9 +405,10 @@ class ExcelUploaderPro extends HTMLElement {
       const data = await resp.json().catch(() => null);
       const raw  = Array.isArray(data) ? data : (data?.d?.results || data?.value || data?.models || []);
       this._sacModels = raw.map(m => ({
-        id:         m.modelID   || m.id || m.modelId || '',
-        name:       m.modelName || m.name || '',
-        importType: m.importType || ''
+        id:          m.modelID          || m.id      || m.modelId    || '',
+        name:        m.modelName        || m.name    || '',
+        description: m.modelDescription || m.description || m.label || '',
+        importType:  m.importType       || ''
       })).filter(m => m.id);
     } catch (err) {
       this._sacModels = [];
@@ -2922,19 +2923,53 @@ class ExcelUploaderPro extends HTMLElement {
                 </div>
                 ${this._showModelPicker ? (() => {
                   const filterTerm = (this._modelPickerFilter || '').toLowerCase();
-                  const filtered = filterTerm
-                    ? this._sacModels.filter(m =>
-                        (m.name || '').toLowerCase().includes(filterTerm) ||
-                        (m.id   || '').toLowerCase().includes(filterTerm))
-                    : this._sacModels;
+                  const matches = (m) =>
+                    (m.description || '').toLowerCase().includes(filterTerm) ||
+                    (m.name        || '').toLowerCase().includes(filterTerm) ||
+                    (m.id          || '').toLowerCase().includes(filterTerm);
+                  const filtered = filterTerm ? this._sacModels.filter(matches) : this._sacModels;
+
+                  // group: planning (privateFactData) first, then rest
+                  const planning = filtered.filter(m => m.importType === 'privateFactData');
+                  const other    = filtered.filter(m => m.importType !== 'privateFactData');
+
+                  const renderRow = (m) => {
+                    const label    = m.description || m.name || m.id;
+                    const subLabel = m.description && m.name && m.name !== m.description ? m.name : '';
+                    const isActive = (m.name || m.id) === this._sacModelId;
+                    const badge    = m.importType === 'privateFactData'
+                      ? '<span style="flex-shrink:0;font-size:10px;background:#E8F5E9;color:#2E7D32;padding:2px 7px;border-radius:10px;font-weight:600;">Planning</span>'
+                      : m.importType === 'factData'
+                        ? '<span style="flex-shrink:0;font-size:10px;background:#EBF5FF;color:#005CB9;padding:2px 7px;border-radius:10px;font-weight:600;">Actual</span>'
+                        : m.importType
+                          ? `<span style="flex-shrink:0;font-size:10px;background:#F5F5F5;color:#556B82;padding:2px 7px;border-radius:10px;font-weight:600;">${this._esc(m.importType)}</span>`
+                          : '';
+                    return `<div class="sac-model-pick-row"
+                        data-model-id="${this._esc(m.id)}"
+                        data-model-name="${this._esc(m.name || m.id)}"
+                        data-import-type="${this._esc(m.importType || 'privateFactData')}"
+                        style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #F0F4F8;display:flex;justify-content:space-between;align-items:center;gap:8px;${isActive ? 'background:#EBF5FF;' : ''}">
+                        <div style="min-width:0;flex:1;">
+                          <div style="font-weight:${isActive ? '800' : '700'};font-size:12px;color:${isActive ? '#003F8A' : '#0064D9'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(label)}">${isActive ? '✓ ' : ''}${this._esc(label)}</div>
+                          ${subLabel ? `<div style="font-size:10px;color:#556B82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(subLabel)}">${this._esc(subLabel)}</div>` : ''}
+                          <div style="font-size:9px;color:#B0BEC5;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(m.id)}">${this._esc(m.id)}</div>
+                        </div>
+                        ${badge}
+                      </div>`;
+                  };
+
+                  const renderGroup = (title, color, items) => items.length === 0 ? '' : `
+                    <div style="padding:4px 12px;font-size:10px;font-weight:700;color:${color};background:#FAFBFC;border-bottom:1px solid #F0F4F8;letter-spacing:.5px;text-transform:uppercase;">${title} (${items.length})</div>
+                    ${items.map(renderRow).join('')}`;
+
                   return `
-                  <div id="modelPickerDropdown" style="position:absolute;z-index:9999;top:calc(100% + 2px);left:0;min-width:380px;max-height:320px;display:flex;flex-direction:column;background:#fff;border:1px solid #0070F2;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);">
+                  <div id="modelPickerDropdown" style="position:absolute;z-index:9999;top:calc(100% + 2px);left:0;min-width:420px;max-height:360px;display:flex;flex-direction:column;background:#fff;border:1px solid #0070F2;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);">
                     <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid #E9EEF3;background:#F8FAFC;border-radius:8px 8px 0 0;flex-shrink:0;">
-                      <span style="font-weight:700;font-size:11px;color:#1D2D3E;">Modelos SAC DIS (${this._sacModels.length})</span>
+                      <span style="font-weight:700;font-size:11px;color:#1D2D3E;">Modelos SAC DIS — ${filtered.length} de ${this._sacModels.length}</span>
                       <button id="closeModelPickerBtn" type="button" style="background:none;border:none;cursor:pointer;font-size:14px;color:#556B82;padding:0 2px;">✕</button>
                     </div>
                     <div style="padding:6px 10px;border-bottom:1px solid #E9EEF3;flex-shrink:0;">
-                      <input type="text" id="modelPickerFilterInp" placeholder="🔍 Buscar por nombre o ID…"
+                      <input type="text" id="modelPickerFilterInp" placeholder="🔍 Buscar por descripción, nombre técnico o ID…"
                         value="${this._esc(this._modelPickerFilter)}"
                         style="width:100%;box-sizing:border-box;border:1px solid #C0CDD8;border-radius:4px;padding:5px 8px;font-size:12px;outline:none;font-family:inherit;" />
                     </div>
@@ -2943,22 +2978,7 @@ class ExcelUploaderPro extends HTMLElement {
                       ? '<div style="padding:20px;text-align:center;color:#556B82;font-size:12px;">⏳ Cargando modelos…</div>'
                       : filtered.length === 0
                         ? `<div style="padding:20px;text-align:center;color:#BB0000;font-size:12px;">${filterTerm ? 'Sin resultados para "' + this._esc(filterTerm) + '"' : 'Sin modelos disponibles o sin permisos DIS'}</div>`
-                        : filtered.map(m => {
-                            const displayName = m.name || m.id;
-                            const showGuid    = m.name && m.name !== m.id;
-                            return `
-                            <div class="sac-model-pick-row"
-                              data-model-id="${this._esc(m.id)}"
-                              data-model-name="${this._esc(m.name || m.id)}"
-                              data-import-type="${this._esc(m.importType || 'privateFactData')}"
-                              style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #F0F4F8;display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                              <div style="min-width:0;flex:1;">
-                                <div style="font-weight:700;font-size:12px;color:#0064D9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(displayName)}">${this._esc(displayName)}</div>
-                                ${showGuid ? `<div style="font-size:10px;color:#9BA8B3;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(m.id)}">${this._esc(m.id)}</div>` : ''}
-                              </div>
-                              ${m.importType ? `<span style="flex-shrink:0;font-size:10px;background:#EBF5FF;color:#005CB9;padding:2px 7px;border-radius:10px;font-weight:600;">${this._esc(m.importType)}</span>` : ''}
-                            </div>`;
-                          }).join('')
+                        : renderGroup('📋 Planning', '#2E7D32', planning) + renderGroup('📊 Actual / Otros', '#005CB9', other)
                     }
                     </div>
                   </div>`;
