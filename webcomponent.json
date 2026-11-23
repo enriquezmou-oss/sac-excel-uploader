@@ -1,6 +1,6 @@
 {
   "id": "com.sap.sac.exceluploaderpro",
-  "version": "2.8.0",
+  "version": "3.0.0",
   "name": "Excel Planning Uploader Pro",
   "description": "Multi-Sheet Consolidation, Transform & Convert, Alert Semaphores for SAC Planning",
   "newInstancePrefix": "ExcelUploaderPro_",
@@ -12,7 +12,7 @@
     {
       "kind": "main",
       "tag": "custom-excel-uploader-pro",
-      "url": "https://cdn.jsdelivr.net/gh/enriquezmou-oss/sac-excel-uploader@d53e508/excel-uploader.js",
+      "url": "https://cdn.jsdelivr.net/gh/enriquezmou-oss/sac-excel-uploader@ed8325b/excel-uploader.js",
       "integrity": "",
       "ignoreIntegrity": true
     }
