@@ -559,6 +559,7 @@ class ExcelUploaderPro extends HTMLElement {
       try { const b = await csvResp.json(); msg = b?.error?.message || b?.message || JSON.stringify(b); } catch (_) {}
       throw new Error(msg);
     }
+    console.log('[DIS] CSV subido OK — filas:', rows.length, '| tamaño CSV:', csvBody.length, 'bytes');
 
     // ── 3b. Wait for job to reach finished_with_data before run ──────────────
     _setLoading('⏳ SAC procesando datos…');
@@ -599,12 +600,15 @@ class ExcelUploaderPro extends HTMLElement {
         method: 'GET', credentials: 'include',
         headers: { 'Accept': 'application/json', ...(extraHeaders || {}) }
       });
-      if (!r.ok) continue;
+      if (!r.ok) { console.warn('[DIS poll] HTTP ' + r.status + ' on attempt ' + (i+1)); continue; }
       const body   = await r.json().catch(() => ({}));
-      const status = (body.jobStatus || body.status || '').toUpperCase();
+      // SAC DIS may return OData format { d: { status: ... } } or flat { status: ... }
+      const inner  = body.d || body;
+      const status = (inner.jobStatus || inner.status || body.jobStatus || body.status || '').toUpperCase();
+      console.log('[DIS poll] attempt', i+1, '— status:', status || '(vacío)', JSON.stringify(inner).slice(0, 120));
       if (targetStatuses.some(s => status === s || status.startsWith(s))) return body;
       if ((failStatuses || []).some(s => status === s.toUpperCase())) {
-        throw new Error('SAC DIS job ' + status + ': ' + (body.message || body.errorMessage || JSON.stringify(body)));
+        throw new Error('SAC DIS job ' + status + ': ' + (inner.message || inner.errorMessage || body.message || JSON.stringify(inner).slice(0, 200)));
       }
       if (_setLoading) _setLoading('⏳ SAC DIS: ' + (status || 'procesando') + '…');
     }
