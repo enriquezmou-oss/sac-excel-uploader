@@ -104,13 +104,17 @@ class ExcelUploaderPro extends HTMLElement {
     this._sacModelId      = this._storageGet('sac_dis_model_id')   || 'PLAN_CAPEX_PLANNING';
     this._sacImportType   = this._storageGet('sac_import_type')    || 'privateFactData';
     this._sacModelName    = '';
-    this._sacModelDesc    = this._storageGet('sac_dis_model_desc') || '';  // friendly description
+    this._sacModelDesc    = this._storageGet('sac_dis_model_desc') || '';
     this._sacModelState   = '';
-    this._sacDISModelId   = this._storageGet('sac_dis_guid') || '';  // resolved DIS internal GUID — persisted
+    this._sacDISModelId   = this._storageGet('sac_dis_guid') || '';
     this._sacModels       = [];
     this._sacModelsLoading = false;
     this._showModelPicker   = false;
     this._modelPickerFilter = '';
+    this._sacModelDimensions  = [];   // [{id, description, type, isMeasure, isAuto}]
+    this._sacDimLoading       = false;
+    this._sacDimError         = '';
+    this._sacDimPanelOpen     = true;
     this._ensureXLSX();
     if (this._sacModelId) this._fetchModelInfo();
     this._render();
@@ -376,7 +380,7 @@ class ExcelUploaderPro extends HTMLElement {
         }
       }
     } catch (err) {
-      this._sacModelName  = err.message || 'Error de conexión';
+      this._sacModelName  = err.message || 'Connection error';
       this._sacModelState = 'error';
     }
     this._updateHeaderSubtitle();
@@ -389,10 +393,69 @@ class ExcelUploaderPro extends HTMLElement {
       descEl.value = show ? desc : '';
       descEl.style.color = show ? '#1D2D3E' : '#A9B8C8';
     }
+    // fetch dimension structure whenever the model connects successfully
+    if (this._sacModelState === 'ok') {
+      this._fetchModelDimensions();
+    }
   }
 
-  // Updates only the header subtitle span — avoids full re-render
-  _updateHeaderSubtitle() {
+  // ── Fetch model dimension structure from SAC DIS ──────────────────────────
+  async _fetchModelDimensions() {
+    const guid = this._sacDISModelId || this._sacModelId;
+    if (!guid) return;
+    this._sacDimLoading = true;
+    this._sacDimError   = '';
+    this._sacModelDimensions = [];
+    this._render();
+    try {
+      const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
+      // Try model-level metadata endpoint first
+      const resp = await fetch(base + '/api/v1/dataimport/models/' + encodeURIComponent(guid), {
+        credentials: 'include',
+        headers: { 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
+      });
+      if (!resp.ok) {
+        // Some tenants use /models/{id}/dimensions
+        const resp2 = await fetch(base + '/api/v1/dataimport/models/' + encodeURIComponent(guid) + '/dimensions', {
+          credentials: 'include',
+          headers: { 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
+        });
+        if (!resp2.ok) throw new Error('HTTP ' + resp.status);
+        const data2 = await resp2.json().catch(() => ({}));
+        this._sacModelDimensions = this._parseDimensions(data2);
+      } else {
+        const data = await resp.json().catch(() => ({}));
+        this._sacModelDimensions = this._parseDimensions(data);
+      }
+      console.log('[DIS] model dimensions:', this._sacModelDimensions.map(d => d.id).join(', '));
+    } catch (err) {
+      this._sacDimError = 'Could not load model dimensions: ' + err.message;
+      console.warn('[DIS] dimension fetch failed:', err.message);
+    }
+    this._sacDimLoading = false;
+    this._render();
+  }
+
+  _parseDimensions(data) {
+    // Handle various DIS response shapes
+    const raw = Array.isArray(data)
+      ? data
+      : (data?.dimensions || data?.d?.dimensions || data?.value || data?.d?.results || []);
+    const AUTO_TYPES = new Set(['VERSION', 'DATE', 'FISCAL_YEAR', 'FISCAL_PERIOD']);
+    const MEASURE_TYPES = new Set(['MEASURE', 'KPI', 'AMOUNT', 'QUANTITY']);
+    return raw.map(d => {
+      const typeRaw = (d.type || d.dimensionType || d.DimensionType || '').toUpperCase();
+      return {
+        id:          d.id || d.dimensionId || d.DimensionId || d.name || d.Name || '',
+        description: d.description || d.Description || d.label || d.name || '',
+        type:        typeRaw || 'GENERIC',
+        isMeasure:   MEASURE_TYPES.has(typeRaw),
+        isAuto:      AUTO_TYPES.has(typeRaw),
+      };
+    }).filter(d => d.id);
+  }
+
+
     const sub = this._shadow && this._shadow.querySelector('.sap-subtitle');
     if (!sub) return;
     const badge =
@@ -400,7 +463,7 @@ class ExcelUploaderPro extends HTMLElement {
       this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
       this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="' + this._esc(this._sacModelName) + '">⚠️ ' + this._esc(this._sacModelName.slice(0, 60)) + '</span>' :
       '';
-    sub.innerHTML = 'Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.6.1' + badge;
+    sub.innerHTML = 'Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.7.0' + badge;
   }
 
   // ── Fetch list of all models from SAC DIS ─────────────────────────────────
@@ -979,6 +1042,26 @@ class ExcelUploaderPro extends HTMLElement {
     const browseModelsBtn = shadow.getElementById('browseModelsBtn');
     if (browseModelsBtn) {
       browseModelsBtn.addEventListener('click', () => this._fetchSacModels());
+    }
+
+    const sacDimPanelHeader = shadow.getElementById('sacDimPanelHeader');
+    if (sacDimPanelHeader) {
+      sacDimPanelHeader.addEventListener('click', () => {
+        this._sacDimPanelOpen = !this._sacDimPanelOpen;
+        this._render();
+      });
+    }
+
+    const applyDimsBtn = shadow.getElementById('applyDimsBtn');
+    if (applyDimsBtn) {
+      applyDimsBtn.addEventListener('click', () => {
+        const reqCols = new Set((this._requiredColumns || []).map(c => c.toUpperCase()));
+        const toAdd   = this._sacModelDimensions.filter(d => !d.isAuto && !reqCols.has(d.id.toUpperCase()));
+        if (toAdd.length === 0) return;
+        this._requiredColumns = [...(this._requiredColumns || []), ...toAdd.map(d => d.id)];
+        this._storageSet('sac_required_cols', JSON.stringify(this._requiredColumns));
+        this._render();
+      });
     }
 
     const closeModelPickerBtn = shadow.getElementById('closeModelPickerBtn');
@@ -1612,6 +1695,18 @@ class ExcelUploaderPro extends HTMLElement {
           this._notify('Please confirm review of preventive and check alerts before synchronizing.', 'error'); return;
         }
         if (this._rows.length === 0) { this._notify('No active data rows to load.', 'error'); return; }
+
+        // Block if model dimensions are loaded and some are unmapped
+        if (this._sacModelDimensions.length > 0) {
+          const reqCols = new Set((this._requiredColumns || []).map(c => c.toUpperCase()));
+          const missing = this._sacModelDimensions.filter(d => !d.isAuto && !reqCols.has(d.id.toUpperCase()));
+          if (missing.length > 0) {
+            this._notify('⚠️ ' + missing.length + ' model dimension(s) not mapped: ' + missing.map(d => d.id).join(', ') + '. Add them to Required Columns first.', 'error');
+            this._sacDimPanelOpen = true;
+            this._render();
+            return;
+          }
+        }
 
         const loadId = 'LOAD-' + Math.floor(10000 + Math.random() * 90000);
         const fileSummary = this._filesQueue.length > 0
@@ -2822,7 +2917,7 @@ class ExcelUploaderPro extends HTMLElement {
             <img class="sap-logo-img" src="${this._sapLogoUri}" alt="SAP Logo" />
             <div class="sap-title-wrap">
               <div class="sap-title">Excel Planning Uploader Pro</div>
-              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.6.1${
+              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.7.0${
                 this._sacModelState === 'connecting' ? ' &nbsp;|&nbsp; <span style="color:#A9B8C8;font-weight:600;">⏳ Conectando…</span>' :
                 this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
                 this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="' + this._esc(this._sacModelName) + '">⚠️ ' + this._esc((this._sacModelName || 'Modelo no encontrado').slice(0, 60)) + '</span>' :
@@ -3004,6 +3099,78 @@ class ExcelUploaderPro extends HTMLElement {
                   </div>`;
                 })() : ''}
               </div>
+            </div>
+            ${/* ── Model Structure Validation panel ── */ ''}
+            ${this._sacModelState === 'ok' ? (() => {
+              const dimTypeIcon = (t) => {
+                if (t === 'VERSION') return '🔁';
+                if (t === 'DATE' || t === 'FISCAL_YEAR' || t === 'FISCAL_PERIOD') return '📅';
+                if (t === 'MEASURE' || t === 'KPI' || t === 'AMOUNT' || t === 'QUANTITY') return '📊';
+                if (t === 'ACCOUNT') return '🔑';
+                return '🏷️';
+              };
+              const autoIds  = new Set(['VERSION', 'DATE']);
+              const reqCols  = new Set((this._requiredColumns || []).map(c => c.toUpperCase()));
+
+              const getDimStatus = (d) => {
+                if (d.isAuto) return { label: '✅ auto', color: '#107E3E', bg: '#E6F9EC', title: 'Handled automatically via VERSION / PERIOD fields' };
+                if (reqCols.has(d.id.toUpperCase())) return { label: '✅ mapped', color: '#107E3E', bg: '#E6F9EC', title: 'Column present in Required Columns' };
+                return { label: '❌ missing', color: '#BB0000', bg: '#FFF0F0', title: 'Not found in Required Columns — add it or Synchronize will be blocked' };
+              };
+
+              const missingCount = this._sacModelDimensions.filter(d => !d.isAuto && !reqCols.has(d.id.toUpperCase())).length;
+              const headerColor  = this._sacDimLoading ? '#556B82' : missingCount > 0 ? '#BB0000' : '#107E3E';
+              const headerIcon   = this._sacDimLoading ? '⏳' : missingCount > 0 ? '⚠️' : '✅';
+              const headerLabel  = this._sacDimLoading
+                ? 'Loading model structure…'
+                : this._sacDimError
+                  ? '⚠️ Could not load model dimensions'
+                  : `${headerIcon} Model Structure — ${this._sacModelDimensions.length} dimensions, ${missingCount} unmapped`;
+
+              return `<div style="width:100%;margin-top:10px;border:1px solid ${missingCount > 0 ? '#FCA5A5' : '#D1E8D1'};border-radius:6px;overflow:hidden;background:#FAFBFC;">
+                <div id="sacDimPanelHeader" data-open="${this._sacDimPanelOpen ? '1' : '0'}"
+                  style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:${missingCount > 0 ? '#FFF5F5' : '#F0F9F0'};cursor:pointer;user-select:none;">
+                  <span style="font-size:11px;font-weight:700;color:${headerColor};">${headerLabel}</span>
+                  <span style="font-size:11px;color:#556B82;">${this._sacDimPanelOpen ? '▲ collapse' : '▼ expand'}</span>
+                </div>
+                ${this._sacDimPanelOpen ? `<div style="padding:0 0 6px 0;">
+                  ${this._sacDimLoading
+                    ? '<div style="padding:16px;text-align:center;color:#556B82;font-size:12px;">⏳ Fetching model dimensions from SAC DIS…</div>'
+                    : this._sacDimError
+                      ? `<div style="padding:12px 16px;font-size:11px;color:#BB0000;">${this._esc(this._sacDimError)}</div>`
+                      : this._sacModelDimensions.length === 0
+                        ? '<div style="padding:12px 16px;font-size:11px;color:#556B82;">No dimension metadata returned by this SAC tenant. Configure Required Columns manually.</div>'
+                        : `<table style="width:100%;border-collapse:collapse;font-size:11px;">
+                            <thead>
+                              <tr style="background:#F0F4F8;border-bottom:1px solid #D9E0E6;">
+                                <th style="padding:5px 10px;text-align:left;font-weight:700;color:#556B82;">Dimension ID</th>
+                                <th style="padding:5px 10px;text-align:left;font-weight:700;color:#556B82;">Description</th>
+                                <th style="padding:5px 10px;text-align:center;font-weight:700;color:#556B82;">Type</th>
+                                <th style="padding:5px 10px;text-align:center;font-weight:700;color:#556B82;">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              ${this._sacModelDimensions.map((d, i) => {
+                                const st = getDimStatus(d);
+                                return `<tr style="border-bottom:1px solid #F0F4F8;background:${i % 2 === 0 ? '#fff' : '#FAFBFC'};">
+                                  <td style="padding:5px 10px;font-family:monospace;font-weight:700;color:#003F8A;">${this._esc(d.id)}</td>
+                                  <td style="padding:5px 10px;color:#1D2D3E;">${this._esc(d.description || '—')}</td>
+                                  <td style="padding:5px 10px;text-align:center;">${dimTypeIcon(d.type)} <span style="color:#556B82;">${this._esc(d.type)}</span></td>
+                                  <td style="padding:5px 10px;text-align:center;"><span style="background:${st.bg};color:${st.color};padding:2px 8px;border-radius:10px;font-weight:700;font-size:10px;" title="${st.title}">${st.label}</span></td>
+                                </tr>`;
+                              }).join('')}
+                            </tbody>
+                          </table>
+                          ${missingCount > 0 ? `<div style="padding:8px 10px;display:flex;align-items:center;gap:10px;border-top:1px solid #FCA5A5;background:#FFF5F5;">
+                            <span style="font-size:11px;color:#BB0000;font-weight:600;">⚠️ ${missingCount} dimension${missingCount > 1 ? 's' : ''} not mapped — Synchronize is blocked until resolved.</span>
+                            <button id="applyDimsBtn" class="btn btn-primary" type="button" style="font-size:11px;padding:4px 12px;white-space:nowrap;">⚡ Add missing to Required Columns</button>
+                          </div>` : '<div style="padding:7px 10px;border-top:1px solid #D1E8D1;background:#F0F9F0;font-size:11px;color:#107E3E;font-weight:600;">✅ All dimensions are mapped — ready to sync.</div>'}
+                        `
+                  }
+                </div>` : ''}
+              </div>`;
+            })() : ''}
+            <div style="width:100%;display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding-top:10px;">
               ${this._targetVersion && this._targetDate
                 ? (this._sacModelId
                     ? '<span class="sac-target-badge" style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">✅ ' + this._esc(this._targetVersion) + ' · ' + this._esc(this._targetDate) + ' → ' + this._esc(this._sacModelId) + '</span>'
