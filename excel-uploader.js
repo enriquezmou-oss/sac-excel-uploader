@@ -19,9 +19,13 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '2.7.6';
+const _EPM_VERSION = '2.7.7';
 
 const _EPM_CHANGELOG = [
+  { v: '2.7.7', date: '2026-11-23', title: 'Fix: DESCRIPTION excluded from DIS + restored as default column',
+    items: ['DESCRIPTION column now shows in the grid (useful to identify items) but is excluded from the CSV sent to DIS.',
+            'Default Required Columns restored to match the Excel template: ID, DESCRIPTION, H1, COMPANY, COSTCENTER, ASSET_CLASS, CAPITALIZED.',
+            'Column mapping ID→CAPEX_ITEM and H1→AMOUNT applied only to the CSV header — DIS always receives correct SAC dimension names.'] },
   { v: '2.7.6', date: '2026-11-23', title: 'Column Mapping — Excel names → SAC dimension names',
     items: ['New _columnMapping state: maps Excel column names to SAC dimension names in the CSV header.',
             'Default mapping pre-configured: ID → CAPEX_ITEM, H1 → AMOUNT.',
@@ -85,15 +89,18 @@ class ExcelUploaderPro extends HTMLElement {
     this._targetDate    = this._storageGet('sac_target_date')    || '';
     this._parseConfig = { format: 'AUTO', delimiter: 'AUTO', numberFormat: 'STD', headerRow: 1 };
 
-    const defaultCols = ['ID', 'H1', 'COMPANY', 'COSTCENTER', 'ASSET_CLASS', 'CAPITALIZED'];
+    const defaultCols = ['ID', 'DESCRIPTION', 'H1', 'COMPANY', 'COSTCENTER', 'ASSET_CLASS', 'CAPITALIZED'];
     const savedCols = this._storageGet('sac_required_cols');
     this._requiredColumns = Array.isArray(savedCols) && savedCols.length > 0 ? savedCols : defaultCols;
 
     // Column mapping: Excel column name → SAC dimension name (applied to CSV header)
-    // Default pre-configured for PLAN_CAPEX_PLANNING
     const defaultMapping = { 'ID': 'CAPEX_ITEM', 'H1': 'AMOUNT' };
     const savedMapping = this._storageGet('sac_column_mapping');
     this._columnMapping = (savedMapping && typeof savedMapping === 'object') ? savedMapping : defaultMapping;
+
+    // Columns excluded from DIS upload (shown in grid but not sent to SAC)
+    const savedExcluded = this._storageGet('sac_dis_excluded_cols');
+    this._disExcludedCols = Array.isArray(savedExcluded) ? savedExcluded : ['DESCRIPTION'];
 
     this._auditExportConfig = {
       open: false,
@@ -609,7 +616,9 @@ class ExcelUploaderPro extends HTMLElement {
     console.log('[DIS] usando modelId:', disModelId, '| técnico:', this._sacModelId, '| GUID en caché:', this._sacDISModelId || '(vacío)');
 
     // ── 1. Build CSV (columns + data rows) ───────────────────────────────────
-    const cols = [...this._requiredColumns];
+    // Filter out display-only columns that must not be sent to DIS
+    const disExcluded = new Set(this._disExcludedCols || ['DESCRIPTION']);
+    const cols = [...this._requiredColumns].filter(c => !disExcluded.has(c));
     if (this._targetVersion && !cols.includes('Version')) cols.unshift('Version');
     if (this._targetDate    && !cols.includes('Date'))    cols.unshift('Date');
     // Build reverse mapping: SAC dimension name → Excel column name
