@@ -501,6 +501,8 @@ class ExcelUploaderPro extends HTMLElement {
       csvLines.push(vals.join(','));
     }
     const csvBody = csvLines.join('\n');
+    console.log('[DIS] CSV header:', csvLines[0]);
+    console.log('[DIS] CSV rows:', csvLines.length - 1, '| first row:', csvLines[1] || '(vacío)');
 
     // ── 2. CSRF token ─────────────────────────────────────────────────────────
     _setLoading('🔑 Obteniendo CSRF token de SAC DIS…');
@@ -526,8 +528,9 @@ class ExcelUploaderPro extends HTMLElement {
       let errBody = {};
       try { errBody = await r.clone().json(); } catch (_) {}
       const errMsg = JSON.stringify(errBody);
+      console.log('[DIS] POST', iType, 'HTTP', r.status, '| error body:', errMsg.slice(0, 400));
       if (r.status !== 404 && !errMsg.includes('1704-1801-3304')) {
-        const msg = errBody?.error?.message || errBody?.message || 'Upload+Create HTTP ' + r.status;
+        const msg = errBody?.error?.message || errBody?.message || errBody?.errorDetails?.[0]?.message || 'Upload+Create HTTP ' + r.status;
         throw new Error(msg);
       }
       jobCreateResp = r;
