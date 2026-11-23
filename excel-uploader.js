@@ -19,9 +19,13 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.1.1';
+const _EPM_VERSION = '3.2.0';
 
 const _EPM_CHANGELOG = [
+  { v: '3.2.0', date: '2026-11-23', title: 'Version y Date visibles en Column Mapping',
+    items: ['Version y Date aparecen en la tabla de Column Mapping con fondo verde y etiqueta "← SAC Load Target".',
+            'Filas bloqueadas (🔒) — sus valores vienen siempre del campo VERSION y PERIOD del widget.',
+            'Solo se muestran si los campos VERSION o PERIOD están rellenos.'] },
   { v: '3.1.1', date: '2026-11-23', title: 'Usar jobURL de SAP para upload de datos',
     items: ['Extrae jobURL del body de la respuesta de creación del job.',
             'Intenta POST al jobURL primero (lo que SAP mismo devuelve como URL canónica).',
@@ -3442,6 +3446,35 @@ class ExcelUploaderPro extends HTMLElement {
                       </tr>
                     </thead>
                     <tbody>
+                      ${/* Auto-filled rows: Version and Date from SAC Load Target */ ''}
+                      ${(this._targetVersion || this._targetDate) ? `
+                        ${this._targetVersion ? `<tr style="border-bottom:1px solid #F0F4F8;background:#F0FAF4;">
+                          <td style="padding:5px 12px;">
+                            <span style="display:inline-block;background:#D6F5E3;color:#0A5C2B;font-family:monospace;font-weight:700;font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid #A3E6BF;">Version</span>
+                          </td>
+                          <td style="padding:5px 4px;text-align:center;color:#9CB0C4;font-size:17px;">→</td>
+                          <td style="padding:3px 8px;">
+                            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#0A5C2B;font-weight:600;">
+                              <span style="background:#107E3E;color:#fff;border-radius:3px;padding:1px 6px;font-size:10px;font-family:monospace;">${this._esc(this._targetVersion)}</span>
+                              <span style="color:#556B82;font-weight:400;">← SAC Load Target</span>
+                            </span>
+                          </td>
+                          <td style="padding:3px 6px;text-align:center;color:#556B82;font-size:12px;" title="Auto-filled from VERSION field">🔒</td>
+                        </tr>` : ''}
+                        ${this._targetDate ? `<tr style="border-bottom:1px solid #F0F4F8;background:#F0FAF4;">
+                          <td style="padding:5px 12px;">
+                            <span style="display:inline-block;background:#D6F5E3;color:#0A5C2B;font-family:monospace;font-weight:700;font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid #A3E6BF;">Date</span>
+                          </td>
+                          <td style="padding:5px 4px;text-align:center;color:#9CB0C4;font-size:17px;">→</td>
+                          <td style="padding:3px 8px;">
+                            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#0A5C2B;font-weight:600;">
+                              <span style="background:#107E3E;color:#fff;border-radius:3px;padding:1px 6px;font-size:10px;font-family:monospace;">${this._esc(String(this._targetDate))}</span>
+                              <span style="color:#556B82;font-weight:400;">← SAC Load Target</span>
+                            </span>
+                          </td>
+                          <td style="padding:3px 6px;text-align:center;color:#556B82;font-size:12px;" title="Auto-filled from PERIOD field">🔒</td>
+                        </tr>` : ''}
+                      ` : ''}
                       ${reqCols.map((col, i) => {
                         const isExcl = excluded.has(col);
                         const val    = mapping[col] || '';
