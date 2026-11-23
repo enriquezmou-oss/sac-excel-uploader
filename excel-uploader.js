@@ -479,7 +479,7 @@ class ExcelUploaderPro extends HTMLElement {
       this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
       this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="' + this._esc(this._sacModelName) + '">⚠️ ' + this._esc(this._sacModelName.slice(0, 60)) + '</span>' :
       '';
-    sub.innerHTML = 'Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.7.1' + badge;
+    sub.innerHTML = 'Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.7.2' + badge;
   }
 
   // ── Fetch list of all models from SAC DIS ─────────────────────────────────
@@ -2933,7 +2933,7 @@ class ExcelUploaderPro extends HTMLElement {
             <img class="sap-logo-img" src="${this._sapLogoUri}" alt="SAP Logo" />
             <div class="sap-title-wrap">
               <div class="sap-title">Excel Planning Uploader Pro</div>
-              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.7.1${
+              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.7.2${
                 this._sacModelState === 'connecting' ? ' &nbsp;|&nbsp; <span style="color:#A9B8C8;font-weight:600;">⏳ Conectando…</span>' :
                 this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
                 this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="' + this._esc(this._sacModelName) + '">⚠️ ' + this._esc((this._sacModelName || 'Modelo no encontrado').slice(0, 60)) + '</span>' :
@@ -3341,7 +3341,7 @@ class ExcelUploaderPro extends HTMLElement {
                       <th style="width:28px;">#</th>
                       <th style="width:76px;text-align:center;">🛠️ Actions</th>
                       <th>📂 Source Workbook & Sheet</th>
-                      ${this._requiredColumns.map(h => '<th><div class="th-content"><span>' + this._esc(h) + '</span>' + (h !== 'ID' ? '<button class="remove-col-btn" data-col="' + this._esc(h) + '">✕</button>' : '') + '</div></th>').join('')}
+                      ${this._requiredColumns.map(h => '<th><div class="th-content"><span>' + this._esc(h) + '</span><button class="remove-col-btn" data-col="' + this._esc(h) + '">✕</button></div></th>').join('')}
                     </tr>
                   </thead>
                   <tbody>
