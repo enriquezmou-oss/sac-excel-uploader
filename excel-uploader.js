@@ -22,15 +22,13 @@ if (typeof ExcelUploaderPro === 'undefined') {
 const _EPM_VERSION = '2.9.0';
 
 const _EPM_CHANGELOG = [
-  { v: '2.9.0', date: '2026-11-23', title: 'Visual Column Mapping panel + auto-map',
-    items: ['New 🔗 Column Mapping panel replaces Model Structure panel.',
-            'Shows each file column with a dropdown to select the target SAC dimension.',
-            'Auto-map button matches exact names and known aliases (ID→CAPEX_ITEM, H1→AMOUNT).',
-            'Auto-map runs automatically when model dimensions load.',
-            'Each row has a ✕ clear button to reset that specific mapping.',
-            'Columns marked as Exclude from DIS shown with ⊘ badge.',
-            'Fix: OData sub-properties (COMPANY__ID, Date__YEAR, etc.) filtered from dimension list.',
-            'Synchronize blocked while any column remains unmapped.'] },
+  { v: '2.9.0', date: '2026-11-23', title: 'Column Mapping panel — simple text inputs, no model load',
+    items: ['New 🔗 Column Mapping panel: one text input per file column, type the SAC dimension name.',
+            'Leave blank = same name sent to DIS. ⊘ Excl. button marks a column as excluded.',
+            '⚡ Defaults button applies: ID→CAPEX_ITEM, H1→AMOUNT, DESCRIPTION→excluded.',
+            '💾 Apply saves all inputs to localStorage.',
+            'No model properties loaded — fast and simple.',
+            'Fix: OData sub-properties (COMPANY__ID, Date__YEAR…) filtered from dim parser.'] },
   { v: '2.8.0', date: '2026-11-23', title: 'Expanded dimension probe: OData, FPA REST, Planning API',
     items: ['6 new endpoint variants added to dimension probe: OData $metadata (XML), SAC FPA REST, Planning REST API.',
             'XML OData $metadata parsed to extract EntityType Properties as dimensions.',
@@ -494,10 +492,6 @@ class ExcelUploaderPro extends HTMLElement {
       descEl.value = show ? desc : '';
       descEl.style.color = show ? '#1D2D3E' : '#A9B8C8';
     }
-    // fetch dimension structure whenever the model connects successfully
-    if (this._sacModelState === 'ok') {
-      this._fetchModelDimensions();
-    }
   }
 
   // ── Fetch model dimension structure from SAC DIS ──────────────────────────
@@ -607,31 +601,20 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   _autoMapColumns() {
-    const sacDims = (this._sacModelDimensions || []).filter(d => !d.isAuto);
-    if (sacDims.length === 0) return;
-    const sacById = new Map(sacDims.map(d => [d.id.toUpperCase(), d.id]));
-    const ALIASES = { 'ID': 'CAPEX_ITEM', 'H1': 'AMOUNT', 'IMPORTE': 'AMOUNT', 'MONTO': 'AMOUNT' };
+    const ALIASES    = { 'ID': 'CAPEX_ITEM', 'H1': 'AMOUNT', 'IMPORTE': 'AMOUNT', 'MONTO': 'AMOUNT' };
     const EXCL_NAMES = new Set(['DESCRIPTION', 'DESCRIPCION', 'DESC', 'NOTES', 'NOTA', 'COMMENT']);
-    const mapping  = { ...(this._columnMapping || {}) };
-    const excluded = new Set(this._disExcludedCols || []);
+    const mapping  = {};
+    const excluded = [];
     for (const col of (this._requiredColumns || [])) {
       const up = col.toUpperCase();
-      // Already mapped or excluded — keep it
-      if (mapping[col] || excluded.has(col)) continue;
-      // Known exclude names
-      if (EXCL_NAMES.has(up)) { excluded.add(col); continue; }
-      // Known alias
+      if (EXCL_NAMES.has(up)) { excluded.push(col); continue; }
       const alias = ALIASES[up];
-      if (alias && sacById.has(alias.toUpperCase())) {
-        mapping[col] = sacById.get(alias.toUpperCase()); continue;
-      }
-      // Exact match (identity) — no entry needed, same name works
-      if (sacById.has(up)) continue;
+      if (alias) { mapping[col] = alias; continue; }
     }
     this._columnMapping   = mapping;
-    this._disExcludedCols = [...excluded];
+    this._disExcludedCols = excluded;
     this._storageSet('sac_column_mapping', mapping);
-    this._storageSet('sac_dis_excluded_cols', [...excluded]);
+    this._storageSet('sac_dis_excluded_cols', excluded);
   }
 
   // Updates only the header subtitle span — avoids full re-render
@@ -1265,19 +1248,15 @@ class ExcelUploaderPro extends HTMLElement {
     const applyMappingBtn = shadow.getElementById('applyMappingBtn');
     if (applyMappingBtn) {
       applyMappingBtn.addEventListener('click', () => {
-        const selects = [...shadow.querySelectorAll('[data-mapping-col]')];
+        const inputs = [...shadow.querySelectorAll('[data-mapping-col]')];
         const newMapping = {};
-        const newExcluded = [];
-        for (const sel of selects) {
-          const col = sel.dataset.mappingCol;
-          const val = sel.value;
-          if (val === '__EXCLUDE__') { newExcluded.push(col); }
-          else if (val) { newMapping[col] = val; }
+        for (const inp of inputs) {
+          const col = inp.dataset.mappingCol;
+          const val = inp.value.trim();
+          if (val) newMapping[col] = val;
         }
-        this._columnMapping   = newMapping;
-        this._disExcludedCols = newExcluded;
+        this._columnMapping = newMapping;
         this._storageSet('sac_column_mapping', newMapping);
-        this._storageSet('sac_dis_excluded_cols', newExcluded);
         this._render();
       });
     }
@@ -1292,6 +1271,17 @@ class ExcelUploaderPro extends HTMLElement {
         this._disExcludedCols = ex;
         this._storageSet('sac_column_mapping', m);
         this._storageSet('sac_dis_excluded_cols', ex);
+        this._render();
+      });
+    });
+
+    shadow.querySelectorAll('[data-toggle-excl-col]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const col = btn.dataset.toggleExclCol;
+        const ex  = new Set(this._disExcludedCols || []);
+        if (ex.has(col)) ex.delete(col); else ex.add(col);
+        this._disExcludedCols = [...ex];
+        this._storageSet('sac_dis_excluded_cols', [...ex]);
         this._render();
       });
     });
@@ -1927,25 +1917,6 @@ class ExcelUploaderPro extends HTMLElement {
           this._notify('Please confirm review of preventive and check alerts before synchronizing.', 'error'); return;
         }
         if (this._rows.length === 0) { this._notify('No active data rows to load.', 'error'); return; }
-
-        // Block if any required column is unmapped (not in column mapping and not an exact SAC dim match)
-        const sacDimsActive = (this._sacModelDimensions || []).filter(d => !d.isAuto);
-        if (sacDimsActive.length > 0) {
-          const mapping  = this._columnMapping || {};
-          const excluded = new Set(this._disExcludedCols || []);
-          const unmapped = (this._requiredColumns || []).filter(col => {
-            if (excluded.has(col)) return false;
-            if (mapping[col]) return false;
-            if (sacDimsActive.find(d => d.id.toUpperCase() === col.toUpperCase())) return false;
-            return true;
-          });
-          if (unmapped.length > 0) {
-            this._notify('⚠️ ' + unmapped.length + ' column(s) not mapped to SAC dimensions: ' + unmapped.join(', ') + '. Use the Column Mapping panel to map them first.', 'error');
-            this._sacDimPanelOpen = true;
-            this._render();
-            return;
-          }
-        }
 
         const loadId = 'LOAD-' + Math.floor(10000 + Math.random() * 90000);
         const fileSummary = this._filesQueue.length > 0
@@ -3382,97 +3353,70 @@ class ExcelUploaderPro extends HTMLElement {
               </div>
             </div>
             ${/* ── Column Mapping Panel ── */ ''}
-            ${(this._sacModelState === 'ok' || this._sacDimLoading) ? (() => {
+            ${(() => {
               const mapping  = this._columnMapping || {};
               const excluded = new Set(this._disExcludedCols || []);
-              const sacDims  = (this._sacModelDimensions || []).filter(d => !d.isAuto);
               const reqCols  = this._requiredColumns || [];
+              if (reqCols.length === 0) return '';
 
-              const getRowStatus = (col) => {
-                if (excluded.has(col)) return { label:'⊘ excluded', color:'#005CB9', bg:'#EBF5FF', icon:'⊘' };
-                const mapped = mapping[col];
-                if (mapped) {
-                  const d = sacDims.find(x => x.id === mapped);
-                  return { label: mapped, color:'#107E3E', bg:'#E6F9EC', icon: d?.isMeasure ? '📊' : '🏷️' };
-                }
-                if (sacDims.find(d => d.id.toUpperCase() === col.toUpperCase()))
-                  return { label:'exact match', color:'#107E3E', bg:'#E6F9EC', icon:'✅' };
-                if (this._sacDimLoading) return { label:'loading…', color:'#556B82', bg:'#F4F5F7', icon:'⏳' };
-                if (sacDims.length === 0) return { label:'no model', color:'#B45309', bg:'#FFF8E6', icon:'⚠️' };
-                return { label:'unmapped', color:'#BB0000', bg:'#FFF0F0', icon:'❌' };
-              };
-
-              const mappedCnt  = reqCols.filter(c => !excluded.has(c) && (mapping[c] || sacDims.find(d => d.id.toUpperCase() === c.toUpperCase()))).length;
+              const mappedCnt  = reqCols.filter(c => !excluded.has(c) && mapping[c]).length;
               const excludedCnt= reqCols.filter(c => excluded.has(c)).length;
-              const unmappedCnt= reqCols.length - mappedCnt - excludedCnt;
+              const sameCnt    = reqCols.length - mappedCnt - excludedCnt;
 
-              const hBorder = this._sacDimLoading ? '#D9E0E6' : unmappedCnt > 0 ? '#FCA5A5' : '#A3E6BF';
-              const hBg     = this._sacDimLoading ? '#F4F5F7' : unmappedCnt > 0 ? '#FFF5F5' : '#F0F9F0';
-              const hColor  = this._sacDimLoading ? '#556B82' : unmappedCnt > 0 ? '#BB0000' : '#107E3E';
-              const hLabel  = this._sacDimLoading
-                ? '⏳ Loading model dimensions…'
-                : `🔗 Column Mapping — ${reqCols.length} columns · ${mappedCnt} mapped · ${excludedCnt} excluded${unmappedCnt > 0 ? ' · <span style="color:#BB0000;font-weight:800;">⚠️ ' + unmappedCnt + ' unmapped</span>' : ''}`;
+              const hBg    = '#F0F4F8';
+              const hLabel = `🔗 Column Mapping — ${mappedCnt > 0 ? mappedCnt + ' renamed · ' : ''}${excludedCnt > 0 ? excludedCnt + ' excluded · ' : ''}${sameCnt} same name`;
 
-              const dimOptHtml = sacDims.length > 0
-                ? `<option value="">— same name —</option><option value="__EXCLUDE__">⊘ Exclude from DIS</option><option disabled>──────────────</option>${sacDims.map(d => `<option value="${this._esc(d.id)}">${d.isMeasure ? '📊' : '🏷️'} ${this._esc(d.id)}</option>`).join('')}`
-                : `<option value="">— connect model first —</option><option value="__EXCLUDE__">⊘ Exclude from DIS</option>`;
-
-              return `<div style="width:100%;margin-top:10px;border:1px solid ${hBorder};border-radius:6px;overflow:hidden;background:#FAFBFC;">
-                <div id="sacDimPanelHeader" data-open="${this._sacDimPanelOpen ? '1' : '0'}"
+              return `<div style="width:100%;margin-top:10px;border:1px solid #D9E0E6;border-radius:6px;overflow:hidden;background:#FAFBFC;">
+                <div id="sacDimPanelHeader"
                   style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:${hBg};cursor:pointer;user-select:none;">
-                  <span style="font-size:11px;font-weight:700;color:${hColor};">${hLabel}</span>
+                  <span style="font-size:11px;font-weight:700;color:#1D2D3E;">${hLabel}</span>
                   <span style="font-size:11px;color:#556B82;">${this._sacDimPanelOpen ? '▲ collapse' : '▼ expand'}</span>
                 </div>
                 ${this._sacDimPanelOpen ? `<div>
-                  ${this._sacDimLoading
-                    ? '<div style="padding:16px;text-align:center;color:#556B82;font-size:12px;">⏳ Fetching model dimensions from SAC…</div>'
-                    : `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-                        <thead>
-                          <tr style="background:#EBF2FA;border-bottom:2px solid #C5D9EB;">
-                            <th style="padding:6px 12px;text-align:left;font-weight:700;color:#1D2D3E;font-size:11px;width:38%;">📄 File Column</th>
-                            <th style="padding:6px 4px;text-align:center;color:#9CB0C4;font-size:13px;width:5%;">→</th>
-                            <th style="padding:6px 8px;text-align:left;font-weight:700;color:#1D2D3E;font-size:11px;width:37%;">📊 SAC Dimension</th>
-                            <th style="padding:6px 8px;text-align:center;font-weight:700;color:#1D2D3E;font-size:11px;width:14%;">Status</th>
-                            <th style="width:5%;padding:6px 4px;"></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          ${reqCols.map((col, i) => {
-                            const st  = getRowStatus(col);
-                            const isExcl = excluded.has(col);
-                            const selVal = isExcl ? '__EXCLUDE__' : (mapping[col] || '');
-                            const opts  = dimOptHtml.replace(`value="${this._esc(selVal)}"`, `value="${this._esc(selVal)}" selected`);
-                            return `<tr style="border-bottom:1px solid #F0F4F8;background:${i % 2 === 0 ? '#fff' : '#F7FAFD'};">
-                              <td style="padding:5px 12px;">
-                                <span style="display:inline-block;background:#E8F4FF;color:#003F8A;font-family:monospace;font-weight:700;font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid #B8D8F8;letter-spacing:.3px;">${this._esc(col)}</span>
-                              </td>
-                              <td style="padding:5px 4px;text-align:center;color:#9CB0C4;font-size:17px;">→</td>
-                              <td style="padding:3px 8px;">
-                                <select data-mapping-col="${this._esc(col)}" style="width:100%;border:1px solid #C0CDD8;border-radius:4px;padding:4px 6px;font-size:11px;font-family:monospace;background:#FFF;color:#1D2D3E;cursor:pointer;outline:none;">${opts}</select>
-                              </td>
-                              <td style="padding:5px 8px;text-align:center;">
-                                <span style="display:inline-block;background:${st.bg};color:${st.color};padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap;">${st.icon} ${this._esc(st.label)}</span>
-                              </td>
-                              <td style="padding:3px 6px;text-align:center;">
-                                ${(mapping[col] || isExcl) ? `<button type="button" data-clear-col="${this._esc(col)}" title="Clear mapping" style="background:none;border:1px solid #DDE3E9;border-radius:3px;cursor:pointer;padding:2px 5px;font-size:10px;color:#556B82;line-height:1;transition:border-color .15s;">✕</button>` : ''}
-                              </td>
-                            </tr>`;
-                          }).join('')}
-                        </tbody>
-                      </table>
-                      <div style="padding:8px 10px;display:flex;align-items:center;gap:10px;border-top:1px solid #D9E0E6;background:#F0F4F8;flex-wrap:wrap;">
-                        ${unmappedCnt > 0
-                          ? `<span style="font-size:11px;color:#BB0000;font-weight:700;">⚠️ ${unmappedCnt} column${unmappedCnt > 1 ? 's' : ''} unmapped — Synchronize is blocked.</span>`
-                          : `<span style="font-size:11px;color:#107E3E;font-weight:700;">✅ All columns mapped — ready to synchronize.</span>`}
-                        <div style="margin-left:auto;display:flex;gap:8px;">
-                          <button id="autoMapAllBtn" class="btn btn-secondary" type="button" style="font-size:11px;padding:4px 12px;white-space:nowrap;" title="Auto-detect mappings from SAC dimension names">⚡ Auto-map</button>
-                          <button id="applyMappingBtn" class="btn btn-primary" type="button" style="font-size:11px;padding:4px 12px;white-space:nowrap;">💾 Apply Mapping</button>
-                        </div>
-                      </div>`
-                  }
+                  <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead>
+                      <tr style="background:#EBF2FA;border-bottom:2px solid #C5D9EB;">
+                        <th style="padding:6px 12px;text-align:left;font-weight:700;color:#1D2D3E;font-size:11px;width:40%;">📄 File Column</th>
+                        <th style="padding:6px 4px;text-align:center;color:#9CB0C4;font-size:13px;width:5%;">→</th>
+                        <th style="padding:6px 8px;text-align:left;font-weight:700;color:#1D2D3E;font-size:11px;">📊 SAC Dimension Name</th>
+                        <th style="width:32px;padding:6px 4px;"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${reqCols.map((col, i) => {
+                        const isExcl = excluded.has(col);
+                        const val    = mapping[col] || '';
+                        return `<tr style="border-bottom:1px solid #F0F4F8;background:${i % 2 === 0 ? '#fff' : '#F7FAFD'};">
+                          <td style="padding:5px 12px;">
+                            <span style="display:inline-block;background:#E8F4FF;color:#003F8A;font-family:monospace;font-weight:700;font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid #B8D8F8;">${this._esc(col)}</span>
+                          </td>
+                          <td style="padding:5px 4px;text-align:center;color:#9CB0C4;font-size:17px;">→</td>
+                          <td style="padding:3px 8px;">
+                            ${isExcl
+                              ? `<span style="display:inline-block;background:#EBF5FF;color:#005CB9;font-size:11px;font-weight:700;padding:3px 10px;border-radius:4px;border:1px solid #B3D4F0;">⊘ Excluded from DIS</span>`
+                              : `<input type="text" data-mapping-col="${this._esc(col)}" value="${this._esc(val)}"
+                                  placeholder="(same name as file)"
+                                  style="width:100%;border:1px solid #C0CDD8;border-radius:4px;padding:4px 8px;font-size:11px;font-family:monospace;background:#FFF;color:#1D2D3E;outline:none;box-sizing:border-box;" />`
+                            }
+                          </td>
+                          <td style="padding:3px 6px;text-align:center;">
+                            <button type="button" data-toggle-excl-col="${this._esc(col)}" title="${isExcl ? 'Include in DIS' : 'Exclude from DIS'}"
+                              style="background:none;border:1px solid ${isExcl ? '#B3D4F0' : '#DDE3E9'};border-radius:3px;cursor:pointer;padding:2px 5px;font-size:10px;color:${isExcl ? '#005CB9' : '#556B82'};line-height:1;white-space:nowrap;">${isExcl ? '+ Include' : '⊘ Excl.'}</button>
+                          </td>
+                        </tr>`;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                  <div style="padding:7px 10px;display:flex;align-items:center;gap:8px;border-top:1px solid #D9E0E6;background:#F0F4F8;">
+                    <span style="font-size:10px;color:#556B82;">Leave blank = use file column name as-is in CSV header.</span>
+                    <div style="margin-left:auto;display:flex;gap:8px;">
+                      <button id="autoMapAllBtn" class="btn btn-secondary" type="button" style="font-size:11px;padding:4px 12px;white-space:nowrap;" title="Apply default aliases: ID→CAPEX_ITEM, H1→AMOUNT, DESCRIPTION→excluded">⚡ Defaults</button>
+                      <button id="applyMappingBtn" class="btn btn-primary" type="button" style="font-size:11px;padding:4px 12px;white-space:nowrap;">💾 Apply</button>
+                    </div>
+                  </div>
                 </div>` : ''}
               </div>`;
-            })() : ''}
+            })()}
             <div style="width:100%;display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding-top:10px;">
               ${this._targetVersion && this._targetDate
                 ? (this._sacModelId
