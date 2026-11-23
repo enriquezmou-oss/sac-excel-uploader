@@ -19,10 +19,15 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.2.0';
+const _EPM_VERSION = '3.3.0';
 
 const _EPM_CHANGELOG = [
-  { v: '3.2.0', date: '2026-11-23', title: 'Version y Date visibles en Column Mapping',
+  { v: '3.3.0', date: '2026-11-23', title: 'MODEL NAME siempre visible + mensajes de auditoría con semáforos',
+    items: ['MODEL NAME siempre muestra la descripción sin filtrado por similitud con el ID.',
+            '_updateModelDesc() y la plantilla eliminan la lógica "show" — siempre se muestra.',
+            'Estado de carga en el auditor: "🟢 CARGA COMPLETA", "⚠️ CARGA PARCIAL", "❌ ERROR DIS".',
+            'Toast de éxito: "🟢 CARGA COMPLETA — LOAD-XXXXX · FULL — N filas grabadas → SAC".',
+            'Bloque DIS en detalle de auditoría rediseñado con señales semafóricas (punto de color + borde grueso).'] },
     items: ['Version y Date aparecen en la tabla de Column Mapping con fondo verde y etiqueta "← SAC Load Target".',
             'Filas bloqueadas (🔒) — sus valores vienen siempre del campo VERSION y PERIOD del widget.',
             'Solo se muestran si los campos VERSION o PERIOD están rellenos.'] },
@@ -506,10 +511,8 @@ class ExcelUploaderPro extends HTMLElement {
     const descEl = this._shadow && this._shadow.querySelector('#sacModelDescDisplay');
     if (descEl) {
       const desc = this._sacModelDesc || '';
-      const id   = (this._sacModelId  || '').toUpperCase();
-      const show = desc && desc.toUpperCase() !== id && !desc.toUpperCase().startsWith(id + ' ') && !desc.toUpperCase().startsWith(id + '-');
-      descEl.value = show ? desc : '';
-      descEl.style.color = show ? '#1D2D3E' : '#A9B8C8';
+      descEl.value = desc;
+      descEl.style.color = desc ? '#1D2D3E' : '#A9B8C8';
     }
   }
 
@@ -699,6 +702,14 @@ class ExcelUploaderPro extends HTMLElement {
         this._sacDISModelId = match.modelID;
         this._storageSet('sac_dis_guid', match.modelID);
         console.log('[DIS] resolved', this._sacModelId, '→', match.modelID);
+        // Also populate MODEL NAME from the matched model description
+        const desc = match.modelDescription || match.description || match.label || match.modelName || '';
+        if (desc && desc !== this._sacModelId) {
+          this._sacModelDesc = desc;
+          this._storageSet('sac_dis_model_desc', desc);
+          const descEl = this._shadow && this._shadow.querySelector('#sacModelDescDisplay');
+          if (descEl) { descEl.value = desc; descEl.style.color = '#1D2D3E'; }
+        }
         return match.modelID;
       }
     } catch (_) {}
@@ -2077,7 +2088,7 @@ class ExcelUploaderPro extends HTMLElement {
             // Update audit record with real DIS error — do NOT show "Synchronized"
             const idx = this._history.findIndex(h => h.id === loadId);
             if (idx !== -1) {
-              this._history[idx].status   = this._loadStrategy + ' ❌ Error DIS';
+              this._history[idx].status   = '❌ ERROR DIS';
               this._history[idx].disStatus = 'ERROR';
               this._history[idx].disError  = err.message;
               this._saveHistory();
@@ -2095,11 +2106,11 @@ class ExcelUploaderPro extends HTMLElement {
           if (idx !== -1) {
             if (failed > 0 || jobStatus === 'COMPLETED_WITH_FAILURES') {
               const writtenTxt = written != null ? written + ' grabadas, ' : '';
-              this._history[idx].status    = this._loadStrategy + ' ⚠️ DIS: ' + writtenTxt + failed + ' rechazadas';
+              this._history[idx].status    = '⚠️ CARGA PARCIAL — ' + writtenTxt + failed + ' rechazadas';
               this._history[idx].disStatus = 'PARTIAL';
             } else {
-              const writtenTxt = written != null ? ' (' + written + ' filas)' : '';
-              this._history[idx].status    = this._loadStrategy + ' Synchronized ✅' + writtenTxt;
+              const writtenTxt = written != null ? ' — ' + written + ' filas' : '';
+              this._history[idx].status    = '🟢 CARGA COMPLETA' + writtenTxt;
               this._history[idx].disStatus = 'OK';
             }
             this._history[idx].disWrittenRows = written;
@@ -2119,9 +2130,10 @@ class ExcelUploaderPro extends HTMLElement {
         // Final notification — only "success" if DIS actually wrote the data
         const finalRec = this._history.find(h => h.id === loadId);
         if (!this._sacModelId || finalRec?.disStatus === 'OK') {
-          this._notify('Load ' + loadId + ' (' + this._loadStrategy + ') synchronized successfully with SAP Analytics Cloud!', 'success');
+          const infoRows = finalRec?.disWrittenRows != null ? ' — ' + finalRec.disWrittenRows + ' filas grabadas' : '';
+          this._notify('🟢 CARGA COMPLETA — ' + loadId + ' · ' + this._loadStrategy + infoRows + ' → SAP Analytics Cloud ✅', 'success');
         } else if (finalRec?.disStatus === 'PARTIAL') {
-          this._notify('⚠️ Load ' + loadId + ': ' + (finalRec.disFailedRows || '?') + ' filas rechazadas por SAC DIS. Revisa la auditoría.', 'warning');
+          this._notify('⚠️ CARGA PARCIAL — ' + loadId + ': ' + (finalRec.disWrittenRows || '0') + ' grabadas, ' + (finalRec.disFailedRows || '?') + ' rechazadas. Revisa la auditoría.', 'warning');
         }
       });
     }
@@ -2914,11 +2926,11 @@ class ExcelUploaderPro extends HTMLElement {
               <div class="metric-box"><div class="metric-title">🛠️ Tracked Actions</div><div class="metric-val">${changeLog.length} events</div></div>
             </div>
 
-            ${rec.disStatus ? `<div style="margin:8px 0 4px;padding:10px 14px;border-radius:8px;font-size:12px;font-weight:600;border:1px solid ${rec.disStatus === 'OK' ? '#A3E6BF' : rec.disStatus === 'PARTIAL' ? '#FFD580' : '#F5B8B8'};background:${rec.disStatus === 'OK' ? '#E6F9EC' : rec.disStatus === 'PARTIAL' ? '#FFF8E1' : '#FFF0F0'};color:${rec.disStatus === 'OK' ? '#107E3E' : rec.disStatus === 'PARTIAL' ? '#7A5A00' : '#BB0000'};">
-              ${rec.disStatus === 'OK' ? '✅ SAC DIS: Datos grabados en el modelo' + (rec.disWrittenRows != null ? ' (' + rec.disWrittenRows + ' filas)' : '') : ''}
-              ${rec.disStatus === 'PARTIAL' ? '⚠️ SAC DIS: ' + (rec.disWrittenRows != null ? rec.disWrittenRows + ' grabadas, ' : '') + (rec.disFailedRows || '?') + ' rechazadas por el modelo' : ''}
-              ${rec.disStatus === 'ERROR' ? '❌ SAC DIS Error: ' + this._esc(rec.disError || 'Error desconocido') : ''}
-              ${rec.disStatus === 'PENDING' ? '⏳ SAC DIS: Pendiente de confirmación' : ''}
+            ${rec.disStatus ? `<div style="margin:8px 0 4px;padding:12px 16px;border-radius:8px;font-size:13px;font-weight:700;border:2px solid ${rec.disStatus === 'OK' ? '#107E3E' : rec.disStatus === 'PARTIAL' ? '#E9730C' : '#BB0000'};background:${rec.disStatus === 'OK' ? '#E6F9EC' : rec.disStatus === 'PARTIAL' ? '#FFF8E1' : '#FFF0F0'};color:${rec.disStatus === 'OK' ? '#107E3E' : rec.disStatus === 'PARTIAL' ? '#7A5A00' : '#BB0000'};display:flex;align-items:center;gap:10px;">
+              ${rec.disStatus === 'OK' ? this._renderSemaphoreDot('GREEN') + ' SAC DIS: CARGA COMPLETA' + (rec.disWrittenRows != null ? ' — <strong>' + rec.disWrittenRows + ' filas grabadas en el modelo</strong>' : '') : ''}
+              ${rec.disStatus === 'PARTIAL' ? this._renderSemaphoreDot('AMBER') + ' SAC DIS: CARGA PARCIAL — ' + (rec.disWrittenRows != null ? '<strong>' + rec.disWrittenRows + ' grabadas</strong>, ' : '') + '<strong>' + (rec.disFailedRows || '?') + ' rechazadas</strong> por el modelo' : ''}
+              ${rec.disStatus === 'ERROR' ? this._renderSemaphoreDot('RED') + ' SAC DIS ERROR: ' + this._esc(rec.disError || 'Error desconocido') : ''}
+              ${rec.disStatus === 'PENDING' ? this._renderSemaphoreDot('BLUE') + ' SAC DIS: Pendiente de confirmación' : ''}
             </div>` : ''}
 
             <div class="subtabs-bar">
@@ -3340,16 +3352,11 @@ class ExcelUploaderPro extends HTMLElement {
                   </div>
                   <div>
                     <label style="font-size:10px;font-weight:700;color:#556B82;display:block;margin-bottom:3px;">MODEL NAME</label>
-                    ${(() => {
-                      const desc = this._sacModelDesc || '';
-                      const id   = (this._sacModelId  || '').toUpperCase();
-                      const show = desc && desc.toUpperCase() !== id && !desc.toUpperCase().startsWith(id + ' ') && !desc.toUpperCase().startsWith(id + '-');
-                      return `<input type="text" id="sacModelDescDisplay"
-                        style="width:200px;background:#FFF;color:${show ? '#1D2D3E' : '#A9B8C8'};border:1px solid #D9E0E6;border-radius:4px;padding:5px 8px;font-size:12px;font-family:inherit;"
-                        value="${show ? this._esc(desc) : ''}"
-                        placeholder="Enter model name…"
-                        title="Model friendly name — editable, saved locally" />`;
-                    })()}
+                    <input type="text" id="sacModelDescDisplay"
+                      style="width:200px;background:#FFF;color:${this._sacModelDesc ? '#1D2D3E' : '#A9B8C8'};border:1px solid #D9E0E6;border-radius:4px;padding:5px 8px;font-size:12px;font-family:inherit;"
+                      value="${this._esc(this._sacModelDesc || '')}"
+                      placeholder="Auto-fills on connect…"
+                      title="Model friendly name — editable, saved locally" />
                   </div>
                 </div>
                 ${this._showModelPicker ? (() => {
