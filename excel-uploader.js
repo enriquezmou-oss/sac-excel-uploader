@@ -19,9 +19,14 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '2.7.5';
+const _EPM_VERSION = '2.7.6';
 
 const _EPM_CHANGELOG = [
+  { v: '2.7.6', date: '2026-11-23', title: 'Column Mapping — Excel names → SAC dimension names',
+    items: ['New _columnMapping state: maps Excel column names to SAC dimension names in the CSV header.',
+            'Default mapping pre-configured: ID → CAPEX_ITEM, H1 → AMOUNT.',
+            'Data lookup uses both SAC name and Excel alias — values are always found regardless of Excel column names.',
+            'Required Columns keep Excel names (what appears in the file); DIS always receives the correct SAC names.'] },
   { v: '2.7.5', date: '2026-11-23', title: 'Fix: auto-migrate old column names from localStorage',
     items: ['On startup, ID → CAPEX_ITEM and H1 → AMOUNT automatically in any saved schema.',
             'DESCRIPTION removed automatically if present. No manual localStorage reset needed.'] },
@@ -80,12 +85,15 @@ class ExcelUploaderPro extends HTMLElement {
     this._targetDate    = this._storageGet('sac_target_date')    || '';
     this._parseConfig = { format: 'AUTO', delimiter: 'AUTO', numberFormat: 'STD', headerRow: 1 };
 
-    const defaultCols = ['CAPEX_ITEM', 'COMPANY', 'COSTCENTER', 'ASSET_CLASS', 'CAPITALIZED', 'AMOUNT'];
+    const defaultCols = ['ID', 'H1', 'COMPANY', 'COSTCENTER', 'ASSET_CLASS', 'CAPITALIZED'];
     const savedCols = this._storageGet('sac_required_cols');
-    let cols = Array.isArray(savedCols) && savedCols.length > 0 ? savedCols : defaultCols;
-    // Migrate old generic column names to model-specific names
-    cols = cols.map(c => c === 'ID' ? 'CAPEX_ITEM' : c === 'H1' ? 'AMOUNT' : c).filter(c => c !== 'DESCRIPTION');
-    this._requiredColumns = cols;
+    this._requiredColumns = Array.isArray(savedCols) && savedCols.length > 0 ? savedCols : defaultCols;
+
+    // Column mapping: Excel column name → SAC dimension name (applied to CSV header)
+    // Default pre-configured for PLAN_CAPEX_PLANNING
+    const defaultMapping = { 'ID': 'CAPEX_ITEM', 'H1': 'AMOUNT' };
+    const savedMapping = this._storageGet('sac_column_mapping');
+    this._columnMapping = (savedMapping && typeof savedMapping === 'object') ? savedMapping : defaultMapping;
 
     this._auditExportConfig = {
       open: false,
@@ -604,13 +612,19 @@ class ExcelUploaderPro extends HTMLElement {
     const cols = [...this._requiredColumns];
     if (this._targetVersion && !cols.includes('Version')) cols.unshift('Version');
     if (this._targetDate    && !cols.includes('Date'))    cols.unshift('Date');
-    const csvLines = [cols.join(',')];
+    // Build reverse mapping: SAC dimension name → Excel column name
+    const mapping = this._columnMapping || {};
+    const revMap = {};
+    Object.entries(mapping).forEach(([excelCol, sacName]) => { revMap[sacName] = excelCol; });
+    // CSV header uses SAC dimension names (apply forward mapping)
+    const sacCols = cols.map(c => mapping[c] || c);
+    const csvLines = [sacCols.join(',')];
     for (const r of rows) {
       const vals = cols.map(col => {
         let v;
         if      (col === 'Version') v = this._targetVersion || '';
         else if (col === 'Date')    v = this._targetDate ? String(this._targetDate) : '';
-        else                        v = r[col] ?? '';
+        else                        v = r[col] ?? r[revMap[col]] ?? ''; // SAC name first, then Excel alias
         v = String(v).trim();
         if (v.includes(',') || v.includes('"') || v.includes('\n')) {
           v = '"' + v.replace(/"/g, '""') + '"';
