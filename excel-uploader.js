@@ -474,7 +474,7 @@ class ExcelUploaderPro extends HTMLElement {
     _setLoading('⏳ Esperando confirmación de SAC DIS…');
     return await this._pollJobStatus(
       DIS + '/jobs/' + jobId + '/status',
-      ['COMPLETED', 'COMPLETED_WITH_FAILURES'],
+      ['COMPLETED', 'COMPLETED_WITH_FAILURES', 'COMPLETE'],
       ['FAILED'],
       120, 3000, _setLoading, DIS_HEADER
     );
@@ -491,7 +491,7 @@ class ExcelUploaderPro extends HTMLElement {
       if (!r.ok) continue;
       const body   = await r.json().catch(() => ({}));
       const status = (body.jobStatus || body.status || '').toUpperCase();
-      if (targetStatuses.some(s => status === s.toUpperCase())) return body;
+      if (targetStatuses.some(s => status === s || status.startsWith(s))) return body;
       if ((failStatuses || []).some(s => status === s.toUpperCase())) {
         throw new Error('SAC DIS job ' + status + ': ' + (body.message || body.errorMessage || JSON.stringify(body)));
       }
