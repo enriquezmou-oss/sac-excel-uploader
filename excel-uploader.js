@@ -369,12 +369,30 @@ class ExcelUploaderPro extends HTMLElement {
         const meta = await resp.json().catch(() => ({}));
         this._sacModelName  = meta.description || meta.name || this._sacModelId;
         this._sacModelState = 'ok';
+        // populate description for MODEL NAME display field
+        if (meta.description && meta.description !== this._sacModelId) {
+          this._sacModelDesc = meta.description;
+          this._storageSet('sac_dis_model_desc', meta.description);
+        }
       }
     } catch (err) {
       this._sacModelName  = err.message || 'Error de conexión';
       this._sacModelState = 'error';
     }
     this._updateHeaderSubtitle();
+    // re-render MODEL NAME field in SAC Load Target row
+    const descEl = this._shadow && this._shadow.querySelector('#sacModelDescDisplay');
+    if (descEl) {
+      if (this._sacModelDesc) {
+        descEl.textContent = this._sacModelDesc;
+        descEl.style.color = '#556B82';
+        descEl.style.fontStyle = 'normal';
+      } else {
+        descEl.textContent = 'Model name: —';
+        descEl.style.color = '#B0BEC5';
+        descEl.style.fontStyle = 'italic';
+      }
+    }
   }
 
   // Updates only the header subtitle span — avoids full re-render
@@ -2904,7 +2922,10 @@ class ExcelUploaderPro extends HTMLElement {
                     ${this._sacModelsLoading ? '⏳' : '🔍 SAC'}
                   </button>
                 </div>
-                ${this._sacModelDesc ? `<div style="margin-top:3px;font-size:10px;color:#556B82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;" title="${this._esc(this._sacModelDesc)}">${this._esc(this._sacModelDesc)}</div>` : ''}
+                ${this._sacModelDesc
+                  ? `<div id="sacModelDescDisplay" style="margin-top:3px;font-size:10px;color:#556B82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;" title="${this._esc(this._sacModelDesc)}">${this._esc(this._sacModelDesc)}</div>`
+                  : `<div id="sacModelDescDisplay" style="margin-top:3px;font-size:10px;color:#B0BEC5;font-style:italic;">Model name: —</div>`
+                }
                 ${this._showModelPicker ? (() => {
                   const filterTerm = (this._modelPickerFilter || '').toLowerCase();
                   const matches = (m) =>
