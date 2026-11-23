@@ -19,9 +19,13 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '2.9.0';
+const _EPM_VERSION = '3.0.0';
 
 const _EPM_CHANGELOG = [
+  { v: '3.0.0', date: '2026-11-23', title: 'Mapping feedback + toast confirmations',
+    items: ['💾 Apply Mapping shows toast: "✅ Mapeo guardado — X columnas mapeadas" and scrolls to Step 1 if no rows loaded.',
+            '⚡ Defaults shows toast: "⚡ Mapeo por defecto aplicado" after auto-mapping.',
+            'No visible changes if 0 columns are loaded yet — toast shows how many columns were mapped.'] },
   { v: '2.9.0', date: '2026-11-23', title: 'Column Mapping simple + fix DIS two-step upload',
     items: ['New 🔗 Column Mapping panel: text inputs per file column, no model properties loaded.',
             'Fix DIS upload: detect READY_FOR_DATA after job creation → POST CSV to /jobs/{jobId}/data.',
@@ -1265,7 +1269,9 @@ class ExcelUploaderPro extends HTMLElement {
     if (autoMapAllBtn) {
       autoMapAllBtn.addEventListener('click', () => {
         this._autoMapColumns();
-        this._render();
+        const mappedCnt  = Object.keys(this._columnMapping || {}).length;
+        const exclCnt    = (this._disExcludedCols || []).length;
+        this._notify('⚡ Mapeo por defecto aplicado — ' + mappedCnt + ' mapeadas, ' + exclCnt + ' excluidas', 'info');
       });
     }
 
@@ -1281,7 +1287,13 @@ class ExcelUploaderPro extends HTMLElement {
         }
         this._columnMapping = newMapping;
         this._storageSet('sac_column_mapping', newMapping);
-        this._render();
+        const mappedCnt = Object.keys(newMapping).length;
+        const totalCols = (this._requiredColumns || []).length;
+        const exclCnt   = (this._disExcludedCols || []).length;
+        const msg = totalCols === 0
+          ? '💾 Mapeo guardado — carga un fichero para ver las columnas'
+          : '✅ Mapeo guardado — ' + mappedCnt + '/' + (totalCols - exclCnt) + ' columnas mapeadas' + (exclCnt > 0 ? ', ' + exclCnt + ' excluidas' : '') + ' — ¡puedes continuar!';
+        this._notify(msg, mappedCnt > 0 || exclCnt > 0 ? 'success' : 'info');
       });
     }
 
