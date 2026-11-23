@@ -1,6 +1,6 @@
- Excel Planning Uploader Pro — SAP Analytics Cloud Custom Widget
+# Excel Planning Uploader Pro — SAP Analytics Cloud Custom Widget
 
-> Enterprise-grade Web Component for SAP Analytics Cloud (SAC) **v2.6.0** — Multi-sheet Excel/CSV/TXT consolidation, configurable validation semaphores, Assisted Code Auto-Fix, Full/Delta load engine, **direct DIS write-back to SAC planning models**, drill-down Audit Monitor with multi-format exports, and SAP Fiori Horizon UX.
+> Enterprise-grade Web Component for SAP Analytics Cloud (SAC) **v2.6.1** — Multi-sheet Excel/CSV/TXT consolidation, configurable validation semaphores, Assisted Code Auto-Fix, Full/Delta load engine, **direct DIS write-back to SAC planning models**, drill-down Audit Monitor with multi-format exports, and SAP Fiori Horizon UX.
 
 **Vendor:** Jose Enriquez SixSevenGroup
 
@@ -96,38 +96,46 @@ Built-in overlay (`? Help` button in the header) — step-by-step documentation 
 | **Custom element tag** | `<custom-excel-uploader-pro>` |
 | **Shadow DOM** | `mode: 'open'` |
 | **XLSX library** | SheetJS `0.18.5`, loaded from CDN automatically if not already present |
-| **Persistence** | `localStorage` keys: `sac_required_cols`, `sac_validation_rules_v9`, `sac_audit_history_v9` |
+| **Persistence** | `localStorage` keys: `sac_required_cols`, `sac_validation_rules_v9`, `sac_audit_history_v9`, `sac_dis_model_id`, `sac_dis_guid`, `sac_dis_model_desc` |
 | **SAC integration** | Dispatches `propertiesChanged` custom event with `validatedDataJson` property |
-| **DIS write-back** | `GET /api/v1/dataimport/models` → GUID resolution → CSRF → POST job → CSV upload → run → poll |
-| **CDN** | jsDelivr pinned por commit hash — inmutable, sin caché sorpresa |
+| **DIS write-back** | GUID resolution → CSRF → POST CSV to model endpoint → auto-poll until `SUCCESSFUL` |
+| **CDN** | jsDelivr pinned to commit hash — immutable, no surprise cache |
 
 ---
 
 ## SAC DIS Write-Back
 
-El widget escribe directamente en un modelo de planificación SAC nativo mediante la **Data Import Service (DIS) REST API**:
+The widget writes directly to a native SAC planning model using the **Data Import Service (DIS) REST API**:
 
-1. **Resolución de GUID** — el nombre técnico (`PLAN_CAPEX_PLANNING`) se resuelve automáticamente al GUID interno (`C9qfcbu7dll3q7ao78qsq5e9h4o`) llamando a `GET /api/v1/dataimport/models`.
-2. **CSRF token** — se obtiene del endpoint del modelo específico (`GET /models/{GUID}/{importType}` con `x-csrf-token: fetch`).
-3. **Creación + Upload CSV** — `POST /models/{GUID}/privateFactData` con `Content-Type: text/csv` y el CSV en el body → devuelve `{ jobID }`.
-4. **Run** — `POST /jobs/{jobId}/run`.
-5. **Poll** — `GET /jobs/{jobId}` hasta `SUCCESSFUL`.
+1. **GUID resolution** — the technical name (e.g. `PLAN_CAPEX_PLANNING`) is resolved automatically to the internal DIS GUID by calling `GET /api/v1/dataimport/models`. The GUID is cached in `localStorage` to avoid a round-trip on every sync.
+2. **CSRF token** — fetched from the model-specific endpoint: `GET /models/{GUID}/{importType}` with `x-csrf-token: fetch`.
+3. **Create job + upload CSV** — `POST /models/{GUID}/privateFactData` with `Content-Type: text/csv` and the CSV data in the body. Returns `{ jobID }`. The job is created and data uploaded in a single HTTP call.
+4. **Run** (optional) — `POST /jobs/{jobId}/run`. Some SAC tenants auto-execute the job on creation; if this endpoint returns 405, it is skipped silently.
+5. **Poll** — `GET /jobs/{jobId}` polled every 3 s until status is `SUCCESSFUL` (or a failure status is detected).
 
-**Autenticación:** cookies de sesión SAC (`credentials: 'include'`). No requiere OAuth Bearer token.
+**Authentication:** SAC session cookies (`credentials: 'include'`). No OAuth Bearer token required.
 
-### Model Picker
-Pulsa **🔍 SAC** junto al campo MODEL ID para explorar los modelos disponibles:
-- Agrupados: **📋 Planning** (privateFactData) · **📊 Actual / Otros** (factData)
-- Búsqueda en tiempo real por descripción, nombre técnico o GUID
-- El modelo activo aparece marcado con ✓
+### SAC Load Target — MODEL ID & MODEL NAME fields
+
+- **MODEL ID** — enter the technical name of the planning model (e.g. `PLAN_CAPEX_PLANNING`). The widget resolves it to the DIS internal GUID automatically.
+- **MODEL NAME** — read-only display field below MODEL ID. Shows the model's friendly description once the DIS connection is established, or after selecting a model from the picker. Persists across page reloads via `localStorage`.
+
+### Model Picker (🔍 SAC button)
+Click **🔍 SAC** next to the MODEL ID field to browse available models:
+- **Technical name** shown as the primary label (blue, bold)
+- **Description** shown as a subtitle (grey)
+- **Internal GUID** shown in small monospace text
+- Grouped: **📋 Planning** (privateFactData) first · **📊 Actual / Others** (factData)
+- Real-time search filtering by technical name, description, or GUID
+- Active model marked with ✓ and blue background
 
 ---
 
 ## Installation
 
 1. Copy `excel-uploader.js` to your SAC custom widget project.
-2. Register the widget in your SAC tenant (Custom Widgets panel).
-3. Add the `<custom-excel-uploader-pro>` tag to your story or application.
+2. Register the widget in your SAC tenant (Custom Widgets panel) by uploading `webcomponent.json`.
+3. Add the `<custom-excel-uploader-pro>` tag to your SAC story or application.
 
 SheetJS is fetched from CDN on first load. If your SAC tenant blocks external CDN requests, bundle `xlsx.full.min.js` locally and load it before this widget.
 
@@ -135,44 +143,48 @@ SheetJS is fetched from CDN on first load. If your SAC tenant blocks external CD
 
 ## Changelog
 
+### v2.6.1 — 2026-11-23
+- **Fix DIS run step (405)** — the `/jobs/{jobId}/run` endpoint returns 405 on this SAC tenant because the job is auto-executed on creation. The widget now detects this and skips the run call silently, proceeding directly to polling.
+- **MODEL NAME field always visible** — previously only appeared when a description was already stored. Now always rendered below MODEL ID with a `Model name: —` placeholder until the description is fetched.
+- **MODEL NAME auto-populated on connect** — `_fetchModelInfo()` now saves the model description to `localStorage` (`sac_dis_model_desc`) when it receives metadata from DIS, so the field fills in automatically without needing to use the picker.
+
 ### v2.6.0 — 2026-11-23
-- **Fix crítico DIS**: flujo de un solo paso — POST CSV directamente a `/models/{GUID}/{importType}` con `Content-Type: text/csv` (el upload separado a `/jobs/{jobId}` devolvía 405)
-- **MODEL NAME**: campo de descripción amistosa debajo del campo MODEL ID, se rellena al seleccionar en el picker
-- **Model Picker rediseñado** — nombre técnico como título principal (antes mostraba descripción); descripción como subtítulo; GUID en letra pequeña
-- **Búsqueda en tiempo real** — filtra por nombre técnico, descripción o GUID
-- **Grupos** — 📋 Planning (privateFactData) primero · 📊 Actual/Otros (factData) después
-- **Modelo activo** marcado con ✓ y fondo azul
-- Al seleccionar se guarda el nombre técnico en MODEL ID y el GUID en caché (evita round-trip adicional)
+- **Critical DIS fix** — single-step CSV upload: data is POSTed directly to `/models/{GUID}/{importType}` with `Content-Type: text/csv`. The separate `/jobs/{jobId}` upload endpoint (which returned 405) has been removed from the flow.
+- **MODEL NAME display field** — new read-only field below MODEL ID showing the model's friendly description. Populated via picker selection or on DIS connect. Persists in `localStorage`.
+- **Model Picker redesigned** — technical name is now the primary label (previously showed description or GUID). Description shown as subtitle. Internal GUID shown in small monospace. `data-model-desc` attribute added to pass description through to the click handler.
+- **Real-time search** — filters simultaneously across technical name, description, and GUID.
+- **Model grouping** — Planning (privateFactData) listed first, Actual/Others (factData) second.
+- **Active model indicator** — selected model shown with ✓ and blue background.
+- Selecting a model from the picker saves the technical name to MODEL ID and caches the GUID to avoid extra resolution on the next sync.
 
 ### v2.5.0 — 2026-11-22
-- **Fix crítico DIS**: resolución automática de GUID interno (`_resolveDISModelId`)
-- **Fix model browser**: `GET /api/v1/dataimport/models` sin parámetros `?importType=`
-- **Fix CSRF**: token obtenido del endpoint del modelo, no del listado
-- **Fix double-load**: guard `if (typeof ExcelUploaderPro === 'undefined')` evita SyntaxError
-- **Fix CSS**: `.toast-warning { background:#E76500 }` (naranja SAP)
-- Auto-detección de `importType`: `privateFactData` → `factData` como fallback
+- **Critical DIS fix** — automatic GUID resolution via `_resolveDISModelId()`. DIS requires the internal GUID, not the technical name, for most endpoints.
+- **Model browser fix** — `GET /api/v1/dataimport/models` called without `?importType=` parameter (caused 404 on this tenant).
+- **CSRF fix** — token now fetched from the model-specific endpoint, not the models list.
+- **Double-load guard** — `if (typeof ExcelUploaderPro === 'undefined')` prevents `SyntaxError: Identifier already declared` when uploading a new `webcomponent.json` while the previous one is still cached.
+- **CSS fix** — `.toast-warning { background:#E76500 }` (SAP orange).
+- Auto-detection of `importType`: tries `privateFactData` first, falls back to `factData` on error `[1704-1801-3304]` or 404.
 
 ### v2.2.1
-- **Bug fix** — `_evalAssistedCode`: fallback path uses expression string as cache key
-- **Bug fix** — `_applyAllAutoFixes`: empty `catch {}` replaced with `console.warn`
-- **Bug fix** — `_storageSet`: only suppresses `QuotaExceededError`
+- **Bug fix** — `_evalAssistedCode`: fallback path uses expression string as cache key.
+- **Bug fix** — `_applyAllAutoFixes`: empty `catch {}` replaced with `console.warn`.
+- **Bug fix** — `_storageSet`: only suppresses `QuotaExceededError`.
 
 ### v2.2.0
-- Removed DSP Artifact toggle from UI
-- Redesigned Full / Delta strategy bar
-- Improved table scrollbars in SAP Blue
-- `requestAnimationFrame` debounce on grid and audit search inputs
+- Removed DSP Artifact toggle from UI.
+- Redesigned Full / Delta strategy bar.
+- Improved table scrollbars in SAP Blue.
+- `requestAnimationFrame` debounce on grid and audit search inputs.
 
 ### v2.1.0
-- Compiled rule function cache (`_compiledRules`)
-- `crypto.randomUUID()` for collision-free rule IDs
-- Early exit in `_validateRows()` when grid is empty
+- Compiled rule function cache (`_compiledRules`).
+- `crypto.randomUUID()` for collision-free rule IDs.
+- Early exit in `_validateRows()` when grid is empty.
 
 ### v2.0.0
-- Multi-file / multi-sheet consolidation
-- Full / Delta load strategy
-- Validation engine: 6 rule types, 4 severity levels
-- Assisted Code Auto-Fix
-- Audit Monitor with XLSX / CSV export
-- Help Guide overlay
-
+- Multi-file / multi-sheet consolidation.
+- Full / Delta load strategy.
+- Validation engine: 6 rule types, 4 severity levels.
+- Assisted Code Auto-Fix.
+- Audit Monitor with XLSX / CSV export.
+- Help Guide overlay.
