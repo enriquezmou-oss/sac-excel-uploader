@@ -1,6 +1,8 @@
- File Planning Uploader Pro — SAP Analytics Cloud Custom Widget
+ Excel Planning Uploader Pro — SAP Analytics Cloud Custom Widget
 
-> Enterprise-grade Web Component for SAP Analytics Cloud (SAC) v2.2.1 — Multi-sheet Excel/CSV/TXT consolidation, configurable validation semaphores, Assisted Code Auto-Fix, Full/Delta load engine, drill-down Audit Monitor with multi-format exports, and SAP Fiori Horizon UX.
+> Enterprise-grade Web Component for SAP Analytics Cloud (SAC) **v2.6.0** — Multi-sheet Excel/CSV/TXT consolidation, configurable validation semaphores, Assisted Code Auto-Fix, Full/Delta load engine, **direct DIS write-back to SAC planning models**, drill-down Audit Monitor with multi-format exports, and SAP Fiori Horizon UX.
+
+**Vendor:** Jose Enriquez SixSevenGroup
 
 ---
 
@@ -96,6 +98,28 @@ Built-in overlay (`? Help` button in the header) — step-by-step documentation 
 | **XLSX library** | SheetJS `0.18.5`, loaded from CDN automatically if not already present |
 | **Persistence** | `localStorage` keys: `sac_required_cols`, `sac_validation_rules_v9`, `sac_audit_history_v9` |
 | **SAC integration** | Dispatches `propertiesChanged` custom event with `validatedDataJson` property |
+| **DIS write-back** | `GET /api/v1/dataimport/models` → GUID resolution → CSRF → POST job → CSV upload → run → poll |
+| **CDN** | jsDelivr pinned por commit hash — inmutable, sin caché sorpresa |
+
+---
+
+## SAC DIS Write-Back
+
+El widget escribe directamente en un modelo de planificación SAC nativo mediante la **Data Import Service (DIS) REST API**:
+
+1. **Resolución de GUID** — el nombre técnico (`PLAN_CAPEX_PLANNING`) se resuelve automáticamente al GUID interno (`C9qfcbu7dll3q7ao78qsq5e9h4o`) llamando a `GET /api/v1/dataimport/models`.
+2. **CSRF token** — se obtiene del endpoint del modelo específico (`/models/{GUID}/{importType}` con `x-csrf-token: fetch`).
+3. **Creación de job** — `POST /models/{GUID}/privateFactData` → devuelve `jobId`.
+4. **Upload CSV** — `PUT /jobs/{jobId}` con los datos en CSV.
+5. **Run & poll** — `POST /jobs/{jobId}/run` → `GET /jobs/{jobId}` hasta `successful`.
+
+**Autenticación:** cookies de sesión SAC (`credentials: 'include'`). No requiere OAuth Bearer token.
+
+### Model Picker
+Pulsa **🔍 SAC** junto al campo MODEL ID para explorar los modelos disponibles:
+- Agrupados: **📋 Planning** (privateFactData) · **📊 Actual / Otros** (factData)
+- Búsqueda en tiempo real por descripción, nombre técnico o GUID
+- El modelo activo aparece marcado con ✓
 
 ---
 
@@ -111,31 +135,43 @@ SheetJS is fetched from CDN on first load. If your SAC tenant blocks external CD
 
 ## Changelog
 
+### v2.6.0 — 2026-11-23
+- **Model Picker rediseñado** — nombre técnico como título (antes mostraba GUID críptico)
+- **Búsqueda en tiempo real** — filtra por descripción, nombre técnico o GUID
+- **Grupos** — 📋 Planning (privateFactData) primero · 📊 Actual/Otros (factData) después
+- **Modelo activo** marcado con ✓ y fondo azul
+- Al seleccionar se guarda el nombre técnico (no el GUID) en MODEL ID
+- GUID cacheado en `_sacDISModelId` — evita round-trip extra en el siguiente Synchronize
+
+### v2.5.0 — 2026-11-22
+- **Fix crítico DIS**: resolución automática de GUID interno (`_resolveDISModelId`)
+- **Fix model browser**: `GET /api/v1/dataimport/models` sin parámetros `?importType=`
+- **Fix CSRF**: token obtenido del endpoint del modelo, no del listado
+- **Fix double-load**: guard `if (typeof ExcelUploaderPro === 'undefined')` evita SyntaxError
+- **Fix CSS**: `.toast-warning { background:#E76500 }` (naranja SAP)
+- Auto-detección de `importType`: `privateFactData` → `factData` como fallback
+
 ### v2.2.1
-- **Bug fix** — `_evalAssistedCode`: fallback path (no `cacheKey`) now uses the expression string itself as cache key — `new Function()` always compiled at most once per unique expression
-- **Bug fix** — `_applyAllAutoFixes`: empty `catch {}` replaced with `console.warn` + failed count surfaced in the toast notification
-- **Bug fix** — `_storageSet`: only suppresses `QuotaExceededError`; other localStorage failures now emit `console.warn`
-- DSP Artifact references removed from code comments
+- **Bug fix** — `_evalAssistedCode`: fallback path uses expression string as cache key
+- **Bug fix** — `_applyAllAutoFixes`: empty `catch {}` replaced with `console.warn`
+- **Bug fix** — `_storageSet`: only suppresses `QuotaExceededError`
 
 ### v2.2.0
-- **Removed** DSP Artifact toggle from UI — SAC Artifact sync remains always active internally
-- **Redesigned** Full / Delta strategy bar: cleaner layout with active-mode badge
-- **Improved** table scrollbars: visible 7 px scrollbar in SAP Blue (`#0070F2`) on `.tbl-wrap`, host scroll, JSON `<pre>` block, and help modal
-- **Performance** — `requestAnimationFrame` debounce on both grid search and audit search inputs (no full re-render on every keystroke)
-- **UX** — `disconnectedCallback` now cancels pending RAF tasks on element removal
+- Removed DSP Artifact toggle from UI
+- Redesigned Full / Delta strategy bar
+- Improved table scrollbars in SAP Blue
+- `requestAnimationFrame` debounce on grid and audit search inputs
 
 ### v2.1.0
-- Compiled rule function cache (`_compiledRules`) — ASSISTED_CODE rules compiled once per session
-- `crypto.randomUUID()` for collision-free rule IDs (fallback to `Math.random`)
+- Compiled rule function cache (`_compiledRules`)
+- `crypto.randomUUID()` for collision-free rule IDs
 - Early exit in `_validateRows()` when grid is empty
-- User toast feedback when export functions have nothing to export
-- Cache invalidated automatically whenever rules are saved
 
-### v2.0.0 *(Gemini-generated baseline)*
+### v2.0.0
 - Multi-file / multi-sheet consolidation
-- Full / Delta load strategy with DSP Artifact toggle
-- Validation engine: 6 rule types, 4 severity levels, scoped rules, temporal validity
-- Assisted Code Auto-Fix with `new Function()`
+- Full / Delta load strategy
+- Validation engine: 6 rule types, 4 severity levels
+- Assisted Code Auto-Fix
 - Audit Monitor with XLSX / CSV export
 - Help Guide overlay
 
