@@ -19,9 +19,12 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '2.7.3';
+const _EPM_VERSION = '2.7.4';
 
 const _EPM_CHANGELOG = [
+  { v: '2.7.4', date: '2026-11-23', title: 'Fix: default columns match PLAN_CAPEX_PLANNING model',
+    items: ['Default Required Columns updated to match the actual SAC model dimensions: CAPEX_ITEM, COMPANY, COSTCENTER, ASSET_CLASS, CAPITALIZED, AMOUNT.',
+            'ID → CAPEX_ITEM (dimension key). H1 → AMOUNT (measure). DESCRIPTION removed (not a DIS upload column).'] },
   { v: '2.7.3', date: '2026-11-23', title: 'What\'s New panel + single version constant',
     items: ['Added "What\'s New" button in header — shows version history inline without leaving the widget.',
             'Version string now defined as a single constant (_EPM_VERSION) so subtitle, header and modal always stay in sync.',
@@ -74,7 +77,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._targetDate    = this._storageGet('sac_target_date')    || '';
     this._parseConfig = { format: 'AUTO', delimiter: 'AUTO', numberFormat: 'STD', headerRow: 1 };
 
-    const defaultCols = ['ID', 'DESCRIPTION', 'H1', 'COMPANY', 'COSTCENTER', 'ASSET_CLASS', 'CAPITALIZED'];
+    const defaultCols = ['CAPEX_ITEM', 'COMPANY', 'COSTCENTER', 'ASSET_CLASS', 'CAPITALIZED', 'AMOUNT'];
     const savedCols = this._storageGet('sac_required_cols');
     this._requiredColumns = Array.isArray(savedCols) && savedCols.length > 0 ? savedCols : defaultCols;
 
