@@ -555,6 +555,15 @@ class ExcelUploaderPro extends HTMLElement {
       throw new Error(msg);
     }
 
+    // ── 3b. Wait for job to reach finished_with_data before run ──────────────
+    _setLoading('⏳ SAC procesando datos…');
+    await this._pollJobStatus(
+      DIS + '/jobs/' + jobId,
+      ['FINISHED_WITH_DATA', 'FINISHEDWITHDATA', 'FINISHED'],
+      ['UPLOADING_FAILED', 'UPLOADINGFAILED', 'FAILED'],
+      30, 2000, null, DIS_HEADER
+    );
+
     // ── 4. Run the job: POST /jobs/{jobId}/run ────────────────────────────
     _setLoading('🚀 Aplicando datos al modelo ' + this._sacModelId + '…');
     const runResp = await fetch(DIS + '/jobs/' + jobId + '/run', {
@@ -567,12 +576,12 @@ class ExcelUploaderPro extends HTMLElement {
       throw new Error(msg);
     }
 
-    // ── 5. Poll GET /jobs/{jobId}/status until COMPLETED ─────────────────
+    // ── 5. Poll GET /jobs/{jobId} until successful ────────────────────────
     _setLoading('⏳ Esperando confirmación de SAC DIS…');
     return await this._pollJobStatus(
-      DIS + '/jobs/' + jobId + '/status',
-      ['COMPLETED', 'COMPLETED_WITH_FAILURES', 'COMPLETE'],
-      ['FAILED'],
+      DIS + '/jobs/' + jobId,
+      ['SUCCESSFUL', 'SUCCESS', 'COMPLETED', 'COMPLETED_WITH_FAILURES', 'COMPLETE'],
+      ['FAILED', 'UPLOADING_FAILED'],
       120, 3000, _setLoading, DIS_HEADER
     );
   }
