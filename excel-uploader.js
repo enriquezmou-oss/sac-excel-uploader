@@ -473,11 +473,12 @@ class ExcelUploaderPro extends HTMLElement {
 
     const _setLoading = (txt) => { this._loadingText = txt; this._render(); };
 
-    // ── 1. Fetch CSRF token from GET /models list ─────────────────────────
+    // ── 1. Fetch CSRF token from the model endpoint itself (official SAP pattern) ─
     _setLoading('🔑 Obteniendo CSRF token de SAC DIS…');
-    const csrfResp = await fetch(DIS + '/models', {
+    const csrfImportType = this._sacImportType || 'privateFactData';
+    const csrfResp = await fetch(DIS + '/models/' + encodeURIComponent(this._sacModelId) + '/' + csrfImportType, {
       method: 'GET', credentials: 'include',
-      headers: { 'Content-Type': 'application/json', 'x-csrf-token': 'fetch', ...DIS_HEADER }
+      headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json', ...DIS_HEADER }
     });
     const csrfToken = csrfResp.headers.get('x-csrf-token') || csrfResp.headers.get('X-Csrf-Token') || '';
 
