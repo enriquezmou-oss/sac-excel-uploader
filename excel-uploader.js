@@ -28,6 +28,7 @@ const _EPM_CHANGELOG = [
             'Estado de carga en el auditor: "🟢 CARGA COMPLETA", "⚠️ CARGA PARCIAL", "❌ ERROR DIS".',
             'Toast de éxito: "🟢 CARGA COMPLETA — LOAD-XXXXX · FULL — N filas grabadas → SAC".',
             'Bloque DIS en detalle de auditoría rediseñado con señales semafóricas (punto de color + borde grueso).'] },
+  { v: '3.2.0', date: '2026-11-23', title: 'Version y Date visibles en Column Mapping',
     items: ['Version y Date aparecen en la tabla de Column Mapping con fondo verde y etiqueta "← SAC Load Target".',
             'Filas bloqueadas (🔒) — sus valores vienen siempre del campo VERSION y PERIOD del widget.',
             'Solo se muestran si los campos VERSION o PERIOD están rellenos.'] },
