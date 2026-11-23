@@ -5,6 +5,24 @@ Format: **[version] — date — summary**
 
 ---
 
+## [2.7.1] — 2026-11-23
+
+### Fix: Model Structure Validation — dimensions not loading on this tenant
+
+The `GET /api/v1/dataimport/models/{GUID}` endpoint returns 404 on this SAC tenant, causing the validation panel to show 0 dimensions.
+
+**Root cause:** `_fetchModelDimensions()` was calling the model metadata endpoint, which is not supported here. The correct endpoint on this tenant is the same CSRF endpoint used for the upload flow: `GET /api/v1/dataimport/models/{GUID}/{importType}`, which returns a `columns` array in its response body listing all valid import columns.
+
+**Changes:**
+- `_fetchModelDimensions()` now tries six endpoint variants in order, stopping at the first that returns parseable dimension data: CSRF endpoint with GUID, CSRF endpoint with technical name, `/dimensions` with GUID, `/dimensions` with technical name, metadata with GUID, metadata with technical name.
+- `_parseDimensions()` now handles the SAC DIS `columns` array format (field name `columnID` instead of `id`, field `columnType` instead of `type`, field `columnDescription` instead of `description`).
+- Added `SIGNEDDATA` to the set of measure types.
+- Error message when 0 dimensions are returned is now more actionable: *"DIS did not return column metadata for this model. Configure Required Columns manually."*
+
+**Why this matters:** The dimensions panel can now show users which columns the SAC model accepts. When columns like `ID`, `DESCRIPTION`, or `H1` are in Required Columns but not in the model, the panel marks them ❌ missing and blocks Synchronize — preventing the HTTP 400 "Request columns did not match import type" error.
+
+---
+
 ## [2.7.0] — 2026-11-23
 
 ### Model Structure Validation

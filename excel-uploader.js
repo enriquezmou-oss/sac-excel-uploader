@@ -402,6 +402,7 @@ class ExcelUploaderPro extends HTMLElement {
   // ── Fetch model dimension structure from SAC DIS ──────────────────────────
   async _fetchModelDimensions() {
     const guid = this._sacDISModelId || this._sacModelId;
+    const tech = this._sacModelId;
     if (!guid) return;
     this._sacDimLoading = true;
     this._sacDimError   = '';
@@ -409,25 +410,37 @@ class ExcelUploaderPro extends HTMLElement {
     this._render();
     try {
       const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
-      // Try model-level metadata endpoint first
-      const resp = await fetch(base + '/api/v1/dataimport/models/' + encodeURIComponent(guid), {
-        credentials: 'include',
-        headers: { 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
-      });
-      if (!resp.ok) {
-        // Some tenants use /models/{id}/dimensions
-        const resp2 = await fetch(base + '/api/v1/dataimport/models/' + encodeURIComponent(guid) + '/dimensions', {
-          credentials: 'include',
-          headers: { 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
-        });
-        if (!resp2.ok) throw new Error('HTTP ' + resp.status);
-        const data2 = await resp2.json().catch(() => ({}));
-        this._sacModelDimensions = this._parseDimensions(data2);
-      } else {
-        const data = await resp.json().catch(() => ({}));
-        this._sacModelDimensions = this._parseDimensions(data);
+      const iType = this._sacImportType || 'privateFactData';
+      // Try endpoints in order — stop at the first one that returns parseable dimensions.
+      // The CSRF endpoint (/models/{id}/{importType}) always works on this tenant and
+      // returns a "columns" array in its body with the valid import columns.
+      const attempts = [
+        base + '/api/v1/dataimport/models/' + encodeURIComponent(guid) + '/' + iType,
+        base + '/api/v1/dataimport/models/' + encodeURIComponent(tech) + '/' + iType,
+        base + '/api/v1/dataimport/models/' + encodeURIComponent(guid) + '/dimensions',
+        base + '/api/v1/dataimport/models/' + encodeURIComponent(tech) + '/dimensions',
+        base + '/api/v1/dataimport/models/' + encodeURIComponent(guid),
+        base + '/api/v1/dataimport/models/' + encodeURIComponent(tech),
+      ];
+      let dims = [];
+      for (const url of attempts) {
+        try {
+          const r = await fetch(url, {
+            credentials: 'include',
+            headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json', 'x-sap-dis-request-source': 'fileUploadWidget' }
+          });
+          if (!r.ok) continue;
+          const data = await r.json().catch(() => null);
+          if (!data) continue;
+          dims = this._parseDimensions(data);
+          if (dims.length > 0) { console.log('[DIS] dimensions from:', url); break; }
+        } catch (_) { continue; }
       }
-      console.log('[DIS] model dimensions:', this._sacModelDimensions.map(d => d.id).join(', '));
+      this._sacModelDimensions = dims;
+      console.log('[DIS] model dimensions:', dims.map(d => d.id).join(', ') || '(none)');
+      if (dims.length === 0) {
+        this._sacDimError = 'DIS did not return column metadata for this model. Configure Required Columns manually.';
+      }
     } catch (err) {
       this._sacDimError = 'Could not load model dimensions: ' + err.message;
       console.warn('[DIS] dimension fetch failed:', err.message);
@@ -437,17 +450,19 @@ class ExcelUploaderPro extends HTMLElement {
   }
 
   _parseDimensions(data) {
-    // Handle various DIS response shapes
+    // SAC DIS returns columns as "columns" array with "columnID" field (CSRF endpoint),
+    // or as "dimensions" array with "id" field (metadata endpoint).
     const raw = Array.isArray(data)
       ? data
-      : (data?.dimensions || data?.d?.dimensions || data?.value || data?.d?.results || []);
-    const AUTO_TYPES = new Set(['VERSION', 'DATE', 'FISCAL_YEAR', 'FISCAL_PERIOD']);
-    const MEASURE_TYPES = new Set(['MEASURE', 'KPI', 'AMOUNT', 'QUANTITY']);
+      : (data?.columns || data?.dimensions || data?.d?.dimensions || data?.value || data?.d?.results || []);
+    const AUTO_TYPES    = new Set(['VERSION', 'DATE', 'FISCAL_YEAR', 'FISCAL_PERIOD']);
+    const MEASURE_TYPES = new Set(['MEASURE', 'KPI', 'AMOUNT', 'QUANTITY', 'SIGNEDDATA']);
     return raw.map(d => {
-      const typeRaw = (d.type || d.dimensionType || d.DimensionType || '').toUpperCase();
+      const typeRaw = (d.type || d.columnType || d.dimensionType || d.DimensionType || '').toUpperCase();
+      const colId   = d.columnID || d.id || d.dimensionId || d.DimensionId || d.name || d.Name || '';
       return {
-        id:          d.id || d.dimensionId || d.DimensionId || d.name || d.Name || '',
-        description: d.description || d.Description || d.label || d.name || '',
+        id:          colId,
+        description: d.description || d.columnDescription || d.Description || d.label || d.name || colId,
         type:        typeRaw || 'GENERIC',
         isMeasure:   MEASURE_TYPES.has(typeRaw),
         isAuto:      AUTO_TYPES.has(typeRaw),
@@ -464,7 +479,7 @@ class ExcelUploaderPro extends HTMLElement {
       this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
       this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="' + this._esc(this._sacModelName) + '">⚠️ ' + this._esc(this._sacModelName.slice(0, 60)) + '</span>' :
       '';
-    sub.innerHTML = 'Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.7.0' + badge;
+    sub.innerHTML = 'Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.7.1' + badge;
   }
 
   // ── Fetch list of all models from SAC DIS ─────────────────────────────────
@@ -2918,7 +2933,7 @@ class ExcelUploaderPro extends HTMLElement {
             <img class="sap-logo-img" src="${this._sapLogoUri}" alt="SAP Logo" />
             <div class="sap-title-wrap">
               <div class="sap-title">Excel Planning Uploader Pro</div>
-              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.7.0${
+              <div class="sap-subtitle">Multi-Sheet Consolidation · Transform &amp; Convert · Alert Semaphores · v2.7.1${
                 this._sacModelState === 'connecting' ? ' &nbsp;|&nbsp; <span style="color:#A9B8C8;font-weight:600;">⏳ Conectando…</span>' :
                 this._sacModelState === 'ok'         ? ' &nbsp;|&nbsp; <span style="color:#5BBFFF;font-weight:700;">📊 ' + this._esc(this._sacModelName || this._sacModelId) + '</span>' :
                 this._sacModelState === 'error'      ? ' &nbsp;|&nbsp; <span style="color:#E67E22;font-weight:600;" title="' + this._esc(this._sacModelName) + '">⚠️ ' + this._esc((this._sacModelName || 'Modelo no encontrado').slice(0, 60)) + '</span>' :
