@@ -693,7 +693,7 @@ class ExcelUploaderPro extends HTMLElement {
   // Discover SAC tenant UUID (and optionally the current user) without hardcoding
   async _discoverTenantUUID(base) {
     if (this._cachedTenantUUID) return this._cachedTenantUUID;
-    // Try SAC global variables first (cheapest)
+    // Try SAC global variables first (cheapest) — also grab user if available
     try {
       const uuid = window?.__sap_umi_config?.tenant
         || window?.sap?.umi?.config?.tenant
@@ -702,8 +702,28 @@ class ExcelUploaderPro extends HTMLElement {
         || null;
       if (uuid && /^[0-9a-f-]{36}$/i.test(uuid)) {
         this._cachedTenantUUID = uuid;
-        return uuid;
       }
+      // Try to pick up user from SAC global state objects
+      const DEFAULT_USER = 'SAP User (Planning)';
+      if (this._currentUser === DEFAULT_USER || !this._currentUser) {
+        const u = window?.__sap_umi_config?.user?.loginName
+          || window?.__sap_umi_config?.user?.name
+          || window?.__sap_umi_config?.loginName
+          || window?.sap?.umi?.currentUser?.loginName
+          || window?.sap?.umi?.currentUser?.name
+          || window?.sap?.umi?.config?.user?.loginName
+          || window?.sap?.umi?.config?.user?.name
+          || window?.SapAnalyticsCloud?.currentUser?.loginName
+          || window?.SapAnalyticsCloud?.currentUser?.name
+          || window?.sapbi_page?.model?.getProperty?.('/user/name')
+          || window?.sapbi_page?.model?.getProperty?.('/user/loginName')
+          || null;
+        if (u && u !== DEFAULT_USER) {
+          this._currentUser = u;
+          console.log('[User] auto-detected from SAC globals:', u);
+        }
+      }
+      if (this._cachedTenantUUID) return this._cachedTenantUUID;
     } catch (_) {}
     const sessionBase = (base || window.location.origin);
     // SAC FPA session endpoint accepts GET with ?request= JSON param
@@ -751,11 +771,35 @@ class ExcelUploaderPro extends HTMLElement {
           const DEFAULT_USER = 'SAP User (Planning)';
           if ((this._currentUser === DEFAULT_USER || !this._currentUser)) {
             const u = data?.user?.loginName || data?.loginName || data?.userName || null;
-            if (u) this._currentUser = u;
+            if (u && u !== DEFAULT_USER) { this._currentUser = u; console.log('[User] auto-detected from session POST:', u); }
           }
         }
       }
     } catch (_) {}
+    // Last resort: try SAC /api/v1/users/me or similar current-user endpoints
+    const userEndpoints = [
+      sessionBase + '/api/v1/users/me',
+      sessionBase + '/sap/fpa/api/users/me',
+      sessionBase + '/sap/fpa/services/rest/session/currentUser',
+    ];
+    for (const url of userEndpoints) {
+      try {
+        const r = await fetch(url, { credentials: 'include', headers: { 'Accept': 'application/json' } });
+        if (r.ok) {
+          const data = await r.json().catch(() => null);
+          const DEFAULT_USER = 'SAP User (Planning)';
+          if (data && (this._currentUser === DEFAULT_USER || !this._currentUser)) {
+            const u = data?.loginName || data?.user?.loginName || data?.userName
+              || data?.name || data?.email || data?.id || null;
+            if (u && u !== DEFAULT_USER) {
+              this._currentUser = u;
+              console.log('[User] auto-detected from', url.replace(sessionBase, ''), ':', u);
+              break;
+            }
+          }
+        }
+      } catch (_) {}
+    }
     return null;
   }
 
@@ -3824,54 +3868,27 @@ class ExcelUploaderPro extends HTMLElement {
 
           <div class="strategy-bar-card">
             <div style="display:flex;align-items:center;gap:10px;">
-              <span style="font-size:11px;font-weight:700;color:#556B82;text-transform:uppercase;letter-spacing:.5px;">Load Mode</span>
-            </div>
-            <div class="strategy-toggle-group">
-              <button class="strategy-btn ${this._loadStrategy === 'FULL' ? 'active' : ''}" data-strategy="FULL" type="button">
-                <span style="font-size:18px;">📦</span>
-                <span>
-                  <span class="strategy-btn-title">FULL LOAD</span>
-                  <span class="strategy-btn-sub">Replaces the planning slice</span>
-                </span>
-              </button>
-              <button class="strategy-btn ${this._loadStrategy === 'DELTA' ? 'active' : ''}" data-strategy="DELTA" type="button">
-                <span style="font-size:18px;">⚡</span>
-                <span>
-                  <span class="strategy-btn-title">DELTA LOAD</span>
-                  <span class="strategy-btn-sub">Replaces matching key records</span>
-                </span>
-              </button>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
-              ${this._loadStrategy === 'FULL'
-                ? `<span style="background:#EBF5FF;color:#005CB9;border:1px solid #B3D4FF;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">📦 Full · ${this._importMethod === 'update' ? '✏️ Update' : this._importMethod === 'append' ? '➕ Append' : '🗑️ Replace'}</span>`
-                : '<span style="background:#FFF3CD;color:#8A5700;border:1px solid #FFCC66;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">⚠️ Delta — updates matching records, inserts new ones</span>'}
+              <span style="font-size:11px;font-weight:700;color:#556B82;text-transform:uppercase;letter-spacing:.5px;">⚙️ Import Method</span>
             </div>
             ${(() => {
-              const METHODS = this._loadStrategy === 'DELTA'
-                ? [
-                    { id: 'update',  icon: '✏️', label: 'Update',  desc: 'Updates matching dimension-key records, inserts new ones, preserves all other existing data.' },
-                    { id: 'append',  icon: '➕', label: 'Append',  desc: 'Accumulates measure values for matching keys (adds to existing amounts), inserts new records.' },
-                  ]
-                : [
-                    { id: 'replace', icon: '🗑️', label: 'Replace', desc: 'Clears all data for Version+Period, then writes the file. Use for complete monthly re-upload.' },
-                    { id: 'update',  icon: '✏️', label: 'Update',  desc: 'Updates matching dimension-key records, inserts new ones, preserves all other existing data.' },
-                    { id: 'append',  icon: '➕', label: 'Append',  desc: 'Accumulates measure values for matching keys (adds to existing amounts), inserts new records.' },
-                  ];
+              const METHODS = [
+                { id: 'replace', icon: '🗑️', label: 'Replace', desc: 'Clears all data for Version+Period, then writes the file. Use for a complete monthly re-upload.' },
+                { id: 'update',  icon: '✏️', label: 'Update',  desc: 'Updates matching dimension-key records, inserts new ones, preserves all other existing data.' },
+                { id: 'append',  icon: '➕', label: 'Append',  desc: 'Existing data check before upload — if rows found, confirms before proceeding. SAC DIS replaces matching rows.' },
+              ];
               const active = METHODS.find(m => m.id === this._importMethod) || METHODS[0];
               return `
-              <div style="width:100%;padding-top:10px;border-top:1px dashed #D9E0E6;margin-top:4px;">
-                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                  <span style="font-size:11px;font-weight:700;color:#556B82;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;">⚙️ Import Method</span>
+              <div style="width:100%;padding:4px 0 8px 0;">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
                   <div style="display:flex;gap:6px;">
                     ${METHODS.map(m => `
                       <button class="method-btn" data-method="${m.id}" type="button"
-                        style="padding:5px 14px;border-radius:20px;border:2px solid ${this._importMethod === m.id ? '#0064D9' : '#D9E0E6'};background:${this._importMethod === m.id ? '#EBF5FF' : '#FFF'};color:${this._importMethod === m.id ? '#0064D9' : '#556B82'};font-size:11px;font-weight:${this._importMethod === m.id ? '800' : '600'};cursor:pointer;transition:all .15s;">
+                        style="padding:7px 18px;border-radius:20px;border:2px solid ${this._importMethod === m.id ? '#0064D9' : '#D9E0E6'};background:${this._importMethod === m.id ? '#EBF5FF' : '#FFF'};color:${this._importMethod === m.id ? '#0064D9' : '#556B82'};font-size:12px;font-weight:${this._importMethod === m.id ? '800' : '600'};cursor:pointer;transition:all .15s;">
                         ${m.icon} ${m.label}
                       </button>`).join('')}
                   </div>
-                  <span style="font-size:11px;color:#556B82;font-style:italic;min-width:0;">${active.desc}</span>
                 </div>
+                <span style="font-size:11px;color:#556B82;font-style:italic;">${active.desc}</span>
               </div>`;
             })()}
             <div style="width:100%;display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding-top:12px;border-top:1px dashed #D9E0E6;margin-top:4px;">
