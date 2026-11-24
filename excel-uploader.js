@@ -983,27 +983,63 @@ class ExcelUploaderPro extends HTMLElement {
     const csrfToken = csrfResp.headers.get('x-csrf-token') || csrfResp.headers.get('X-Csrf-Token') || '';
     console.log('[DIS] CSRF:', csrfToken ? '✅ obtained' : '❌ empty (HTTP ' + csrfResp.status + ')');
 
-    // ── 3. Create job + upload CSV in one POST (body = text/csv) ──────────────
+    // ── 3. Create job ─────────────────────────────────────────────────────────
+    // For Update/Append: POST JSON settings body → DIS creates empty job (READY_FOR_DATA).
+    //   Write mode set via "writeBackMode" (DIS v1 canonical) + fallback params.
+    // For Replace: POST CSV directly (single-step, existing proven flow).
     _setLoading('📤 Sending ' + rows.length + ' rows to SAC DIS…');
     const importTypesToTry = [importType, importType === 'privateFactData' ? 'factData' : 'privateFactData'];
     let jobCreateResp, usedImportType;
-    const methodParam = this._importMethod && this._importMethod !== 'replace' ? '?method=' + encodeURIComponent(this._importMethod.toUpperCase()) : '';
+
+    const isNonReplace = this._importMethod === 'update' || this._importMethod === 'append';
+    // DIS v1 write mode mapping
+    const DIS_MODE_MAP = { replace: 'REPLACE', update: 'MERGE', append: 'APPEND' };
+    const disWriteMode = DIS_MODE_MAP[this._importMethod] || 'REPLACE';
+
     for (const iType of importTypesToTry) {
-      const r = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + iType + methodParam, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
-        body: csvBody
-      });
-      if (r.ok) { jobCreateResp = r; usedImportType = iType; break; }
-      let errBody = {};
-      try { errBody = await r.clone().json(); } catch (_) {}
-      const errMsg = JSON.stringify(errBody);
-      console.log('[DIS] POST', iType, 'HTTP', r.status, '| error body:', errMsg.slice(0, 400));
-      if (r.status !== 404 && !errMsg.includes('1704-1801-3304')) {
-        const msg = errBody?.error?.message || errBody?.message || errBody?.errorDetails?.[0]?.message || 'Upload+Create HTTP ' + r.status;
-        throw new Error(msg);
+      if (isNonReplace) {
+        // ── Non-replace: create empty job with JSON settings body (write mode in body) ──
+        const jobSettingsBody = JSON.stringify({
+          importJobSettings: { containsHeader: true, delimiter: ',' },
+          writeBackMode:  disWriteMode,   // SAP DIS v1 canonical
+          importMode:     disWriteMode,   // alternative field name used by some versions
+          writeBack:      disWriteMode,   // another variant seen in SDK examples
+        });
+        const r = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + iType, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken, ...DIS_HEADER },
+          body: jobSettingsBody
+        });
+        console.log('[DIS] job create (JSON, mode=' + disWriteMode + ')', iType, 'HTTP', r.status);
+        if (r.ok) { jobCreateResp = r; usedImportType = iType; break; }
+        // If JSON creation fails, fall through to CSV single-step as last resort
+        const errClone = r.clone();
+        let errBody = {};
+        try { errBody = await errClone.json(); } catch (_) {}
+        const errMsg = JSON.stringify(errBody);
+        if (r.status !== 404 && !errMsg.includes('1704-1801-3304')) {
+          const msg = errBody?.error?.message || errBody?.message || errBody?.errorDetails?.[0]?.message || 'Job create HTTP ' + r.status;
+          throw new Error(msg);
+        }
+      } else {
+        // ── Replace: single-step CSV upload (proven flow) ──────────────────────
+        const r = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + iType, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
+          body: csvBody
+        });
+        console.log('[DIS] job create (CSV, Replace)', iType, 'HTTP', r.status);
+        if (r.ok) { jobCreateResp = r; usedImportType = iType; break; }
+        let errBody = {};
+        try { errBody = await r.clone().json(); } catch (_) {}
+        const errMsg = JSON.stringify(errBody);
+        console.log('[DIS] POST', iType, 'HTTP', r.status, '| error body:', errMsg.slice(0, 400));
+        if (r.status !== 404 && !errMsg.includes('1704-1801-3304')) {
+          const msg = errBody?.error?.message || errBody?.message || errBody?.errorDetails?.[0]?.message || 'Upload+Create HTTP ' + r.status;
+          throw new Error(msg);
+        }
+        jobCreateResp = r;
       }
-      jobCreateResp = r;
     }
     if (!jobCreateResp?.ok) {
       let msg = 'Upload+Create HTTP ' + (jobCreateResp?.status || '?');
@@ -1025,7 +1061,7 @@ class ExcelUploaderPro extends HTMLElement {
     // ── 4. Upload CSV data (two-step tenant: job created empty) ──────────────
     // Check initial job status; if READY_FOR_DATA the tenant requires a separate data upload.
     // Try POST /jobs/{jobId} (SAP DIS SDK canonical) then /jobs/{jobId}/data as fallback.
-    _setLoading('📤 Subiendo datos al job DIS…');
+    _setLoading('📤 Uploading data to DIS job…');
     const jobCheckResp = await fetch(DIS + '/jobs/' + jobId, {
       method: 'GET', credentials: 'include',
       headers: { 'Accept': 'application/json', ...DIS_HEADER }
@@ -1041,7 +1077,13 @@ class ExcelUploaderPro extends HTMLElement {
       for (const dataUrl of dataUrls) {
         const dataResp = await fetch(dataUrl, {
           method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
+          headers: {
+            'Content-Type': 'text/csv',
+            'x-csrf-token': csrfToken,
+            // Pass write mode as header fallback — honored by some DIS versions
+            ...(isNonReplace ? { 'x-sap-dis-write-mode': disWriteMode, 'x-sap-dis-import-mode': disWriteMode } : {}),
+            ...DIS_HEADER
+          },
           body: csvBody
         });
         const label = dataUrl === jobUrl ? 'jobURL' : (dataUrl.endsWith('/data') ? 'jobId/data' : 'jobId');
@@ -1057,11 +1099,19 @@ class ExcelUploaderPro extends HTMLElement {
 
     // ── 5. Run the job ────────────────────────────────────────────────────────
     _setLoading('🚀 Applying data to model ' + this._sacModelId + '…');
+    const runBody = isNonReplace
+      ? JSON.stringify({ writeBackMode: disWriteMode, importMode: disWriteMode, writeBack: disWriteMode })
+      : undefined;
     const runResp = await fetch(DIS + '/jobs/' + jobId + '/run', {
       method: 'POST', credentials: 'include',
-      headers: { 'x-csrf-token': csrfToken, ...DIS_HEADER }
+      headers: {
+        'x-csrf-token': csrfToken,
+        ...(isNonReplace ? { 'Content-Type': 'application/json' } : {}),
+        ...DIS_HEADER
+      },
+      ...(runBody ? { body: runBody } : {})
     });
-    console.log('[DIS] run HTTP:', runResp.status);
+    console.log('[DIS] run HTTP:', runResp.status, isNonReplace ? '(mode=' + disWriteMode + ')' : '');
     if (!runResp.ok && runResp.status !== 405 && runResp.status !== 412) {
       let msg = 'Run HTTP ' + runResp.status;
       try { const b = await runResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
