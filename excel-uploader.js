@@ -19,9 +19,13 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.5.0';
+const _EPM_VERSION = '3.6.0';
 
 const _EPM_CHANGELOG = [
+  { v: '3.6.0', date: '2026-11-24', title: 'Publish-ready banner in Audit Monitor',
+    items: ['After a successful DIS load (🟢 LOAD COMPLETE), the Audit Monitor detail view now shows a persistent green banner: "Data loaded — review the snapshot below, then publish when ready".',
+            '"📢 How to Publish" button opens a step-by-step guide for publishing planning data in SAP Analytics Cloud.',
+            'Publish modal covers permissions, Full vs Delta behaviour, and the SAC publish flow.'] },
   { v: '3.5.0', date: '2026-11-24', title: 'All UI messages in English + Delta load warning',
     items: ['All user-visible messages translated to English (toasts, audit status, model picker, DIS block).',
             'Delta load strategy now shows ⚠️ warning badge: "replaces matching records, does not sum amounts".',
@@ -139,6 +143,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._xlsxReady = typeof XLSX !== 'undefined';
     this._showHelpModal = false;
     this._showChangelog = false;
+    this._showPublishModal = false;
 
     this._loadStrategy  = 'FULL';
     this._dspArtifactSync = true;
@@ -1903,6 +1908,12 @@ class ExcelUploaderPro extends HTMLElement {
     const backToAuditListBtn = shadow.getElementById('backToAuditListBtn');
     if (backToAuditListBtn) backToAuditListBtn.addEventListener('click', () => { this._selectedAuditId = null; this._render(); });
 
+    const publishReadyBtn = shadow.getElementById('publishReadyBtn');
+    if (publishReadyBtn) publishReadyBtn.addEventListener('click', () => { this._showPublishModal = true; this._render(); });
+
+    const closePublishModalBtn = shadow.getElementById('closePublishModalBtn');
+    if (closePublishModalBtn) closePublishModalBtn.addEventListener('click', () => { this._showPublishModal = false; this._render(); });
+
     const clearHistoryBtn = shadow.getElementById('clearHistoryBtn');
     if (clearHistoryBtn) {
       clearHistoryBtn.addEventListener('click', () => {
@@ -2659,6 +2670,48 @@ class ExcelUploaderPro extends HTMLElement {
       </div>`;
   }
 
+  _renderPublishModal() {
+    if (!this._showPublishModal) return '';
+    return `
+      <div class="help-modal-overlay">
+        <div class="help-modal-card" style="max-width:520px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #D9E0E6;padding-bottom:12px;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="background:#107E3E;color:#FFF;width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;">📢</span>
+              <div>
+                <h3 style="margin:0;color:#1D2D3E;font-size:16px;">Publish Planning Data in SAC</h3>
+                <span style="font-size:11px;color:#556B82;">Make the imported data visible to all story users</span>
+              </div>
+            </div>
+            <button class="btn" id="closePublishModalBtn" type="button">✕ Close</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:14px;">
+            <div style="background:#E6F9EC;border:1px solid #A3D9B1;border-radius:8px;padding:12px 16px;">
+              <div style="font-size:12px;font-weight:700;color:#107E3E;margin-bottom:4px;">✅ Your data has been loaded successfully</div>
+              <div style="font-size:12px;color:#1D6B2E;">The rows are now in the planning model's private workspace. Publish to share them with all users of this story.</div>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#1D2D3E;margin-bottom:10px;">Steps to publish in SAP Analytics Cloud:</div>
+              <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:10px;">
+                <li style="font-size:12px;color:#3D4F5F;line-height:1.6;">In your SAC <strong>Story</strong>, click the <strong>Edit</strong> button in the top toolbar to enter edit mode (if not already editing).</li>
+                <li style="font-size:12px;color:#3D4F5F;line-height:1.6;">In the top menu bar, click <strong>Data</strong> → <strong>Publish Data Changes</strong>.<br><span style="color:#556B82;font-size:11px;">Alternatively: click the model name in a planning table → <em>Publish</em>.</span></li>
+                <li style="font-size:12px;color:#3D4F5F;line-height:1.6;">SAC will show a confirmation dialog with the planning version and timestamp. Review and click <strong>Publish</strong>.</li>
+                <li style="font-size:12px;color:#3D4F5F;line-height:1.6;">The data is now available in the <strong>public</strong> area of the model and visible to all story viewers.</li>
+              </ol>
+            </div>
+            <div style="background:#FFF8E1;border:1px solid #FFD54F;border-radius:8px;padding:12px 16px;">
+              <div style="font-size:12px;font-weight:700;color:#7A5A00;margin-bottom:4px;">⚠️ Important notes</div>
+              <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;">
+                <li style="font-size:12px;color:#5A4200;line-height:1.5;">You need <em>Create and Edit Stories</em> and <em>Planning</em> permissions to publish.</li>
+                <li style="font-size:12px;color:#5A4200;line-height:1.5;">If you loaded with <strong>DELTA</strong> strategy, publishing replaces only the matching key records — not the full model.</li>
+                <li style="font-size:12px;color:#5A4200;line-height:1.5;">If the Publish option is greyed out, contact your SAC administrator to verify your permissions on model <strong>PLAN_CAPEX_PLANNING</strong>.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
   _renderHelpModal() {
     if (!this._showHelpModal) return '';
     return `
@@ -2980,6 +3033,19 @@ class ExcelUploaderPro extends HTMLElement {
               ${(rec.disStatus === 'PARTIAL' || rec.disStatus === 'ERROR') && rec.disError ? `<div style="margin-top:6px;padding:8px 10px;border-radius:6px;background:rgba(0,0,0,0.05);font-size:11px;font-weight:600;font-family:monospace;white-space:pre-wrap;line-height:1.5;">${this._esc(rec.disError)}</div>` : ''}
             </div>` : ''}
 
+            ${rec.disStatus === 'OK' ? `
+            <div style="margin:8px 0 4px;padding:14px 18px;border-radius:8px;background:linear-gradient(135deg,#E6F9EC,#EBF7FF);border:2px solid #107E3E;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <span style="font-size:22px;line-height:1;">📋</span>
+                <div>
+                  <div style="font-size:13px;font-weight:800;color:#107E3E;">Data loaded — review the snapshot below, then publish when ready</div>
+                  <div style="font-size:11px;color:#1D6B2E;margin-top:3px;">Once you have verified the rows, publish the planning version in SAP Analytics Cloud to make it visible to all users.</div>
+                </div>
+              </div>
+              <button class="btn" id="publishReadyBtn" type="button" style="background:#107E3E;color:#FFF;padding:8px 16px;font-size:12px;font-weight:700;border-radius:6px;white-space:nowrap;border:none;cursor:pointer;">📢 How to Publish</button>
+            </div>
+            ` : ''}
+
             <div class="subtabs-bar">
               <button class="audit-subtab ${this._auditDetailSubTab === 'dataTab' ? 'active' : ''}" data-subtab="dataTab" type="button">📊 Consolidated Data Snapshot (${snapshotRows.length})</button>
               <button class="audit-subtab ${this._auditDetailSubTab === 'changesTab' ? 'active' : ''}" data-subtab="changesTab" type="button">🛠️ User Edits, Auto-Fixes & Checks (${changeLog.length})</button>
@@ -3281,6 +3347,7 @@ class ExcelUploaderPro extends HTMLElement {
         ${this._isLoading ? '<div class="busy-overlay"><div class="spinner"></div><div style="font-weight:700;color:#1D2D3E;">' + this._esc(this._loadingText) + '</div></div>' : ''}
         ${this._renderHelpModal()}
         ${this._renderChangelogModal()}
+        ${this._renderPublishModal()}
 
         <div class="sap-header">
           <div class="sap-brand">
