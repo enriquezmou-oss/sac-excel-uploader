@@ -19,7 +19,7 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.9.5';
+const _EPM_VERSION = '3.9.6';
 
 const _EPM_CHANGELOG = [
   { v: '3.9.5', date: '2026-11-24', title: 'Update/Append: data existence check with confirmation dialog',
@@ -297,6 +297,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._sacDimLoading       = false;
     this._sacDimError         = '';
     this._sacDimPanelOpen     = true;
+    this._existingDataInfo    = null; // set by SAC story script via existingDataInfo property
     this._ensureXLSX();
     if (this._sacModelId) this._fetchModelInfo();
     this._render();
@@ -352,6 +353,20 @@ class ExcelUploaderPro extends HTMLElement {
     if (v !== this._sacTenantUrl) {
       this._sacTenantUrl = v;
       this._storageSet('sac_dis_tenant_url', v || null);
+    }
+  }
+
+  // ── SAC story bridge: existingDataInfo ────────────────────────────────────────
+  // Set by a SAC Application script reading Table_1 data:
+  //   ExcelUploaderPro_1.existingDataInfo = JSON.stringify({rowCount: N, hasData: true/false});
+  // The widget shows this in the Update/Append confirmation dialog.
+  get existingDataInfo() { return this._existingDataInfo ? JSON.stringify(this._existingDataInfo) : ''; }
+  set existingDataInfo(val) {
+    try {
+      const parsed = val ? JSON.parse(String(val)) : null;
+      this._existingDataInfo = parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_) {
+      this._existingDataInfo = null;
     }
   }
 
@@ -1146,23 +1161,35 @@ class ExcelUploaderPro extends HTMLElement {
       return obj;
     });
 
-    // ── 1b. For Update/Append: always confirm before uploading ──────────────────
-    // OData Export and DIS GET endpoints both unavailable on this tenant (400/404).
-    // Always show a confirmation so the user knows what DIS will do.
+    // ── 1b. For Update/Append: data check + confirm before uploading ─────────────
+    // Primary source: existingDataInfo property set by SAC story script (Table_1).
+    // Fallback: OData Export endpoint (returns 400 on most tenants — requires OAuth).
     const isNonReplace = this._importMethod === 'update' || this._importMethod === 'append';
     if (isNonReplace) {
       const modeLabel  = this._importMethod === 'update' ? 'Update' : 'Append';
       const ver        = this._targetVersion || '—';
       const dat        = this._targetDate    || '—';
       let rowCountLine = '';
-      // Try to read existing data — show count if available, otherwise skip silently
-      _setLoading('🔍 Checking for existing data for Version=' + ver + ' / Date=' + dat + '…');
-      try {
-        const existing = await this._fetchExistingDataOData(ver === '—' ? null : ver, dat === '—' ? null : dat);
-        if (existing && existing.length > 0) {
-          rowCountLine = '📊 ' + existing.length + ' existing row(s) found.\n\n';
+
+      if (this._existingDataInfo && typeof this._existingDataInfo === 'object') {
+        // ── Source A: SAC Table_1 bridge (injected by story script) ──────────────
+        const rc = Number(this._existingDataInfo.rowCount ?? 0);
+        if (rc > 0) {
+          rowCountLine = '📊 ' + rc + ' existing row(s) found in model (via story table).\n\n';
+        } else if (this._existingDataInfo.hasData === false) {
+          rowCountLine = '✅ No existing data found for this Version/Period (via story table).\n\n';
         }
-      } catch (_) {}
+      } else {
+        // ── Source B: OData Export endpoint fallback ──────────────────────────────
+        _setLoading('🔍 Checking for existing data for Version=' + ver + ' / Date=' + dat + '…');
+        try {
+          const existing = await this._fetchExistingDataOData(ver === '—' ? null : ver, dat === '—' ? null : dat);
+          if (existing && existing.length > 0) {
+            rowCountLine = '📊 ' + existing.length + ' existing row(s) found.\n\n';
+          }
+        } catch (_) {}
+      }
+
       const proceed = window.confirm(
         '⚠️ ' + modeLabel + ' — confirm upload\n\n' +
         rowCountLine +

@@ -5,6 +5,24 @@ Format: **[version] — date — summary**
 
 ---
 
+## [3.9.6] — 2026-11-24
+
+### SAC story bridge: data check via Table_1
+
+- **New property `existingDataInfo`** — a SAC Application script can inject the row count from any table widget (e.g. Table_1) into the uploader before an Upload/Append operation. The widget reads this value in priority over the OData Export endpoint.
+- **Confirmation dialog enhanced** — if `existingDataInfo` carries `{rowCount: N, hasData: true/false}`, the dialog shows `📊 N existing row(s) found in model (via story table)` or `✅ No existing data found` before asking the user to confirm or cancel.
+- **OData fallback kept** — if `existingDataInfo` is not set (older stories without script), the widget still tries the OData Export endpoint as before (returns 400 on most tenants without OAuth, so the dialog shows no row count — but still asks for confirmation).
+- **SAC script to wire up** — in SAC Application Builder, add this to `Table_1 → onResultChanged`:
+  ```javascript
+  // Replace 'ExcelUploaderPro_1' with your widget's name in the story
+  ExcelUploaderPro_1.existingDataInfo = JSON.stringify({
+    rowCount: Table_1.getDataBinding().getData().rows.length,
+    hasData:  Table_1.getDataBinding().getData().rows.length > 0
+  });
+  ```
+
+---
+
 ## [3.9.5] — 2026-11-24
 
 ### Update/Append: data existence check with confirmation dialog
