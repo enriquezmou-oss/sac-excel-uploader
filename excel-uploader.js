@@ -19,9 +19,21 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.9.3';
+const _EPM_VERSION = '3.9.4';
 
 const _EPM_CHANGELOG = [
+  { v: '3.9.4', date: '2026-11-24', title: '9 bug fixes: merge safety, double upload, regex errors, ID column, Audit colspan, blur-before-sync',
+    items: [
+      'Fix: step 4 data re-upload removed — no longer fires unless job status is explicitly READY_FOR_DATA (single-step CSV POST in step 3 already uploads data).',
+      'Fix: _mergePlanningData — Append mode uses case-insensitive column lookup for measure accumulation; early exit if no model dimensions loaded.',
+      'Fix: _mergeWarningMsg now shown as a warning toast 3.5s after the success toast when OData fetch fails.',
+      'Fix: _fetchModelDimensions() now called automatically after model state becomes ok (both 404 and success branches of _fetchModelInfo).',
+      'Fix: ID column can now be deleted; _columnMapping and _disExcludedCols cleaned up on column removal.',
+      'Fix: Audit Monitor empty-state colspan corrected from 9 to 11.',
+      'Fix: active cell blur() added before Synchronize reads rows — last edit is always captured.',
+      'Fix: Model Picker dropdown closes when user clicks outside it.',
+      'Fix: REGEX validation reports invalid regex syntax in the cell instead of silently passing.'
+    ] },
   { v: '3.9.3', date: '2026-11-24', title: 'Fix: Update/Append — client-side merge (DIS v1 always Replaces)',
     items: ['Root cause confirmed: DIS v1 ignores writeBackMode/importMode/writeBack JSON body params — always replaces data for the uploaded Version+Period.',
             'Fix: for Update/Append modes, the widget now fetches existing data via OData export before uploading, merges the datasets in memory, then does a single Replace with the merged complete dataset.',
@@ -531,6 +543,7 @@ class ExcelUploaderPro extends HTMLElement {
         // SAC DIS metadata endpoint not available — try to find description in models list
         this._sacModelState = 'ok';
         this._sacModelName  = this._sacModelId;
+        this._fetchModelDimensions().catch(() => {});
         if (!this._sacModelDesc) {
           const listResp = await fetch(base + '/api/v1/dataimport/models', {
             credentials: 'include',
@@ -559,6 +572,7 @@ class ExcelUploaderPro extends HTMLElement {
         const meta = await resp.json().catch(() => ({}));
         this._sacModelName  = meta.description || meta.name || this._sacModelId;
         this._sacModelState = 'ok';
+        this._fetchModelDimensions().catch(() => {});
         // populate description for MODEL NAME display field
         if (meta.description && meta.description !== this._sacModelId) {
           this._sacModelDesc = meta.description;
@@ -1002,6 +1016,10 @@ class ExcelUploaderPro extends HTMLElement {
       .map(k => k + '\x00' + (row[k] ?? ''))
       .join('\x01');
     const uploadedMap = new Map(uploadedRows.map(r => [makeKey(r), r]));
+    if (!dimensions || dimensions.length === 0) {
+      console.warn('[Merge] No model dimensions loaded — merge skipped, returning uploaded rows only');
+      return uploadedRows;
+    }
     if (mode === 'update') {
       const kept = existingRows
         .filter(r => !uploadedMap.has(makeKey(r)))
@@ -1018,7 +1036,10 @@ class ExcelUploaderPro extends HTMLElement {
           const existing = existingMap.get(key);
           for (const [col, val] of Object.entries(uploaded)) {
             if (measureSet.has(col.toUpperCase())) {
-              existing[col] = String((parseFloat(existing[col] || 0) || 0) + (parseFloat(val || 0) || 0));
+              const existKey = Object.keys(existing).find(k => k.toUpperCase() === col.toUpperCase()) || col;
+              const ev = parseFloat(existing[existKey] || 0) || 0;
+              const uv = parseFloat(val || 0) || 0;
+              existing[existKey] = String(ev + uv);
             }
           }
         } else {
@@ -1166,7 +1187,7 @@ class ExcelUploaderPro extends HTMLElement {
     const jobInitStatus = ((jobCheckBody.d || jobCheckBody).jobStatus || (jobCheckBody.d || jobCheckBody).status || '').toUpperCase();
     console.log('[DIS] job initial status:', jobInitStatus || '(unknown)');
 
-    if (jobInitStatus === 'READY_FOR_DATA' || !jobInitStatus) {
+    if (jobInitStatus === 'READY_FOR_DATA') {
       let dataUploaded = false;
       // Try SAP-provided jobURL first, then canonical /jobs/{id}, then /jobs/{id}/data
       const dataUrls = [jobUrl, DIS + '/jobs/' + jobId, DIS + '/jobs/' + jobId + '/data'].filter(Boolean);
@@ -1681,6 +1702,13 @@ class ExcelUploaderPro extends HTMLElement {
     if (browseModelsBtn) {
       browseModelsBtn.addEventListener('click', () => this._fetchSacModels());
     }
+    document.addEventListener('click', (e) => {
+      const picker = this._shadow && this._shadow.getElementById('modelPickerDropdown');
+      const btn    = this._shadow && this._shadow.getElementById('browseModelsBtn');
+      if (picker && !picker.contains(e.target) && e.target !== btn) {
+        picker.style.display = 'none';
+      }
+    });
 
     const sacDimPanelHeader = shadow.getElementById('sacDimPanelHeader');
     if (sacDimPanelHeader) {
@@ -1995,8 +2023,11 @@ class ExcelUploaderPro extends HTMLElement {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const colToRemove = e.currentTarget.dataset.col;
-        if (colToRemove === 'ID') { this._notify('Primary ID column cannot be removed.', 'error'); return; }
         this._requiredColumns = this._requiredColumns.filter(c => c !== colToRemove);
+        const m = { ...(this._columnMapping || {}) }; delete m[colToRemove]; this._columnMapping = m;
+        const ex = (this._disExcludedCols || []).filter(c => c !== colToRemove); this._disExcludedCols = ex;
+        this._storageSet('sac_column_mapping', this._columnMapping);
+        this._storageSet('sac_dis_excluded_cols', this._disExcludedCols);
         this._storageSet('sac_required_cols', this._requiredColumns);
         this._syncExportColumnsWithSchema(this._requiredColumns);
         if (!this._requiredColumns.includes(this._bulkCol)) this._bulkCol = this._requiredColumns[0] || 'ID';
@@ -2374,6 +2405,7 @@ class ExcelUploaderPro extends HTMLElement {
 
     if (finishBtn) {
       finishBtn.addEventListener('click', async () => {
+        if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
         const stats = this._getAlertStats();
         if (!this._targetVersion || !this._targetDate) {
           this._notify('⚠️ Set the Version and Period (🎯 SAC Load Target) before synchronizing.', 'error');
@@ -2535,6 +2567,10 @@ class ExcelUploaderPro extends HTMLElement {
           const infoRows = finalRec?.disWrittenRows != null ? ' — ' + finalRec.disWrittenRows + ' rows written' : '';
           const deltaNote = this._loadStrategy === 'DELTA' ? ' · Delta: matching records updated, new ones inserted, other existing data preserved' : '';
           this._notify('🟢 LOAD COMPLETE — ' + loadId + ' · ' + this._loadStrategy + infoRows + ' → SAP Analytics Cloud ✅' + deltaNote, 'success');
+          if (this._mergeWarningMsg) {
+            setTimeout(() => this._notify('⚠️ Merge warning: ' + this._mergeWarningMsg, 'warning'), 3500);
+            this._mergeWarningMsg = '';
+          }
         } else if (finalRec?.disStatus === 'PARTIAL') {
           const reason = finalRec.disError ? ' · ' + finalRec.disError.slice(0, 120) : '';
           this._notify('⚠️ PARTIAL LOAD — ' + loadId + ': ' + (finalRec.disWrittenRows || '0') + ' written, ' + (finalRec.disFailedRows || '?') + ' rejected. Check the audit log.' + reason, 'warning');
@@ -2779,7 +2815,7 @@ class ExcelUploaderPro extends HTMLElement {
         } else if (rule.type === 'STARTS_WITH' && !rawVal.toUpperCase().startsWith(rule.param.toUpperCase())) {
           failed = true; failMsg = 'Must start with ' + rule.param;
         } else if (rule.type === 'REGEX') {
-          try { if (!(new RegExp(rule.param)).test(rawVal)) { failed = true; failMsg = 'Invalid pattern (' + rule.param + ')'; } } catch (e) {}
+          try { if (!(new RegExp(rule.param)).test(rawVal)) { failed = true; failMsg = 'Pattern mismatch (' + rule.param + ')'; } } catch (e) { failed = true; failMsg = 'Invalid regex: ' + e.message; }
         } else if (rule.type === 'ASSISTED_CODE') {
           try { if (!this._evalAssistedCode(rule.param, row, col, rule.id + '_p')) { failed = true; failMsg = rule.desc || ('Formula failed: ' + rule.param); } }
           catch (e) { failed = true; failMsg = 'Code syntax error: ' + e.message; }
@@ -3532,7 +3568,7 @@ class ExcelUploaderPro extends HTMLElement {
                 </td>
               </tr>
             `).join('') : `
-              <tr><td colspan="9" style="text-align:center;padding:36px;color:#556B82;">No planning loads registered yet. Use the export buttons above to download a template/draft audit report or complete an upload in the Wizard.</td></tr>
+              <tr><td colspan="11" style="text-align:center;padding:36px;color:#556B82;">No planning loads registered yet. Use the export buttons above to download a template/draft audit report or complete an upload in the Wizard.</td></tr>
             `}
           </tbody>
         </table>
