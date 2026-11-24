@@ -52,41 +52,41 @@ const _EPM_CHANGELOG = [
             'Delta load strategy now shows ⚠️ warning badge: "replaces matching records, does not sum amounts".',
             'Fixed misleading Delta description ("Appends / incremental update" → "Replaces matching key records").',
             'Delta console.log warning added in _callDISApi to surface the replace-not-sum behavior in devtools.'] },
-  { v: '3.4.0', date: '2026-11-23', title: 'Detección de filas rechazadas por SAC DIS (invalidrecords)',
-    items: ['Tras COMPLETED, el widget consulta GET /jobs/{jobId}/invalidrecords.',
-            'Si hay filas rechazadas: estado cambia a "⚠️ CARGA PARCIAL", toast muestra el motivo.',
-            'El detalle del auditor muestra el mensaje de error DIS en un bloque monospace.',
-            'Detecta casos como "miembro de dimensión inválido" (ej: CC_FIN_02) que SAC DIS rechaza silenciosamente.'] },
-  { v: '3.3.1', date: '2026-11-23', title: 'Fix: 3 bugs — doble render DIS error, doble render addConvRule, asignación duplicada targetDate',
-    items: ['Elimina this._render() redundante tras this._notify() en el catch de DIS error (ya re-renderizaba).',
-            'Elimina this._render() redundante tras this._notify() en el handler de addConvRuleBtn.',
-            'Elimina asignación duplicada de this._targetDate en el listener del campo PERIOD.'] },
-  { v: '3.3.0', date: '2026-11-23', title: 'MODEL NAME siempre visible + mensajes de auditoría con semáforos',
-    items: ['MODEL NAME siempre muestra la descripción sin filtrado por similitud con el ID.',
-            '_updateModelDesc() y la plantilla eliminan la lógica "show" — siempre se muestra.',
-            'Estado de carga en el auditor: "🟢 CARGA COMPLETA", "⚠️ CARGA PARCIAL", "❌ ERROR DIS".',
-            'Toast de éxito: "🟢 CARGA COMPLETA — LOAD-XXXXX · FULL — N filas grabadas → SAC".',
-            'Bloque DIS en detalle de auditoría rediseñado con señales semafóricas (punto de color + borde grueso).'] },
-  { v: '3.2.0', date: '2026-11-23', title: 'Version y Date visibles en Column Mapping',
-    items: ['Version y Date aparecen en la tabla de Column Mapping con fondo verde y etiqueta "← SAC Load Target".',
-            'Filas bloqueadas (🔒) — sus valores vienen siempre del campo VERSION y PERIOD del widget.',
-            'Solo se muestran si los campos VERSION o PERIOD están rellenos.'] },
-  { v: '3.1.1', date: '2026-11-23', title: 'Usar jobURL de SAP para upload de datos',
-    items: ['Extrae jobURL del body de la respuesta de creación del job.',
-            'Intenta POST al jobURL primero (lo que SAP mismo devuelve como URL canónica).',
-            'Fallback: /jobs/{id} y /jobs/{id}/data si jobURL falla con 404/405.'] },
-  { v: '3.1.0', date: '2026-11-23', title: 'Fix DIS two-step: endpoint correcto + abort si sin datos',
-    items: ['Cambia endpoint de upload de /jobs/{id}/data a /jobs/{id} (endpoint canónico SAP DIS SDK).',
-            'Fallback: si /jobs/{id} devuelve 405, intenta /jobs/{id}/data automáticamente.',
-            'Poll aborta a los 15s si el job sigue en READY_FOR_DATA (evita bloqueo infinito de UI).',
-            'Log mejorado: "[DIS] data upload jobId HTTP: X" y "[DIS] data upload jobId/data HTTP: X".'] },
+  { v: '3.4.0', date: '2026-11-23', title: 'Detection of rows rejected by SAC DIS (invalidrecords)',
+    items: ['After COMPLETED, the widget queries GET /jobs/{jobId}/invalidrecords.',
+            'If rows are rejected: status changes to "⚠️ PARTIAL LOAD", toast shows the reason.',
+            'Audit detail shows the DIS error message in a monospace block.',
+            'Detects cases like "invalid dimension member" (e.g. CC_FIN_02) that SAC DIS rejects silently.'] },
+  { v: '3.3.1', date: '2026-11-23', title: 'Fix: 3 bugs — double render DIS error, double render addConvRule, duplicate targetDate assignment',
+    items: ['Removed redundant this._render() after this._notify() in DIS error catch (already re-rendered).',
+            'Removed redundant this._render() after this._notify() in addConvRuleBtn handler.',
+            'Removed duplicate assignment of this._targetDate in PERIOD field listener.'] },
+  { v: '3.3.0', date: '2026-11-23', title: 'MODEL NAME always visible + audit messages with semaphore colours',
+    items: ['MODEL NAME always shows the description without similarity filtering against the ID.',
+            '_updateModelDesc() and template remove the "show" logic — always rendered.',
+            'Load status in audit: "🟢 FULL LOAD", "⚠️ PARTIAL LOAD", "❌ DIS ERROR".',
+            'Success toast: "🟢 FULL LOAD — LOAD-XXXXX · FULL — N rows written → SAC".',
+            'DIS block in audit detail redesigned with semaphore signals (colour dot + thick border).'] },
+  { v: '3.2.0', date: '2026-11-23', title: 'Version and Date visible in Column Mapping',
+    items: ['Version and Date appear in the Column Mapping table with green background and "← SAC Load Target" label.',
+            'Locked rows (🔒) — their values always come from the VERSION and PERIOD fields.',
+            'Only shown when VERSION or PERIOD fields are filled.'] },
+  { v: '3.1.1', date: '2026-11-23', title: 'Use SAP jobURL for data upload',
+    items: ['Extracts jobURL from the job creation response body.',
+            'Attempts POST to jobURL first (the canonical URL SAP returns).',
+            'Fallback: /jobs/{id} and /jobs/{id}/data if jobURL fails with 404/405.'] },
+  { v: '3.1.0', date: '2026-11-23', title: 'Fix DIS two-step: correct endpoint + abort if no data',
+    items: ['Changes upload endpoint from /jobs/{id}/data to /jobs/{id} (canonical SAP DIS SDK endpoint).',
+            'Fallback: if /jobs/{id} returns 405, automatically tries /jobs/{id}/data.',
+            'Poll aborts after 15 s if job stays in READY_FOR_DATA (prevents infinite UI block).',
+            'Improved log: "[DIS] data upload jobId HTTP: X" and "[DIS] data upload jobId/data HTTP: X".'] },
   { v: '3.0.1', date: '2026-11-23', title: 'Bug fixes: double render, poll match, clear button',
     items: ['Fix double _render() after Transform & Convert — _notify() already re-renders.',
             'Fix DIS poll failure detection — uses startsWith instead of strict equality (catches UPLOAD_FAILED variants).',
             '✕ Clear button now visible in mapping rows — removes custom name or exclusion for that column.'] },
   { v: '3.0.0', date: '2026-11-23', title: 'Mapping feedback + toast confirmations',
-    items: ['💾 Apply Mapping shows toast: "✅ Mapeo guardado — X columnas mapeadas" and scrolls to Step 1 if no rows loaded.',
-            '⚡ Defaults shows toast: "⚡ Mapeo por defecto aplicado" after auto-mapping.',
+    items: ['💾 Apply Mapping shows toast: "✅ Mapping saved — X/N columns mapped" and scrolls to Step 1 if no rows loaded.',
+            '⚡ Defaults shows toast: "⚡ Default mapping applied" after auto-mapping.',
             'No visible changes if 0 columns are loaded yet — toast shows how many columns were mapped.'] },
   { v: '2.9.0', date: '2026-11-23', title: 'Column Mapping simple + fix DIS two-step upload',
     items: ['New 🔗 Column Mapping panel: text inputs per file column, no model properties loaded.',
@@ -665,28 +665,55 @@ class ExcelUploaderPro extends HTMLElement {
         return uuid;
       }
     } catch (_) {}
-    // Try SAC FPA session endpoint — also captures the logged-in user
+    const sessionBase = (base || window.location.origin);
+    // SAC FPA session endpoint accepts GET with ?request= JSON param
+    const sessionActions = [
+      '{"action":"getUserInfo","data":{}}',
+      '{"action":"getState","data":{}}',
+      '{"action":"getUser","data":{}}',
+      '{}',
+    ];
+    for (const action of sessionActions) {
+      try {
+        const url = sessionBase + '/sap/fpa/services/rest/session?request=' + encodeURIComponent(action);
+        const r = await fetch(url, { credentials: 'include', headers: { 'Accept': 'application/json' } });
+        if (r.ok) {
+          const data = await r.json().catch(() => null);
+          if (data) {
+            const uuid = data?.tenantId || data?.tenant || data?.id || data?.data?.tenantId
+              || data?.state?.tenantId || null;
+            if (uuid && /^[0-9a-f-]{36}$/i.test(uuid)) this._cachedTenantUUID = uuid;
+            const DEFAULT_USER = 'SAP User (Planning)';
+            if (this._currentUser === DEFAULT_USER || !this._currentUser) {
+              const u = data?.user?.loginName || data?.user?.name || data?.loginName
+                || data?.userName || data?.user?.email || data?.state?.user?.loginName
+                || data?.data?.user?.loginName || null;
+              if (u) this._currentUser = u;
+            }
+            if (this._cachedTenantUUID) return this._cachedTenantUUID;
+          }
+        }
+      } catch (_) {}
+    }
+    // Try POST to session endpoint as fallback
     try {
-      const r = await fetch((base || window.location.origin) + '/sap/fpa/services/rest/session', {
+      const r = await fetch(sessionBase + '/sap/fpa/services/rest/session', {
+        method: 'POST',
         credentials: 'include',
-        headers: { 'Accept': 'application/json' }
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ action: 'getState', data: {} })
       });
       if (r.ok) {
         const data = await r.json().catch(() => null);
-        const uuid = data?.tenantId || data?.tenant || data?.id || data?.data?.tenantId || null;
-        if (uuid && /^[0-9a-f-]{36}$/i.test(uuid)) {
-          this._cachedTenantUUID = uuid;
-        }
-        // Auto-populate the SAP user from session if still at placeholder default
-        const DEFAULT_USER = 'SAP User (Planning)';
-        if (this._currentUser === DEFAULT_USER || !this._currentUser) {
-          const sessionUser = data?.user?.loginName || data?.user?.name || data?.loginName
-            || data?.userName || data?.user?.email || null;
-          if (sessionUser) {
-            this._currentUser = sessionUser;
+        if (data) {
+          const uuid = data?.tenantId || data?.tenant || data?.id || null;
+          if (uuid && /^[0-9a-f-]{36}$/i.test(uuid)) { this._cachedTenantUUID = uuid; return uuid; }
+          const DEFAULT_USER = 'SAP User (Planning)';
+          if ((this._currentUser === DEFAULT_USER || !this._currentUser)) {
+            const u = data?.user?.loginName || data?.loginName || data?.userName || null;
+            if (u) this._currentUser = u;
           }
         }
-        if (this._cachedTenantUUID) return this._cachedTenantUUID;
       }
     } catch (_) {}
     return null;
@@ -845,7 +872,7 @@ class ExcelUploaderPro extends HTMLElement {
         return match.modelID;
       }
     } catch (_) {}
-    console.warn('[DIS] GUID no resuelto — usando nombre técnico como fallback:', this._sacModelId, '(puede causar [1003])');
+    console.warn('[DIS] GUID not resolved — using technical name as fallback:', this._sacModelId, '(may cause [1003])');
     return this._sacModelId; // fallback: use as-is
   }
 
@@ -910,7 +937,7 @@ class ExcelUploaderPro extends HTMLElement {
     // ── 0. Resolve DIS internal GUID ─────────────────────────────────────────
     _setLoading('🔍 Resolving model ID in SAC DIS…');
     const disModelId = await this._resolveDISModelId();
-    console.log('[DIS] usando modelId:', disModelId, '| técnico:', this._sacModelId, '| GUID en caché:', this._sacDISModelId || '(vacío)');
+    console.log('[DIS] modelId:', disModelId, '| technical:', this._sacModelId, '| cached GUID:', this._sacDISModelId || '(none)');
     if (this._loadStrategy === 'DELTA') {
       console.log('[DIS] Load strategy: DELTA — DIS Update mode: updates matching dimension-key records, inserts new ones, preserves all other existing data');
     }
@@ -944,7 +971,7 @@ class ExcelUploaderPro extends HTMLElement {
     }
     const csvBody = csvLines.join('\n');
     console.log('[DIS] CSV header:', csvLines[0]);
-    console.log('[DIS] CSV rows:', csvLines.length - 1, '| first row:', csvLines[1] || '(vacío)');
+    console.log('[DIS] CSV rows:', csvLines.length - 1, '| first row:', csvLines[1] || '(empty)');
 
     // ── 2. CSRF token ─────────────────────────────────────────────────────────
     _setLoading('🔑 Fetching CSRF token from SAC DIS…');
@@ -954,10 +981,10 @@ class ExcelUploaderPro extends HTMLElement {
       headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json', ...DIS_HEADER }
     });
     const csrfToken = csrfResp.headers.get('x-csrf-token') || csrfResp.headers.get('X-Csrf-Token') || '';
-    console.log('[DIS] CSRF:', csrfToken ? '✅ obtenido' : '❌ vacío (HTTP ' + csrfResp.status + ')');
+    console.log('[DIS] CSRF:', csrfToken ? '✅ obtained' : '❌ empty (HTTP ' + csrfResp.status + ')');
 
     // ── 3. Create job + upload CSV in one POST (body = text/csv) ──────────────
-    _setLoading('📤 Enviando ' + rows.length + ' filas a SAC DIS…');
+    _setLoading('📤 Sending ' + rows.length + ' rows to SAC DIS…');
     const importTypesToTry = [importType, importType === 'privateFactData' ? 'factData' : 'privateFactData'];
     let jobCreateResp, usedImportType;
     const methodParam = this._importMethod && this._importMethod !== 'replace' ? '?method=' + encodeURIComponent(this._importMethod.toUpperCase()) : '';
@@ -1025,7 +1052,7 @@ class ExcelUploaderPro extends HTMLElement {
         try { const b = await dataResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
         throw new Error(msg);
       }
-      if (!dataUploaded) console.warn('[DIS] data upload: ningún endpoint aceptó el CSV (', dataUrls.join(', '), ')');
+      if (!dataUploaded) console.warn('[DIS] data upload: no endpoint accepted the CSV (', dataUrls.join(', '), ')');
     }
 
     // ── 5. Run the job ────────────────────────────────────────────────────────
@@ -1086,7 +1113,7 @@ class ExcelUploaderPro extends HTMLElement {
       // SAC DIS may return OData format { d: { status: ... } } or flat { status: ... }
       const inner  = body.d || body;
       const status = (inner.jobStatus || inner.status || body.jobStatus || body.status || '').toUpperCase();
-      console.log('[DIS poll] attempt', i+1, '— status:', status || '(vacío)', JSON.stringify(inner).slice(0, 120));
+      console.log('[DIS poll] attempt', i+1, '— status:', status || '(empty)', JSON.stringify(inner).slice(0, 120));
       if (targetStatuses.some(s => status === s || status.startsWith(s))) return body;
       if ((failStatuses || []).some(s => status.startsWith(s.toUpperCase()) || s.toUpperCase().startsWith(status))) {
         throw new Error('SAC DIS job ' + status + ': ' + (inner.message || inner.errorMessage || body.message || JSON.stringify(inner).slice(0, 200)));
@@ -1408,7 +1435,7 @@ class ExcelUploaderPro extends HTMLElement {
     const badge = shadow.querySelector('.sac-target-badge');
     if (!badge) return;
     if (!this._targetVersion || !this._targetDate) {
-      badge.innerHTML = '⚠️ Configura Version y Period antes de sincronizar';
+      badge.innerHTML = '⚠️ Set Version and Period before synchronizing';
       badge.style.cssText = 'background:#FFF8E6;color:#B45309;border:1px solid #FCD34D;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;';
       return;
     }
@@ -2213,7 +2240,7 @@ class ExcelUploaderPro extends HTMLElement {
       finishBtn.addEventListener('click', async () => {
         const stats = this._getAlertStats();
         if (!this._targetVersion || !this._targetDate) {
-          this._notify('⚠️ Configura la Version y el Period (🎯 SAC Load Target) antes de sincronizar.', 'error');
+          this._notify('⚠️ Set the Version and Period (🎯 SAC Load Target) before synchronizing.', 'error');
           return;
         }
         if (stats.blockingRows > 0) { this._notify('Cannot synchronize: ' + stats.blockingRows + ' row(s) have BLOCKING alerts.', 'error'); return; }
@@ -3623,7 +3650,7 @@ class ExcelUploaderPro extends HTMLElement {
             </div>
             <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
               ${this._loadStrategy === 'FULL'
-                ? '<span style="background:#EBF5FF;color:#005CB9;border:1px solid #B3D4FF;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">📦 Full — overwrites target slice</span>'
+                ? `<span style="background:#EBF5FF;color:#005CB9;border:1px solid #B3D4FF;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">📦 Full · ${this._importMethod === 'update' ? '✏️ Update' : this._importMethod === 'append' ? '➕ Append' : '🗑️ Replace'}</span>`
                 : '<span style="background:#FFF3CD;color:#8A5700;border:1px solid #FFCC66;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">⚠️ Delta — updates matching records, inserts new ones</span>'}
             </div>
             ${(() => {
@@ -3856,7 +3883,7 @@ class ExcelUploaderPro extends HTMLElement {
                     ? '<span class="sac-target-badge" style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">✅ ' + this._esc(this._targetVersion) + ' · ' + this._esc(this._targetDate) + ' → ' + this._esc(this._sacModelId) + '</span>'
                     : '<span class="sac-target-badge" style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">✅ ' + this._esc(this._targetVersion) + ' · ' + this._esc(this._targetDate) + ' <span style=\'color:#B45309\'>(no Model ID — event only)</span></span>'
                   )
-                : '<span class="sac-target-badge" style="background:#FFF8E6;color:#B45309;border:1px solid #FCD34D;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">⚠️ Configura Version y Period antes de sincronizar</span>'
+                : '<span class="sac-target-badge" style="background:#FFF8E6;color:#B45309;border:1px solid #FCD34D;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">⚠️ Set Version and Period before synchronizing</span>'
               }
             </div>
           </div>
