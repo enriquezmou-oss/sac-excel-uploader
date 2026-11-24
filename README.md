@@ -1,6 +1,6 @@
 # Excel Planning Uploader Pro — SAP Analytics Cloud Custom Widget
 
-> Enterprise-grade Web Component for SAP Analytics Cloud (SAC) **v2.7.3** — Multi-sheet Excel/CSV/TXT consolidation, configurable validation semaphores, Assisted Code Auto-Fix, Full/Delta load engine, **direct DIS write-back to SAC planning models**, drill-down Audit Monitor with multi-format exports, and SAP Fiori Horizon UX.
+> Enterprise-grade Web Component for SAP Analytics Cloud (SAC) **v3.9.2** — Multi-sheet Excel/CSV/TXT consolidation, configurable validation semaphores, Assisted Code Auto-Fix, Full/Delta load engine, **direct DIS write-back to SAC planning models**, drill-down Audit Monitor with multi-format exports, and SAP Fiori Horizon UX.
 
 **Vendor:** Jose Enriquez SixSevenGroup
 

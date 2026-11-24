@@ -5,6 +5,27 @@ Format: **[version] — date — summary**
 
 ---
 
+## [3.9.2] — 2026-11-24
+
+### Fix: import method (Update/Append) always replaced — DIS write mode enforced
+
+- **Root cause** — `?method=UPDATE` URL param is ignored by SAC DIS v1 (always replaces).
+- **Fix** — for Update/Append, POST a JSON settings body to create an empty job. Write mode specified in `writeBackMode`/`importMode`/`writeBack` fields. Replace keeps single-step CSV POST (unchanged).
+- **Headers** — write mode headers (`x-sap-dis-write-mode`, `x-sap-dis-import-mode`) added to the CSV upload step.
+- **Run step** — write mode JSON body also sent on the `/run` call for non-replace modes.
+- **Step 4 guard** — CSV upload now always triggered for Update/Append (previously skipped if initial job status wasn't `READY_FOR_DATA`).
+
+---
+
+## [3.9.1] — 2026-11-24
+
+### All UI messages in English + Full load badge shows method
+
+- All remaining Spanish strings translated to English (console logs, toasts, loading text, `_pollJobStatus` timeout error).
+- Full load strategy badge now shows the active import method: `📦 Full · 🗑️ Replace`, `📦 Full · ✏️ Update`, or `📦 Full · ➕ Append`.
+
+---
+
 ## [3.9.0] — 2026-11-24
 
 ### Auto-load model dimensions via FPA REST · Real SAP user in Audit Monitor

@@ -19,9 +19,19 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.9.0';
+const _EPM_VERSION = '3.9.2';
 
 const _EPM_CHANGELOG = [
+  { v: '3.9.2', date: '2026-11-24', title: 'Fix: import method (Update/Append) always replaced — DIS write mode enforced',
+    items: ['Root cause: SAC DIS v1 ignores ?method= URL param — always replaces regardless.',
+            'Fix: for Update/Append, POST a JSON settings body to create an empty job (write mode in writeBackMode/importMode/writeBack fields). Replace still uses single-step CSV POST.',
+            'Write mode headers (x-sap-dis-write-mode) also added on the CSV upload step.',
+            'JSON body with write mode also sent on the /run step.',
+            'Full load badge now shows the active method: Replace/Update/Append.'] },
+  { v: '3.9.1', date: '2026-11-24', title: 'All UI messages in English',
+    items: ['Translated all remaining Spanish strings: console logs, toasts, loading text, UI badges.',
+            'Full load strategy badge now shows the active import method (Replace / Update / Append).',
+            'Strategy bar badge for Full load: "📦 Full · 🗑️ Replace" / "📦 Full · ✏️ Update" / "📦 Full · ➕ Append".'] },
   { v: '3.9.0', date: '2026-11-24', title: 'Auto-load model dimensions via FPA REST · Real SAP user in Audit',
     items: ['_fetchModelDimensions() now first tries POST /sap/fpa/services/rest/fpa/model — the confirmed working endpoint on this tenant. Payload: {"action":"getDesignTime","data":{"resourceId":"{GUID}","metadata":{},"includeDatasphereInfos":true}}.',
             'New _discoverTenantUUID(): tries SAC global variables (window.__sap_umi_config), then GET /sap/fpa/services/rest/session. Calls the FPA endpoint both with and without ?tenant= param so it works across tenants.',
@@ -923,7 +933,7 @@ class ExcelUploaderPro extends HTMLElement {
         if (arr && arr.length === 0) { loaded = true; rows = []; break; }
       } catch (e) { console.warn('[DeltaPreview] endpoint failed:', e.message); }
     }
-    if (!loaded) error = 'Preview not available on this DIS endpoint. Check data in SAC Modeler → PLAN_CAPEX_PLANNING.';
+    if (!loaded) error = 'Preview not available on this DIS endpoint. Check data in SAC Modeler → ' + (this._sacModelId || 'model') + '.';
     this._deltaPreview = { rows, cols, loading: false, error, loaded };
     this._render();
   }
@@ -1070,7 +1080,7 @@ class ExcelUploaderPro extends HTMLElement {
     const jobInitStatus = ((jobCheckBody.d || jobCheckBody).jobStatus || (jobCheckBody.d || jobCheckBody).status || '').toUpperCase();
     console.log('[DIS] job initial status:', jobInitStatus || '(unknown)');
 
-    if (jobInitStatus === 'READY_FOR_DATA' || !jobInitStatus) {
+    if (isNonReplace || jobInitStatus === 'READY_FOR_DATA' || !jobInitStatus) {
       let dataUploaded = false;
       // Try SAP-provided jobURL first, then canonical /jobs/{id}, then /jobs/{id}/data
       const dataUrls = [jobUrl, DIS + '/jobs/' + jobId, DIS + '/jobs/' + jobId + '/data'].filter(Boolean);
@@ -1173,7 +1183,7 @@ class ExcelUploaderPro extends HTMLElement {
       }
       if (_setLoading) _setLoading('⏳ SAC DIS: ' + (status || 'processing') + '…');
     }
-    throw new Error('Timeout esperando SAC DIS (URL: ' + statusUrl + ')');
+    throw new Error('Timeout waiting for SAC DIS (URL: ' + statusUrl + ')');
   }
 
   // ── Core conversion resolver ─────────────────────────────────────────────────
