@@ -949,27 +949,36 @@ class ExcelUploaderPro extends HTMLElement {
   async _fetchExistingDataOData(version, date) {
     if (!version && !date) return null;
     const base    = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
+    const DIS     = base + '/api/v1/dataimport';
     const modelId = this._sacModelId;
     const guid    = this._sacDISModelId || modelId;
+    const iType   = this._sacImportType || 'privateFactData';
     const filterParts = [];
     if (version) filterParts.push("Version eq '" + version + "'");
     if (date)    filterParts.push("Date eq '" + date + "'");
     const filter = filterParts.join(' and ');
     const guidWithPrefix = guid.startsWith('t.5.') ? guid : ('t.5.' + guid);
+    const vEnc = encodeURIComponent(version || '');
+    const dEnc = encodeURIComponent(date    || '');
     const endpoints = [
+      // OData Export Service
       base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(modelId) + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000',
       base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guid) + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000',
       base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guidWithPrefix) + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000',
+      // DIS GET (same endpoints as Delta Preview, but with $top=50000)
+      DIS + '/models/' + encodeURIComponent(guid)    + '/' + iType + '?Version=' + vEnc + '&Date=' + dEnc + '&$format=json&$top=50000',
+      DIS + '/models/' + encodeURIComponent(modelId) + '/' + iType + '?Version=' + vEnc + '&Date=' + dEnc + '&$format=json&$top=50000',
+      DIS + '/models/' + encodeURIComponent(guid)    + '/data?$filter=' + encodeURIComponent(filter) + '&$top=50000&$format=json',
     ];
     for (const url of endpoints) {
       try {
         const r = await fetch(url, { credentials: 'include', headers: { 'Accept': 'application/json' } });
-        const shortUrl = url.replace(/.*providers\/sac\//, '').split('?')[0];
+        const shortUrl = url.replace(base, '').split('?')[0];
         console.log('[DIS] existing data fetch:', r.status, shortUrl);
         if (!r.ok) continue;
         const data = await r.json().catch(() => null);
         if (!data) continue;
-        const rows = data?.value || data?.d?.results || (Array.isArray(data) ? data : null);
+        const rows = data?.value || data?.d?.results || data?.data || data?.rows || (Array.isArray(data) ? data : null);
         if (rows) {
           const filtered = rows.filter(row => {
             const rv = row?.Version || row?.version || '';
