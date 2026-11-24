@@ -19,9 +19,15 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.6.0';
+const _EPM_VERSION = '3.7.0';
 
 const _EPM_CHANGELOG = [
+  { v: '3.7.0', date: '2026-11-24', title: 'VERSION + PERIOD in Audit Monitor · Delta behavior corrected',
+    items: ['Audit Monitor list now shows VERSION and PERIOD columns for every load record.',
+            'Audit Monitor detail view metrics bar expanded (5 → 7 KPI boxes) to include VERSION and PERIOD.',
+            'VERSION and PERIOD are saved in the audit record at sync time, so they are always accurate even if the config changes later.',
+            'Delta load description corrected: DIS Update mode updates matching dimension-key records, inserts new ones, and preserves all other existing data — it does not delete non-matching rows.',
+            'Delta warning badge updated to: "Updates matching records, inserts new ones — existing data for other keys is preserved".'] },
   { v: '3.6.0', date: '2026-11-24', title: 'Publish-ready banner in Audit Monitor',
     items: ['After a successful DIS load (🟢 LOAD COMPLETE), the Audit Monitor detail view now shows a persistent green banner: "Data loaded — review the snapshot below, then publish when ready".',
             '"📢 How to Publish" button opens a step-by-step guide for publishing planning data in SAP Analytics Cloud.',
@@ -753,7 +759,7 @@ class ExcelUploaderPro extends HTMLElement {
     const disModelId = await this._resolveDISModelId();
     console.log('[DIS] usando modelId:', disModelId, '| técnico:', this._sacModelId, '| GUID en caché:', this._sacDISModelId || '(vacío)');
     if (this._loadStrategy === 'DELTA') {
-      console.log('[DIS] Load strategy: DELTA — note: DIS replaces matching key combinations, does not add amounts to existing values');
+      console.log('[DIS] Load strategy: DELTA — DIS Update mode: updates matching dimension-key records, inserts new ones, preserves all other existing data');
     }
 
     // ── 1. Build CSV (columns + data rows) ───────────────────────────────────
@@ -2095,6 +2101,8 @@ class ExcelUploaderPro extends HTMLElement {
           id: loadId,
           user: this._currentUser,
           loadStrategy: this._loadStrategy,
+          targetVersion: this._targetVersion || '',
+          targetDate: this._targetDate || '',
           dspArtifact: this._dspArtifactSync,
           semaphoreStatus: stats.preventiveRows > 0 ? 'AMBER' : (stats.checkRows > 0 ? 'PURPLE' : 'GREEN'),
           file: fileSummary,
@@ -2184,7 +2192,7 @@ class ExcelUploaderPro extends HTMLElement {
         const finalRec = this._history.find(h => h.id === loadId);
         if (!this._sacModelId || finalRec?.disStatus === 'OK') {
           const infoRows = finalRec?.disWrittenRows != null ? ' — ' + finalRec.disWrittenRows + ' rows written' : '';
-          const deltaNote = this._loadStrategy === 'DELTA' ? ' · Delta: matching records were replaced, not summed' : '';
+          const deltaNote = this._loadStrategy === 'DELTA' ? ' · Delta: matching records updated, new ones inserted, other existing data preserved' : '';
           this._notify('🟢 LOAD COMPLETE — ' + loadId + ' · ' + this._loadStrategy + infoRows + ' → SAP Analytics Cloud ✅' + deltaNote, 'success');
         } else if (finalRec?.disStatus === 'PARTIAL') {
           const reason = finalRec.disError ? ' · ' + finalRec.disError.slice(0, 120) : '';
@@ -2703,7 +2711,7 @@ class ExcelUploaderPro extends HTMLElement {
               <div style="font-size:12px;font-weight:700;color:#7A5A00;margin-bottom:4px;">⚠️ Important notes</div>
               <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;">
                 <li style="font-size:12px;color:#5A4200;line-height:1.5;">You need <em>Create and Edit Stories</em> and <em>Planning</em> permissions to publish.</li>
-                <li style="font-size:12px;color:#5A4200;line-height:1.5;">If you loaded with <strong>DELTA</strong> strategy, publishing replaces only the matching key records — not the full model.</li>
+                <li style="font-size:12px;color:#5A4200;line-height:1.5;">If you loaded with <strong>DELTA</strong> strategy, publishing updates only the matching key records and inserts new ones — non-matching rows in the model are preserved.</li>
                 <li style="font-size:12px;color:#5A4200;line-height:1.5;">If the Publish option is greyed out, contact your SAC administrator to verify your permissions on model <strong>PLAN_CAPEX_PLANNING</strong>.</li>
               </ul>
             </div>
@@ -3015,8 +3023,10 @@ class ExcelUploaderPro extends HTMLElement {
 
             ${this._renderAuditExportConfigurator(cols, true)}
 
-            <div class="metrics-bar" style="grid-template-columns:repeat(5,1fr);">
+            <div class="metrics-bar" style="grid-template-columns:repeat(7,1fr);">
               <div class="metric-box"><div class="metric-title">🔄 Load Strategy</div><div class="metric-val" style="font-size:13px;color:#0064D9;">${this._esc(rec.loadStrategy || 'FULL')}</div></div>
+              <div class="metric-box"><div class="metric-title">🏷️ Version</div><div class="metric-val" style="font-size:13px;color:#1D3A6E;">${this._esc(rec.targetVersion || '—')}</div></div>
+              <div class="metric-box"><div class="metric-title">📅 Period</div><div class="metric-val" style="font-size:13px;color:#5B21B6;">${this._esc(rec.targetDate || '—')}</div></div>
               <div class="metric-box"><div class="metric-title">🕒 Timestamp</div><div class="metric-val" style="font-size:13px;">${this._esc(rec.timestamp)}</div></div>
               <div class="metric-box kpi-ok"><div class="metric-title">✅ Committed Rows</div><div class="metric-val" style="color:#107E3E;">${rec.rows}</div></div>
               <div class="metric-box"><div class="metric-title">✎ Rows Modified</div><div class="metric-val" style="color:#0064D9;">${modifiedRowsCount}</div></div>
@@ -3139,6 +3149,8 @@ class ExcelUploaderPro extends HTMLElement {
             <tr>
               <th>🆔 Load ID</th>
               <th>🔄 Strategy</th>
+              <th>🏷️ Version</th>
+              <th>📅 Period</th>
               <th>👤 SAP User</th>
               <th>📂 Workbooks, Selected Sheets & Comments</th>
               <th>📊 Rows</th>
@@ -3153,6 +3165,8 @@ class ExcelUploaderPro extends HTMLElement {
               <tr class="audit-row-link" data-load-id="${this._esc(h.id)}" style="cursor:pointer;">
                 <td><strong style="color:#0064D9;text-decoration:underline;">${this._esc(h.id)}</strong></td>
                 <td><span style="background:#EBF5FF;color:#005CB9;padding:2px 8px;border-radius:10px;font-weight:700;font-size:11px;">${this._esc(h.loadStrategy || 'FULL')}</span></td>
+                <td><span style="background:#F0F4FF;color:#1D3A6E;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${this._esc(h.targetVersion || '—')}</span></td>
+                <td><span style="background:#F5F0FF;color:#5B21B6;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${this._esc(h.targetDate || '—')}</span></td>
                 <td>${this._esc(h.user)}</td>
                 <td>${this._esc(h.file)}</td>
                 <td><strong>${h.rows}</strong> rows</td>
@@ -3432,7 +3446,7 @@ class ExcelUploaderPro extends HTMLElement {
             <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
               ${this._loadStrategy === 'FULL'
                 ? '<span style="background:#EBF5FF;color:#005CB9;border:1px solid #B3D4FF;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">📦 Full — overwrites target slice</span>'
-                : '<span style="background:#FFF3CD;color:#8A5700;border:1px solid #FFCC66;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">⚠️ Delta — replaces matching records, does not sum</span>'}
+                : '<span style="background:#FFF3CD;color:#8A5700;border:1px solid #FFCC66;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">⚠️ Delta — updates matching records, inserts new ones</span>'}
             </div>
             <div style="width:100%;display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding-top:12px;border-top:1px dashed #D9E0E6;margin-top:4px;">
               <span style="font-weight:800;color:#1D2D3E;font-size:12px;padding-bottom:2px;">🎯 SAC Load Target:</span>
