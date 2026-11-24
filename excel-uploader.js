@@ -1146,30 +1146,35 @@ class ExcelUploaderPro extends HTMLElement {
       return obj;
     });
 
-    // ── 1b. For Update/Append: check if existing data is present and ask for confirmation ──
-    // DIS v1 always does row-level Replace regardless of mode params.
-    // We inform the user before overwriting any existing data.
+    // ── 1b. For Update/Append: always confirm before uploading ──────────────────
+    // OData Export and DIS GET endpoints both unavailable on this tenant (400/404).
+    // Always show a confirmation so the user knows what DIS will do.
     const isNonReplace = this._importMethod === 'update' || this._importMethod === 'append';
     if (isNonReplace) {
-      _setLoading('🔍 Checking for existing data in Version=' + (this._targetVersion || '—') + ' / Date=' + (this._targetDate || '—') + '…');
-      const existing = await this._fetchExistingDataOData(this._targetVersion, this._targetDate);
-      if (existing && existing.length > 0) {
-        const modeLabel = this._importMethod === 'update' ? 'Update' : 'Append';
-        const proceed = window.confirm(
-          '⚠️ Found ' + existing.length + ' existing row(s) for\n' +
-          'Version: ' + (this._targetVersion || '—') + '\n' +
-          'Date:    ' + (this._targetDate    || '—') + '\n\n' +
-          'SAC DIS will replace these rows with the uploaded data.\n' +
-          '(' + modeLabel + ' mode selected)\n\n' +
-          'Continue with upload?'
-        );
-        if (!proceed) {
-          this._isLoading = false;
-          this._render();
-          return;
+      const modeLabel  = this._importMethod === 'update' ? 'Update' : 'Append';
+      const ver        = this._targetVersion || '—';
+      const dat        = this._targetDate    || '—';
+      let rowCountLine = '';
+      // Try to read existing data — show count if available, otherwise skip silently
+      _setLoading('🔍 Checking for existing data for Version=' + ver + ' / Date=' + dat + '…');
+      try {
+        const existing = await this._fetchExistingDataOData(ver === '—' ? null : ver, dat === '—' ? null : dat);
+        if (existing && existing.length > 0) {
+          rowCountLine = '📊 ' + existing.length + ' existing row(s) found.\n\n';
         }
-      } else {
-        console.log('[DIS] No existing data found for Version=' + (this._targetVersion || '—') + ', Date=' + (this._targetDate || '—') + ' — uploading as new records');
+      } catch (_) {}
+      const proceed = window.confirm(
+        '⚠️ ' + modeLabel + ' — confirm upload\n\n' +
+        rowCountLine +
+        'Version : ' + ver + '\n' +
+        'Period  : ' + dat + '\n\n' +
+        'SAC DIS will replace any existing rows whose dimension keys match the uploaded data.\n\n' +
+        'Continue?'
+      );
+      if (!proceed) {
+        this._isLoading = false;
+        this._render();
+        return;
       }
     }
 
@@ -1212,7 +1217,7 @@ class ExcelUploaderPro extends HTMLElement {
         headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
         body: csvBody
       });
-      console.log('[DIS] job create (CSV' + (isNonReplace ? ', client-merged ' + this._importMethod : '') + ')', iType, 'HTTP', r.status);
+      console.log('[DIS] job create (CSV' + (isNonReplace ? ', ' + this._importMethod + ' mode' : '') + ')', iType, 'HTTP', r.status);
       if (r.ok) { jobCreateResp = r; usedImportType = iType; break; }
       let errBody = {};
       try { errBody = await r.clone().json(); } catch (_) {}
