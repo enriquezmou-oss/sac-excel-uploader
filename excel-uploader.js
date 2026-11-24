@@ -19,16 +19,24 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.9.2';
+const _EPM_VERSION = '3.9.3';
 
 const _EPM_CHANGELOG = [
-  { v: '3.9.2', date: '2026-11-24', title: 'Fix: import method (Update/Append) always replaced — DIS write mode enforced',
-    items: ['Root cause: SAC DIS v1 ignores ?method= URL param — always replaces regardless.',
-            'Fix: for Update/Append, POST a JSON settings body to create an empty job (write mode in writeBackMode/importMode/writeBack fields). Replace still uses single-step CSV POST.',
-            'Write mode headers (x-sap-dis-write-mode) also added on the CSV upload step.',
-            'JSON body with write mode also sent on the /run step.',
-            'Full load badge now shows the active method: Replace/Update/Append.'] },
-  { v: '3.9.1', date: '2026-11-24', title: 'All UI messages in English',
+  { v: '3.9.3', date: '2026-11-24', title: 'Fix: Update/Append — client-side merge (DIS v1 always Replaces)',
+    items: ['Root cause confirmed: DIS v1 ignores writeBackMode/importMode/writeBack JSON body params — always replaces data for the uploaded Version+Period.',
+            'Fix: for Update/Append modes, the widget now fetches existing data via OData export before uploading, merges the datasets in memory, then does a single Replace with the merged complete dataset.',
+            'Update merge: existing rows not in the uploaded file are preserved; uploaded rows replace matching ones.',
+            'Append merge: measure values are accumulated for matching dimension keys; new keys are inserted; all other existing rows are kept.',
+            'If existing data cannot be fetched (OData endpoint unavailable), a warning is logged and Replace proceeds as fallback.',
+            'All modes now use the same proven single-step CSV POST flow — the JSON job creation branch has been removed.',
+            'New methods: _fetchExistingDataOData(version, date) and _mergePlanningData(uploadedRows, existingRows, mode, dimensions).'] },
+  { v: '3.9.2', date: '2026-11-24', title: 'Fix: 5 bugs from code review',
+    items: ['Version constant 3.9.0 → 3.9.2 (was not bumped).',
+            'Critical: CSV upload was skipped if job initial status was not exactly READY_FOR_DATA — fixed with isNonReplace guard.',
+            'Spanish timeout message translated to English.',
+            'Hardcoded model name "PLAN_CAPEX_PLANNING" in _fetchDeltaPreview replaced with this._sacModelId.',
+            'README version updated to 3.9.2.'] },
+  { v: '3.9.1', date: '2026-11-24', title: 'All UI messages in English + Full load badge shows method',
     items: ['Translated all remaining Spanish strings: console logs, toasts, loading text, UI badges.',
             'Full load strategy badge now shows the active import method (Replace / Update / Append).',
             'Strategy bar badge for Full load: "📦 Full · 🗑️ Replace" / "📦 Full · ✏️ Update" / "📦 Full · ➕ Append".'] },
@@ -938,6 +946,81 @@ class ExcelUploaderPro extends HTMLElement {
     this._render();
   }
 
+  async _fetchExistingDataOData(version, date) {
+    if (!version && !date) return null;
+    const base    = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
+    const modelId = this._sacModelId;
+    const guid    = this._sacDISModelId || modelId;
+    const filterParts = [];
+    if (version) filterParts.push("Version eq '" + version + "'");
+    if (date)    filterParts.push("Date eq '" + date + "'");
+    const filter = filterParts.join(' and ');
+    const guidWithPrefix = guid.startsWith('t.5.') ? guid : ('t.5.' + guid);
+    const endpoints = [
+      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(modelId) + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000',
+      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guid) + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000',
+      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guidWithPrefix) + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000',
+    ];
+    for (const url of endpoints) {
+      try {
+        const r = await fetch(url, { credentials: 'include', headers: { 'Accept': 'application/json' } });
+        const shortUrl = url.replace(/.*providers\/sac\//, '').split('?')[0];
+        console.log('[DIS] existing data fetch:', r.status, shortUrl);
+        if (!r.ok) continue;
+        const data = await r.json().catch(() => null);
+        if (!data) continue;
+        const rows = data?.value || data?.d?.results || (Array.isArray(data) ? data : null);
+        if (rows) {
+          const filtered = rows.filter(row => {
+            const rv = row?.Version || row?.version || '';
+            const rd = row?.Date    || row?.date    || '';
+            return (!version || rv === version) && (!date || rd === date);
+          });
+          console.log('[DIS] existing data: found', filtered.length, 'rows for Version=' + (version || '*') + ' Date=' + (date || '*'));
+          return filtered;
+        }
+      } catch (_) {}
+    }
+    return null; // null = cannot fetch (vs [] = no existing data)
+  }
+
+  _mergePlanningData(uploadedRows, existingRows, mode, dimensions) {
+    const measureSet = new Set((dimensions || []).filter(d => d.isMeasure).map(d => d.id.toUpperCase()));
+    const autoSet    = new Set(['VERSION', 'DATE']);
+    const makeKey = row => Object.keys(row)
+      .filter(k => !measureSet.has(k.toUpperCase()) && !autoSet.has(k.toUpperCase()))
+      .sort()
+      .map(k => k + '\x00' + (row[k] ?? ''))
+      .join('\x01');
+    const uploadedMap = new Map(uploadedRows.map(r => [makeKey(r), r]));
+    if (mode === 'update') {
+      const kept = existingRows
+        .filter(r => !uploadedMap.has(makeKey(r)))
+        .map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v ?? '')])));
+      return [...kept, ...uploadedRows];
+    }
+    if (mode === 'append') {
+      const existingMap = new Map(
+        existingRows.map(r => [makeKey(r), Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v ?? '')]))])
+      );
+      for (const uploaded of uploadedRows) {
+        const key = makeKey(uploaded);
+        if (existingMap.has(key)) {
+          const existing = existingMap.get(key);
+          for (const [col, val] of Object.entries(uploaded)) {
+            if (measureSet.has(col.toUpperCase())) {
+              existing[col] = String((parseFloat(existing[col] || 0) || 0) + (parseFloat(val || 0) || 0));
+            }
+          }
+        } else {
+          existingMap.set(key, { ...uploaded });
+        }
+      }
+      return [...existingMap.values()];
+    }
+    return uploadedRows;
+  }
+
   async _callDISApi(rows) {
     const base       = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
     const DIS        = base + '/api/v1/dataimport';
@@ -952,26 +1035,54 @@ class ExcelUploaderPro extends HTMLElement {
       console.log('[DIS] Load strategy: DELTA — DIS Update mode: updates matching dimension-key records, inserts new ones, preserves all other existing data');
     }
 
-    // ── 1. Build CSV (columns + data rows) ───────────────────────────────────
-    // Filter out display-only columns that must not be sent to DIS
+    // ── 1. Build SAC-name rows (enables client-side merge), then CSV ──────────
     const disExcluded = new Set(this._disExcludedCols || ['DESCRIPTION']);
     const cols = [...this._requiredColumns].filter(c => !disExcluded.has(c));
     if (this._targetVersion && !cols.includes('Version')) cols.unshift('Version');
     if (this._targetDate    && !cols.includes('Date'))    cols.unshift('Date');
-    // Build reverse mapping: SAC dimension name → Excel column name
     const mapping = this._columnMapping || {};
     const revMap = {};
     Object.entries(mapping).forEach(([excelCol, sacName]) => { revMap[sacName] = excelCol; });
-    // CSV header uses SAC dimension names (apply forward mapping)
     const sacCols = cols.map(c => mapping[c] || c);
-    const csvLines = [sacCols.join(',')];
-    for (const r of rows) {
-      const vals = cols.map(col => {
+
+    // Build rows as SAC-name objects first
+    let sacRows = rows.map(r => {
+      const obj = {};
+      cols.forEach((col, i) => {
         let v;
         if      (col === 'Version') v = this._targetVersion || '';
         else if (col === 'Date')    v = this._targetDate ? String(this._targetDate) : '';
-        else                        v = r[col] ?? r[revMap[col]] ?? ''; // SAC name first, then Excel alias
-        v = String(v).trim();
+        else                        v = r[col] ?? r[revMap[col]] ?? '';
+        obj[sacCols[i]] = String(v).trim();
+      });
+      return obj;
+    });
+
+    // ── 1b. For Update/Append: fetch existing data and merge client-side ───────
+    // DIS v1 ignores writeBackMode/importMode/writeBack JSON body params — always Replace.
+    // Client-side merge: fetch existing → merge in memory → Replace with merged dataset.
+    const isNonReplace = this._importMethod === 'update' || this._importMethod === 'append';
+    this._mergeWarningMsg = '';
+    if (isNonReplace) {
+      _setLoading('🔍 Reading existing data for ' + (this._importMethod === 'update' ? 'Update' : 'Append') + ' merge…');
+      const existing = await this._fetchExistingDataOData(this._targetVersion, this._targetDate);
+      if (existing && existing.length > 0) {
+        sacRows = this._mergePlanningData(sacRows, existing, this._importMethod, this._sacModelDimensions || []);
+        console.log('[DIS] client-side', this._importMethod, 'merge:', existing.length, 'existing +', rows.length, 'uploaded →', sacRows.length, 'rows in merged CSV');
+      } else if (existing === null) {
+        console.warn('[DIS] Cannot read existing data — Upload will Replace. Existing rows for Version=' + (this._targetVersion || '—') + ' Date=' + (this._targetDate || '—') + ' may be overwritten.');
+        this._mergeWarningMsg = 'Could not read existing data to merge — existing rows for this Version+Period may have been replaced.';
+      } else {
+        console.log('[DIS] No existing data for Version=' + (this._targetVersion || '—') + ', Date=' + (this._targetDate || '—') + ' — uploading as new records');
+      }
+    }
+
+    // Build CSV from (merged) sacRows
+    const sacColsFinal = sacRows.length > 0 ? Object.keys(sacRows[0]) : sacCols;
+    const csvLines = [sacColsFinal.join(',')];
+    for (const r of sacRows) {
+      const vals = sacColsFinal.map(col => {
+        let v = String(r[col] ?? '').trim();
         if (v.includes(',') || v.includes('"') || v.includes('\n')) {
           v = '"' + v.replace(/"/g, '""') + '"';
         }
@@ -993,63 +1104,29 @@ class ExcelUploaderPro extends HTMLElement {
     const csrfToken = csrfResp.headers.get('x-csrf-token') || csrfResp.headers.get('X-Csrf-Token') || '';
     console.log('[DIS] CSRF:', csrfToken ? '✅ obtained' : '❌ empty (HTTP ' + csrfResp.status + ')');
 
-    // ── 3. Create job ─────────────────────────────────────────────────────────
-    // For Update/Append: POST JSON settings body → DIS creates empty job (READY_FOR_DATA).
-    //   Write mode set via "writeBackMode" (DIS v1 canonical) + fallback params.
-    // For Replace: POST CSV directly (single-step, existing proven flow).
-    _setLoading('📤 Sending ' + rows.length + ' rows to SAC DIS…');
+    // ── 3. Create job + upload data (single-step CSV POST) ───────────────────
+    // Write mode (Update/Append) is handled client-side in step 1b — DIS v1 always Replaces.
+    _setLoading('📤 Sending ' + sacRows.length + ' rows to SAC DIS…');
     const importTypesToTry = [importType, importType === 'privateFactData' ? 'factData' : 'privateFactData'];
     let jobCreateResp, usedImportType;
 
-    const isNonReplace = this._importMethod === 'update' || this._importMethod === 'append';
-    // DIS v1 write mode mapping
-    const DIS_MODE_MAP = { replace: 'REPLACE', update: 'MERGE', append: 'APPEND' };
-    const disWriteMode = DIS_MODE_MAP[this._importMethod] || 'REPLACE';
-
     for (const iType of importTypesToTry) {
-      if (isNonReplace) {
-        // ── Non-replace: create empty job with JSON settings body (write mode in body) ──
-        const jobSettingsBody = JSON.stringify({
-          importJobSettings: { containsHeader: true, delimiter: ',' },
-          writeBackMode:  disWriteMode,   // SAP DIS v1 canonical
-          importMode:     disWriteMode,   // alternative field name used by some versions
-          writeBack:      disWriteMode,   // another variant seen in SDK examples
-        });
-        const r = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + iType, {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken, ...DIS_HEADER },
-          body: jobSettingsBody
-        });
-        console.log('[DIS] job create (JSON, mode=' + disWriteMode + ')', iType, 'HTTP', r.status);
-        if (r.ok) { jobCreateResp = r; usedImportType = iType; break; }
-        // If JSON creation fails, fall through to CSV single-step as last resort
-        const errClone = r.clone();
-        let errBody = {};
-        try { errBody = await errClone.json(); } catch (_) {}
-        const errMsg = JSON.stringify(errBody);
-        if (r.status !== 404 && !errMsg.includes('1704-1801-3304')) {
-          const msg = errBody?.error?.message || errBody?.message || errBody?.errorDetails?.[0]?.message || 'Job create HTTP ' + r.status;
-          throw new Error(msg);
-        }
-      } else {
-        // ── Replace: single-step CSV upload (proven flow) ──────────────────────
-        const r = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + iType, {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
-          body: csvBody
-        });
-        console.log('[DIS] job create (CSV, Replace)', iType, 'HTTP', r.status);
-        if (r.ok) { jobCreateResp = r; usedImportType = iType; break; }
-        let errBody = {};
-        try { errBody = await r.clone().json(); } catch (_) {}
-        const errMsg = JSON.stringify(errBody);
-        console.log('[DIS] POST', iType, 'HTTP', r.status, '| error body:', errMsg.slice(0, 400));
-        if (r.status !== 404 && !errMsg.includes('1704-1801-3304')) {
-          const msg = errBody?.error?.message || errBody?.message || errBody?.errorDetails?.[0]?.message || 'Upload+Create HTTP ' + r.status;
-          throw new Error(msg);
-        }
-        jobCreateResp = r;
+      const r = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + iType, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
+        body: csvBody
+      });
+      console.log('[DIS] job create (CSV' + (isNonReplace ? ', client-merged ' + this._importMethod : '') + ')', iType, 'HTTP', r.status);
+      if (r.ok) { jobCreateResp = r; usedImportType = iType; break; }
+      let errBody = {};
+      try { errBody = await r.clone().json(); } catch (_) {}
+      const errMsg = JSON.stringify(errBody);
+      console.log('[DIS] POST', iType, 'HTTP', r.status, '| error body:', errMsg.slice(0, 400));
+      if (r.status !== 404 && !errMsg.includes('1704-1801-3304')) {
+        const msg = errBody?.error?.message || errBody?.message || errBody?.errorDetails?.[0]?.message || 'Upload+Create HTTP ' + r.status;
+        throw new Error(msg);
       }
+      jobCreateResp = r;
     }
     if (!jobCreateResp?.ok) {
       let msg = 'Upload+Create HTTP ' + (jobCreateResp?.status || '?');
@@ -1080,7 +1157,7 @@ class ExcelUploaderPro extends HTMLElement {
     const jobInitStatus = ((jobCheckBody.d || jobCheckBody).jobStatus || (jobCheckBody.d || jobCheckBody).status || '').toUpperCase();
     console.log('[DIS] job initial status:', jobInitStatus || '(unknown)');
 
-    if (isNonReplace || jobInitStatus === 'READY_FOR_DATA' || !jobInitStatus) {
+    if (jobInitStatus === 'READY_FOR_DATA' || !jobInitStatus) {
       let dataUploaded = false;
       // Try SAP-provided jobURL first, then canonical /jobs/{id}, then /jobs/{id}/data
       const dataUrls = [jobUrl, DIS + '/jobs/' + jobId, DIS + '/jobs/' + jobId + '/data'].filter(Boolean);
@@ -1090,8 +1167,6 @@ class ExcelUploaderPro extends HTMLElement {
           headers: {
             'Content-Type': 'text/csv',
             'x-csrf-token': csrfToken,
-            // Pass write mode as header fallback — honored by some DIS versions
-            ...(isNonReplace ? { 'x-sap-dis-write-mode': disWriteMode, 'x-sap-dis-import-mode': disWriteMode } : {}),
             ...DIS_HEADER
           },
           body: csvBody
@@ -1109,19 +1184,11 @@ class ExcelUploaderPro extends HTMLElement {
 
     // ── 5. Run the job ────────────────────────────────────────────────────────
     _setLoading('🚀 Applying data to model ' + this._sacModelId + '…');
-    const runBody = isNonReplace
-      ? JSON.stringify({ writeBackMode: disWriteMode, importMode: disWriteMode, writeBack: disWriteMode })
-      : undefined;
     const runResp = await fetch(DIS + '/jobs/' + jobId + '/run', {
       method: 'POST', credentials: 'include',
-      headers: {
-        'x-csrf-token': csrfToken,
-        ...(isNonReplace ? { 'Content-Type': 'application/json' } : {}),
-        ...DIS_HEADER
-      },
-      ...(runBody ? { body: runBody } : {})
+      headers: { 'x-csrf-token': csrfToken, ...DIS_HEADER }
     });
-    console.log('[DIS] run HTTP:', runResp.status, isNonReplace ? '(mode=' + disWriteMode + ')' : '');
+    console.log('[DIS] run HTTP:', runResp.status);
     if (!runResp.ok && runResp.status !== 405 && runResp.status !== 412) {
       let msg = 'Run HTTP ' + runResp.status;
       try { const b = await runResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
