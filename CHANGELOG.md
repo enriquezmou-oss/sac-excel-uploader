@@ -5,7 +5,20 @@ Format: **[version] — date — summary**
 
 ---
 
-## [2.7.3] — 2026-11-23
+## [3.9.0] — 2026-11-24
+
+### Auto-load model dimensions via FPA REST · Real SAP user in Audit Monitor
+
+- **FPA REST as first priority** — `_fetchModelDimensions()` now POSTs to `/sap/fpa/services/rest/fpa/model` as the first attempt. Payload: `{"action":"getDesignTime","data":{"resourceId":"{DIS_GUID}","metadata":{},"includeDatasphereInfos":true}}`. This endpoint is confirmed working on this tenant and returns the full `DIMENSION` array.
+- **`_parseDimensionsFromFPA()`** — new parser for FPA REST response format: `DIMENSION[].metadata.id.name` → dimension ID; `DIMENSION[].data.type` → type (`VersionDim` → isAuto, `TimeHANA` → isAuto).
+- **`_discoverTenantUUID()`** — new discovery helper: tries SAC global variables (`window.__sap_umi_config`, `window.sap.umi.config`) first, then `GET /sap/fpa/services/rest/session`. Tenant UUID cached in `_cachedTenantUUID`. FPA endpoint called both with `?tenant=` and without, so it works across tenants.
+- **DIS GET fallback** — 10 DIS endpoint variants kept as fallback in case FPA REST is unavailable.
+- **Real SAP user in Audit Monitor** — `_discoverTenantUUID()` also parses `loginName`/`userName` from the session response. If `currentUser` is still the default placeholder ("SAP User (Planning)"), it is replaced automatically with the actual logged-in user. No configuration needed.
+- **Non-blocking startup** — `_discoverTenantUUID()` is called at the start of `_fetchModelInfo()` as a background task so user and tenant UUID are ready before the first sync.
+
+---
+
+## [3.8.0] — 2026-11-24
 
 ### What's New panel + single version constant
 

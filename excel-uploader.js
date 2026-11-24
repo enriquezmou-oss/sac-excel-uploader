@@ -19,9 +19,16 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.8.0';
+const _EPM_VERSION = '3.9.0';
 
 const _EPM_CHANGELOG = [
+  { v: '3.9.0', date: '2026-11-24', title: 'Auto-load model dimensions via FPA REST · Real SAP user in Audit',
+    items: ['_fetchModelDimensions() now first tries POST /sap/fpa/services/rest/fpa/model — the confirmed working endpoint on this tenant. Payload: {"action":"getDesignTime","data":{"resourceId":"{GUID}","metadata":{},"includeDatasphereInfos":true}}.',
+            'New _discoverTenantUUID(): tries SAC global variables (window.__sap_umi_config), then GET /sap/fpa/services/rest/session. Calls the FPA endpoint both with and without ?tenant= param so it works across tenants.',
+            'New _parseDimensionsFromFPA(): parses the DIMENSION array returned by FPA REST (metadata.id.name + data.type + data.dimensionId). VersionDim → isAuto, TimeHANA → isAuto.',
+            'DIS GET endpoints kept as fallback (10 variants) in case the FPA REST endpoint is unavailable.',
+            'Real SAP user auto-populated in Audit Monitor: session endpoint also returns the logged-in loginName / userName; replaces the placeholder "SAP User (Planning)" automatically without requiring manual configuration.',
+            '_discoverTenantUUID() called at _fetchModelInfo() startup (non-blocking) so user and tenant are ready before the first sync.'] },
   { v: '3.8.0', date: '2026-11-24', title: 'Import Method selector + Delta data preview',
     items: ['New ⚙️ Import Method selector in the strategy bar: Replace / Update / Append. Full load offers all 3; Delta load offers Update (default) and Append.',
             'Method stored in localStorage and saved in the audit record per load.',
@@ -495,6 +502,8 @@ class ExcelUploaderPro extends HTMLElement {
     this._updateHeaderSubtitle();
     try {
       const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
+      // Discover tenant UUID + real SAP user in background (non-blocking)
+      this._discoverTenantUUID(base).catch(() => {});
       const resp = await fetch(base + '/api/v1/dataimport/models/' + encodeURIComponent(this._sacModelId), {
         method: 'GET',
         credentials: 'include',
@@ -552,7 +561,7 @@ class ExcelUploaderPro extends HTMLElement {
     }
   }
 
-  // ── Fetch model dimension structure from SAC DIS ──────────────────────────
+  // ── Fetch model dimension structure from SAC ─────────────────────────────
   async _fetchModelDimensions() {
     const guid = this._sacDISModelId || this._sacModelId;
     const tech = this._sacModelId;
@@ -563,46 +572,70 @@ class ExcelUploaderPro extends HTMLElement {
     this._render();
     try {
       const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
-      const iType = this._sacImportType || 'privateFactData';
-      const attempts = [
-        // DIS endpoints (tried first — tenant-specific)
-        base + '/api/v1/dataimport/models/' + encodeURIComponent(guid) + '/' + iType,
-        base + '/api/v1/dataimport/models/' + encodeURIComponent(tech) + '/' + iType,
-        base + '/api/v1/dataimport/models/' + encodeURIComponent(guid) + '/dimensions',
-        base + '/api/v1/dataimport/models/' + encodeURIComponent(tech) + '/dimensions',
-        base + '/api/v1/dataimport/models/' + encodeURIComponent(guid),
-        base + '/api/v1/dataimport/models/' + encodeURIComponent(tech),
-        // OData Export API — returns EntityType with Properties (dimensions + measures)
-        base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(tech) + '/$metadata',
-        base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guid) + '/$metadata',
-        // SAC FPA REST API — model structure
-        base + '/sap/fpa/services/rest/epm/models/' + encodeURIComponent(tech),
-        base + '/sap/fpa/services/rest/epm/models/' + encodeURIComponent(guid),
-        // Planning REST API
-        base + '/api/v1/planning/models/' + encodeURIComponent(tech),
-        base + '/api/v1/planning/models/' + encodeURIComponent(guid),
-      ];
       let dims = [];
-      for (const url of attempts) {
+
+      // ── Priority 1: SAC FPA REST API (POST, confirmed working on this tenant) ──
+      // POST /sap/fpa/services/rest/fpa/model[?tenant=uuid]
+      // Body: {"action":"getDesignTime","data":{"resourceId":"{DIS_GUID}","metadata":{},"includeDatasphereInfos":true}}
+      const fpaBody = JSON.stringify({ action: 'getDesignTime', data: { resourceId: guid, metadata: {}, includeDatasphereInfos: true } });
+      const fpaEndpoint = base + '/sap/fpa/services/rest/fpa/model';
+      const tenantUUID = await this._discoverTenantUUID(base);
+      const fpaUrls = tenantUUID
+        ? [fpaEndpoint + '?tenant=' + encodeURIComponent(tenantUUID), fpaEndpoint]
+        : [fpaEndpoint];
+      for (const url of fpaUrls) {
         try {
           const r = await fetch(url, {
+            method: 'POST',
             credentials: 'include',
-            headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json,application/xml,*/*', 'x-sap-dis-request-source': 'fileUploadWidget' }
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: fpaBody
           });
-          const ct = r.headers.get('content-type') || '';
-          let data = null;
-          if (ct.includes('xml')) {
-            const xml = await r.text().catch(() => null);
-            console.log('[DIS] dim probe', r.status, url.replace(base, ''), '→ XML', xml?.slice(0, 400));
-            if (r.ok && xml) { dims = this._parseDimensionsFromXml(xml); }
-          } else {
-            data = await r.json().catch(() => null);
-            console.log('[DIS] dim probe', r.status, url.replace(base, ''), '→', JSON.stringify(data)?.slice(0, 300));
-            if (r.ok && data) { dims = this._parseDimensions(data); }
+          console.log('[DIS] FPA probe', r.status, url.replace(base, ''));
+          if (r.ok) {
+            const data = await r.json().catch(() => null);
+            if (data) { dims = this._parseDimensionsFromFPA(data); }
+            if (dims.length > 0) { console.log('[DIS] dimensions via FPA REST from:', url); break; }
           }
-          if (dims.length > 0) { console.log('[DIS] dimensions from:', url); break; }
         } catch (_) { continue; }
       }
+
+      // ── Priority 2: DIS fallback endpoints (GET) ─────────────────────────────
+      if (dims.length === 0) {
+        const iType = this._sacImportType || 'privateFactData';
+        const attempts = [
+          base + '/api/v1/dataimport/models/' + encodeURIComponent(guid) + '/' + iType,
+          base + '/api/v1/dataimport/models/' + encodeURIComponent(tech) + '/' + iType,
+          base + '/api/v1/dataimport/models/' + encodeURIComponent(guid) + '/dimensions',
+          base + '/api/v1/dataimport/models/' + encodeURIComponent(tech) + '/dimensions',
+          base + '/api/v1/dataimport/models/' + encodeURIComponent(guid),
+          base + '/api/v1/dataimport/models/' + encodeURIComponent(tech),
+          base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(tech) + '/$metadata',
+          base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guid) + '/$metadata',
+          base + '/api/v1/planning/models/' + encodeURIComponent(tech),
+          base + '/api/v1/planning/models/' + encodeURIComponent(guid),
+        ];
+        for (const url of attempts) {
+          try {
+            const r = await fetch(url, {
+              credentials: 'include',
+              headers: { 'x-csrf-token': 'fetch', 'Accept': 'application/json,application/xml,*/*', 'x-sap-dis-request-source': 'fileUploadWidget' }
+            });
+            const ct = r.headers.get('content-type') || '';
+            if (ct.includes('xml')) {
+              const xml = await r.text().catch(() => null);
+              console.log('[DIS] dim probe', r.status, url.replace(base, ''), '→ XML', xml?.slice(0, 300));
+              if (r.ok && xml) { dims = this._parseDimensionsFromXml(xml); }
+            } else {
+              const data = await r.json().catch(() => null);
+              console.log('[DIS] dim probe', r.status, url.replace(base, ''), '→', JSON.stringify(data)?.slice(0, 200));
+              if (r.ok && data) { dims = this._parseDimensions(data); }
+            }
+            if (dims.length > 0) { console.log('[DIS] dimensions from:', url); break; }
+          } catch (_) { continue; }
+        }
+      }
+
       this._sacModelDimensions = dims;
       if (dims.length > 0) this._autoMapColumns();
       console.log('[DIS] model dimensions:', dims.map(d => d.id).join(', ') || '(none)');
@@ -615,6 +648,69 @@ class ExcelUploaderPro extends HTMLElement {
     }
     this._sacDimLoading = false;
     this._render();
+  }
+
+  // Discover SAC tenant UUID (and optionally the current user) without hardcoding
+  async _discoverTenantUUID(base) {
+    if (this._cachedTenantUUID) return this._cachedTenantUUID;
+    // Try SAC global variables first (cheapest)
+    try {
+      const uuid = window?.__sap_umi_config?.tenant
+        || window?.sap?.umi?.config?.tenant
+        || window?.sap?.authz?.tenantId
+        || window?.SapAnalyticsCloud?.tenantId
+        || null;
+      if (uuid && /^[0-9a-f-]{36}$/i.test(uuid)) {
+        this._cachedTenantUUID = uuid;
+        return uuid;
+      }
+    } catch (_) {}
+    // Try SAC FPA session endpoint — also captures the logged-in user
+    try {
+      const r = await fetch((base || window.location.origin) + '/sap/fpa/services/rest/session', {
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      });
+      if (r.ok) {
+        const data = await r.json().catch(() => null);
+        const uuid = data?.tenantId || data?.tenant || data?.id || data?.data?.tenantId || null;
+        if (uuid && /^[0-9a-f-]{36}$/i.test(uuid)) {
+          this._cachedTenantUUID = uuid;
+        }
+        // Auto-populate the SAP user from session if still at placeholder default
+        const DEFAULT_USER = 'SAP User (Planning)';
+        if (this._currentUser === DEFAULT_USER || !this._currentUser) {
+          const sessionUser = data?.user?.loginName || data?.user?.name || data?.loginName
+            || data?.userName || data?.user?.email || null;
+          if (sessionUser) {
+            this._currentUser = sessionUser;
+          }
+        }
+        if (this._cachedTenantUUID) return this._cachedTenantUUID;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // Parse SAC FPA REST response: { DIMENSION: [{ metadata: { id: { name } }, data: { type, dimensionId, description } }] }
+  _parseDimensionsFromFPA(data) {
+    const dimArray = data?.DIMENSION;
+    if (!Array.isArray(dimArray) || dimArray.length === 0) return [];
+    const AUTO_TYPES    = new Set(['VERSIONDIM', 'TIMEHANA']);
+    const MEASURE_TYPES = new Set(['MEASURE', 'KPI', 'AMOUNT', 'QUANTITY', 'SIGNEDDATA']);
+    return dimArray.map(d => {
+      const dimId   = d?.metadata?.id?.name || d?.data?.dimensionId || '';
+      const dimType = (d?.data?.type || '').toUpperCase();
+      const desc    = d?.data?.description || dimId;
+      const isAuto  = AUTO_TYPES.has(dimType) || dimId.toUpperCase() === 'VERSION' || dimId.toUpperCase() === 'DATE';
+      return {
+        id:          dimId,
+        description: desc,
+        type:        dimType || 'GENERIC',
+        isMeasure:   MEASURE_TYPES.has(dimType),
+        isAuto,
+      };
+    }).filter(d => d.id);
   }
 
   _parseDimensionsFromXml(xml) {
