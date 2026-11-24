@@ -19,9 +19,17 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.9.4';
+const _EPM_VERSION = '3.9.5';
 
 const _EPM_CHANGELOG = [
+  { v: '3.9.5', date: '2026-11-24', title: 'Update/Append: data existence check with confirmation dialog',
+    items: [
+      'For Update and Append modes, the widget now checks whether data already exists for the selected Version+Date before uploading.',
+      'If existing rows are found, a confirmation dialog shows the row count and asks the user to proceed or cancel.',
+      'If no existing rows are found, the upload proceeds directly without interruption.',
+      'OData export endpoint now tried without $filter first (SAC rejects $filter with 400 on some tenants); client-side filtering handles Version+Date matching.',
+      'Removed client-side merge logic (DIS v1 always replaces matching dimension-key rows; merge was unreliable when OData endpoints returned 400).',
+    ] },
   { v: '3.9.4', date: '2026-11-24', title: '9 bug fixes: merge safety, double upload, regex errors, ID column, Audit colspan, blur-before-sync',
     items: [
       'Fix: step 4 data re-upload removed — no longer fires unless job status is explicitly READY_FOR_DATA (single-step CSV POST in step 3 already uploads data).',
@@ -974,12 +982,18 @@ class ExcelUploaderPro extends HTMLElement {
     const guidWithPrefix = guid.startsWith('t.5.') ? guid : ('t.5.' + guid);
     const vEnc = encodeURIComponent(version || '');
     const dEnc = encodeURIComponent(date    || '');
+    // Build tenant param if UUID is known (some SAC OData APIs require it)
+    const tParam = this._cachedTenantUUID ? '&tenant=' + encodeURIComponent(this._cachedTenantUUID) : '';
     const endpoints = [
-      // OData Export Service
-      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(modelId) + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000',
-      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guid) + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000',
-      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guidWithPrefix) + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000',
-      // DIS GET (same endpoints as Delta Preview, but with $top=50000)
+      // ── OData Export Service — NO $filter first (SAC rejects $filter with 400 on some tenants) ──
+      // Get all rows and filter client-side. The client-side filter below handles Version+Date matching.
+      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(modelId) + '?$format=json&$top=50000' + tParam,
+      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guid)    + '?$format=json&$top=50000' + tParam,
+      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guidWithPrefix) + '?$format=json&$top=50000' + tParam,
+      // ── OData with $filter (secondary — servers that support it) ──
+      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(modelId) + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000' + tParam,
+      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guid)    + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000' + tParam,
+      // ── DIS GET (same endpoints as Delta Preview, but with $top=50000) ──
       DIS + '/models/' + encodeURIComponent(guid)    + '/' + iType + '?Version=' + vEnc + '&Date=' + dEnc + '&$format=json&$top=50000',
       DIS + '/models/' + encodeURIComponent(modelId) + '/' + iType + '?Version=' + vEnc + '&Date=' + dEnc + '&$format=json&$top=50000',
       DIS + '/models/' + encodeURIComponent(guid)    + '/data?$filter=' + encodeURIComponent(filter) + '&$top=50000&$format=json',
@@ -1088,22 +1102,30 @@ class ExcelUploaderPro extends HTMLElement {
       return obj;
     });
 
-    // ── 1b. For Update/Append: fetch existing data and merge client-side ───────
-    // DIS v1 ignores writeBackMode/importMode/writeBack JSON body params — always Replace.
-    // Client-side merge: fetch existing → merge in memory → Replace with merged dataset.
+    // ── 1b. For Update/Append: check if existing data is present and ask for confirmation ──
+    // DIS v1 always does row-level Replace regardless of mode params.
+    // We inform the user before overwriting any existing data.
     const isNonReplace = this._importMethod === 'update' || this._importMethod === 'append';
-    this._mergeWarningMsg = '';
     if (isNonReplace) {
-      _setLoading('🔍 Reading existing data for ' + (this._importMethod === 'update' ? 'Update' : 'Append') + ' merge…');
+      _setLoading('🔍 Checking for existing data in Version=' + (this._targetVersion || '—') + ' / Date=' + (this._targetDate || '—') + '…');
       const existing = await this._fetchExistingDataOData(this._targetVersion, this._targetDate);
       if (existing && existing.length > 0) {
-        sacRows = this._mergePlanningData(sacRows, existing, this._importMethod, this._sacModelDimensions || []);
-        console.log('[DIS] client-side', this._importMethod, 'merge:', existing.length, 'existing +', rows.length, 'uploaded →', sacRows.length, 'rows in merged CSV');
-      } else if (existing === null) {
-        console.warn('[DIS] Cannot read existing data — Upload will Replace. Existing rows for Version=' + (this._targetVersion || '—') + ' Date=' + (this._targetDate || '—') + ' may be overwritten.');
-        this._mergeWarningMsg = 'Could not read existing data to merge — existing rows for this Version+Period may have been replaced.';
+        const modeLabel = this._importMethod === 'update' ? 'Update' : 'Append';
+        const proceed = window.confirm(
+          '⚠️ Found ' + existing.length + ' existing row(s) for\n' +
+          'Version: ' + (this._targetVersion || '—') + '\n' +
+          'Date:    ' + (this._targetDate    || '—') + '\n\n' +
+          'SAC DIS will replace these rows with the uploaded data.\n' +
+          '(' + modeLabel + ' mode selected)\n\n' +
+          'Continue with upload?'
+        );
+        if (!proceed) {
+          this._isLoading = false;
+          this._render();
+          return;
+        }
       } else {
-        console.log('[DIS] No existing data for Version=' + (this._targetVersion || '—') + ', Date=' + (this._targetDate || '—') + ' — uploading as new records');
+        console.log('[DIS] No existing data found for Version=' + (this._targetVersion || '—') + ', Date=' + (this._targetDate || '—') + ' — uploading as new records');
       }
     }
 

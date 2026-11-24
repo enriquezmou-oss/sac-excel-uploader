@@ -5,6 +5,52 @@ Format: **[version] — date — summary**
 
 ---
 
+## [3.9.5] — 2026-11-24
+
+### Update/Append: data existence check with confirmation dialog
+
+- **Simpler approach** — instead of client-side merging (which required OData reads that returned 400), Update/Append modes now check whether data already exists for the target Version+Date and show a confirmation dialog if it does.
+- **Confirmation dialog** — if existing rows are found, a dialog shows the row count (`⚠️ Found N rows for Version: X / Date: Y`) and asks the user to proceed or cancel. If the user cancels, the upload is aborted.
+- **No existing data** — if no rows are found (or the check endpoint fails), the upload proceeds immediately without any interruption.
+- **OData endpoint fix** — `_fetchExistingDataOData` now tries the OData export endpoint without `$filter` first (SAC returns 400 when `$filter` is present on some tenants). Client-side filtering handles Version+Date matching after fetching all rows.
+- **Removed client-side merge** — `_mergePlanningData` is no longer called. DIS v1 always replaces matching dimension-key rows; merge was unreliable when OData reads returned 400.
+
+---
+
+## [3.9.4] — 2026-11-24
+
+### 9 bug fixes: merge safety, double upload, regex, ID column, Audit colspan, blur-before-sync
+
+- **Fix 1 (double upload)** — `_callDISApi` step 4 CSV re-upload was incorrectly triggered when the job status GET failed (due to `|| !jobInitStatus` condition). Now fires only when status is explicitly `READY_FOR_DATA`.
+- **Fix 2A (Append case mismatch)** — OData may return column names in different casing than the uploaded rows. `_mergePlanningData` now uses a case-insensitive `existKey` lookup when accumulating measure values in Append mode.
+- **Fix 2B (empty dimensions guard)** — If `_sacModelDimensions` is empty at merge time, all columns would have been treated as dimension keys, corrupting the merge key. Added early-return guard: merge skipped, uploaded rows returned as-is, and a console warning emitted.
+- **Fix 3 (merge warning never shown)** — `_mergeWarningMsg` was set but never surfaced. Now shown as a warning toast 3.5 s after the success toast, so the user is informed if existing data could not be fetched before an Update/Append operation.
+- **Fix 4 (dimensions never auto-fetched)** — `_fetchModelDimensions()` was never called automatically; dimensions were always empty at first sync. Now called in both branches of `_fetchModelInfo()` after model state becomes `ok`.
+- **Fix 5 (ID column deletion blocked)** — `if (colToRemove === 'ID') return` guard prevented the ID column from being removed from the Required Columns grid. Guard removed; `_columnMapping` and `_disExcludedCols` are also cleaned up on removal.
+- **Fix 6 (Audit Monitor empty-state colspan)** — Empty-state row `colspan` corrected from 9 to 11 to match the actual 11-column table.
+- **Fix 7A (last cell edit lost)** — `document.activeElement.blur()` now called at the start of the Synchronize handler so any in-progress cell edit is committed before the grid rows are read.
+- **Fix 7B (model picker never closes)** — Added a `document.click` listener so the model picker dropdown closes when the user clicks outside it.
+- **Fix 8 (REGEX errors swallowed)** — The `catch` block for `new RegExp(rule.param)` was empty; invalid regex patterns silently passed validation. Now reports `'Invalid regex: ' + e.message` in the cell as a failed validation.
+
+---
+
+## [3.9.3] — 2026-11-24
+
+### Fix: Update/Append — client-side merge (DIS v1 always Replaces)
+
+- **Root cause confirmed** — DIS v1 ignores `writeBackMode`/`importMode`/`writeBack` JSON body params for `privateFactData`. The API accepts them but always replaces data for the uploaded Version+Period.
+- **Fix** — for Update/Append, the widget now:
+  1. Fetches existing data for the target Version+Period via OData export (`/api/v1/dataexport/providers/sac/{modelId}`)
+  2. Merges the datasets in memory (client-side)
+  3. Uploads the complete merged dataset via single-step Replace
+- **Update merge** — existing rows not in the uploaded file are preserved; uploaded rows replace matching dimension-key combinations.
+- **Append merge** — measure values are accumulated for matching dimension keys; new keys are inserted; all other existing rows are kept.
+- **Fallback** — if the OData endpoint is unavailable (404), a warning is logged and the upload proceeds as Replace.
+- **Simplified DIS flow** — all modes now use the proven single-step CSV POST. The JSON job creation branch has been removed.
+- **New methods** — `_fetchExistingDataOData(version, date)` and `_mergePlanningData(uploadedRows, existingRows, mode, dimensions)`.
+
+---
+
 ## [3.9.2] — 2026-11-24
 
 ### Fix: import method (Update/Append) always replaced — DIS write mode enforced
