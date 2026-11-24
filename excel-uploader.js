@@ -19,9 +19,17 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.7.0';
+const _EPM_VERSION = '3.8.0';
 
 const _EPM_CHANGELOG = [
+  { v: '3.8.0', date: '2026-11-24', title: 'Import Method selector + Delta data preview',
+    items: ['New ⚙️ Import Method selector in the strategy bar: Replace / Update / Append. Full load offers all 3; Delta load offers Update (default) and Append.',
+            'Method stored in localStorage and saved in the audit record per load.',
+            'Method passed as ?method= query parameter to DIS job creation (honored by DIS versions that support it).',
+            'Replace: clears the entire Version+Period region before writing. Update: updates matching keys, inserts new, preserves rest. Append: accumulates measure values for matching keys.',
+            'New 🔍 Delta Preview card — appears when DELTA is selected. Click "Load Preview" to fetch existing data for the target Version+Period from SAC DIS and display it in a table.',
+            'Preview gracefully degrades: if the DIS endpoint returns no data or is not supported, shows a helpful fallback message.',
+            'Switching strategy auto-resets the method (DELTA → Update, FULL → keeps current unless was replaced) and clears any loaded preview.'] },
   { v: '3.7.0', date: '2026-11-24', title: 'VERSION + PERIOD in Audit Monitor · Delta behavior corrected',
     items: ['Audit Monitor list now shows VERSION and PERIOD columns for every load record.',
             'Audit Monitor detail view metrics bar expanded (5 → 7 KPI boxes) to include VERSION and PERIOD.',
@@ -230,6 +238,8 @@ class ExcelUploaderPro extends HTMLElement {
     this._sacTenantUrl    = this._storageGet('sac_dis_tenant_url') || '';
     this._sacModelId      = this._storageGet('sac_dis_model_id')   || 'PLAN_CAPEX_PLANNING';
     this._sacImportType   = this._storageGet('sac_import_type')    || 'privateFactData';
+    this._importMethod    = this._storageGet('sac_import_method')  || 'replace';
+    this._deltaPreview    = { rows: [], cols: [], loading: false, error: null, loaded: false };
     this._sacModelName    = '';
     this._sacModelDesc    = this._storageGet('sac_dis_model_desc') || '';
     this._sacModelState   = '';
@@ -748,6 +758,53 @@ class ExcelUploaderPro extends HTMLElement {
   // 2. Create + Upload: POST /models/{GUID}/{importType} with CSV body → { jobID }
   // 3. Run   : POST /jobs/{jobId}/run
   // 4. Poll  : GET /jobs/{jobId} until successful
+  async _fetchDeltaPreview() {
+    if (!this._sacModelId || !this._targetVersion || !this._targetDate) {
+      this._deltaPreview = { rows: [], cols: [], loading: false, error: 'Set VERSION, PERIOD and MODEL ID first.', loaded: false };
+      this._render(); return;
+    }
+    this._deltaPreview = { rows: [], cols: [], loading: true, error: null, loaded: false };
+    this._render();
+    const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
+    const DIS  = base + '/api/v1/dataimport';
+    const DIS_HEADER = { 'x-sap-sac-custom-auth': 'true' };
+    let disModelId = this._sacDISModelId || '';
+    if (!disModelId) { try { disModelId = await this._resolveDISModelId(); } catch (_) { disModelId = this._sacModelId; } }
+
+    const vFilter = encodeURIComponent(this._targetVersion);
+    const dFilter = encodeURIComponent(this._targetDate);
+    const importType = this._sacImportType || 'privateFactData';
+
+    const endpoints = [
+      DIS + '/models/' + encodeURIComponent(disModelId) + '/' + importType + '?Version=' + vFilter + '&Date=' + dFilter + '&$format=json&$top=200',
+      DIS + '/models/' + encodeURIComponent(disModelId) + '/data?$filter=Version%20eq%20%27' + vFilter + '%27%20and%20Date%20eq%20%27' + dFilter + '%27&$top=200&$format=json',
+      DIS + '/models/' + encodeURIComponent(this._sacModelId) + '/' + importType + '?Version=' + vFilter + '&Date=' + dFilter + '&$format=json&$top=200',
+    ];
+
+    let rows = [], cols = [], error = null, loaded = false;
+    for (const url of endpoints) {
+      try {
+        const resp = await fetch(url, { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/json', ...DIS_HEADER } });
+        if (!resp.ok) { console.log('[DeltaPreview] GET', url.slice(-60), 'HTTP', resp.status); continue; }
+        const body = await resp.json().catch(() => null);
+        if (!body) continue;
+        const arr = body.value || body.data || body.rows || (Array.isArray(body) ? body : null);
+        if (arr && arr.length > 0) {
+          rows = arr;
+          cols = Object.keys(arr[0]).filter(k => !k.startsWith('@') && !k.startsWith('__'));
+          loaded = true;
+          console.log('[DeltaPreview] found', rows.length, 'rows via', url.slice(-60));
+          break;
+        }
+        // empty array → no data in region
+        if (arr && arr.length === 0) { loaded = true; rows = []; break; }
+      } catch (e) { console.warn('[DeltaPreview] endpoint failed:', e.message); }
+    }
+    if (!loaded) error = 'Preview not available on this DIS endpoint. Check data in SAC Modeler → PLAN_CAPEX_PLANNING.';
+    this._deltaPreview = { rows, cols, loading: false, error, loaded };
+    this._render();
+  }
+
   async _callDISApi(rows) {
     const base       = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
     const DIS        = base + '/api/v1/dataimport';
@@ -807,8 +864,9 @@ class ExcelUploaderPro extends HTMLElement {
     _setLoading('📤 Enviando ' + rows.length + ' filas a SAC DIS…');
     const importTypesToTry = [importType, importType === 'privateFactData' ? 'factData' : 'privateFactData'];
     let jobCreateResp, usedImportType;
+    const methodParam = this._importMethod && this._importMethod !== 'replace' ? '?method=' + encodeURIComponent(this._importMethod.toUpperCase()) : '';
     for (const iType of importTypesToTry) {
-      const r = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + iType, {
+      const r = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + iType + methodParam, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'text/csv', 'x-csrf-token': csrfToken, ...DIS_HEADER },
         body: csvBody
@@ -1287,13 +1345,36 @@ class ExcelUploaderPro extends HTMLElement {
         if (strat && this._loadStrategy !== strat) {
           const prev = this._loadStrategy;
           this._loadStrategy = strat;
+          if (strat === 'DELTA' && this._importMethod === 'replace') {
+            this._importMethod = 'update';
+            this._storageSet('sac_import_method', 'update');
+          } else if (strat === 'FULL' && !this._importMethod) {
+            this._importMethod = 'replace';
+            this._storageSet('sac_import_method', 'replace');
+          }
+          this._deltaPreview = { rows: [], cols: [], loading: false, error: null, loaded: false };
           this._logAction('STRATEGY_CHANGE', 'Load Strategy', 'Planning mode switched from ' + prev + ' to ' + strat, prev, strat);
           this._render();
         }
       });
     });
 
-    // SAC Artifact sync is always active
+    // ── SAC Artifact sync is always active
+
+    shadow.querySelectorAll('.method-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const m = e.currentTarget.dataset.method;
+        if (m && this._importMethod !== m) {
+          this._importMethod = m;
+          this._storageSet('sac_import_method', m);
+          this._deltaPreview = { rows: [], cols: [], loading: false, error: null, loaded: false };
+          this._render();
+        }
+      });
+    });
+
+    const loadDeltaPreviewBtn = shadow.getElementById('loadDeltaPreviewBtn');
+    if (loadDeltaPreviewBtn) loadDeltaPreviewBtn.addEventListener('click', () => { this._fetchDeltaPreview(); });
 
     // ── SAC Load Target: Version & Period ─────────────────────────────────────
     const targetVersionInp = shadow.getElementById('targetVersionInp');
@@ -2103,6 +2184,7 @@ class ExcelUploaderPro extends HTMLElement {
           loadStrategy: this._loadStrategy,
           targetVersion: this._targetVersion || '',
           targetDate: this._targetDate || '',
+          importMethod: this._importMethod || 'replace',
           dspArtifact: this._dspArtifactSync,
           semaphoreStatus: stats.preventiveRows > 0 ? 'AMBER' : (stats.checkRows > 0 ? 'PURPLE' : 'GREEN'),
           file: fileSummary,
@@ -3448,6 +3530,33 @@ class ExcelUploaderPro extends HTMLElement {
                 ? '<span style="background:#EBF5FF;color:#005CB9;border:1px solid #B3D4FF;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">📦 Full — overwrites target slice</span>'
                 : '<span style="background:#FFF3CD;color:#8A5700;border:1px solid #FFCC66;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">⚠️ Delta — updates matching records, inserts new ones</span>'}
             </div>
+            ${(() => {
+              const METHODS = this._loadStrategy === 'DELTA'
+                ? [
+                    { id: 'update',  icon: '✏️', label: 'Update',  desc: 'Updates matching dimension-key records, inserts new ones, preserves all other existing data.' },
+                    { id: 'append',  icon: '➕', label: 'Append',  desc: 'Accumulates measure values for matching keys (adds to existing amounts), inserts new records.' },
+                  ]
+                : [
+                    { id: 'replace', icon: '🗑️', label: 'Replace', desc: 'Clears all data for Version+Period, then writes the file. Use for complete monthly re-upload.' },
+                    { id: 'update',  icon: '✏️', label: 'Update',  desc: 'Updates matching dimension-key records, inserts new ones, preserves all other existing data.' },
+                    { id: 'append',  icon: '➕', label: 'Append',  desc: 'Accumulates measure values for matching keys (adds to existing amounts), inserts new records.' },
+                  ];
+              const active = METHODS.find(m => m.id === this._importMethod) || METHODS[0];
+              return `
+              <div style="width:100%;padding-top:10px;border-top:1px dashed #D9E0E6;margin-top:4px;">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                  <span style="font-size:11px;font-weight:700;color:#556B82;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;">⚙️ Import Method</span>
+                  <div style="display:flex;gap:6px;">
+                    ${METHODS.map(m => `
+                      <button class="method-btn" data-method="${m.id}" type="button"
+                        style="padding:5px 14px;border-radius:20px;border:2px solid ${this._importMethod === m.id ? '#0064D9' : '#D9E0E6'};background:${this._importMethod === m.id ? '#EBF5FF' : '#FFF'};color:${this._importMethod === m.id ? '#0064D9' : '#556B82'};font-size:11px;font-weight:${this._importMethod === m.id ? '800' : '600'};cursor:pointer;transition:all .15s;">
+                        ${m.icon} ${m.label}
+                      </button>`).join('')}
+                  </div>
+                  <span style="font-size:11px;color:#556B82;font-style:italic;min-width:0;">${active.desc}</span>
+                </div>
+              </div>`;
+            })()}
             <div style="width:100%;display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding-top:12px;border-top:1px dashed #D9E0E6;margin-top:4px;">
               <span style="font-weight:800;color:#1D2D3E;font-size:12px;padding-bottom:2px;">🎯 SAC Load Target:</span>
               <div>
@@ -3655,6 +3764,50 @@ class ExcelUploaderPro extends HTMLElement {
               }
             </div>
           </div>
+
+          ${this._loadStrategy === 'DELTA' ? (() => {
+            const dp = this._deltaPreview;
+            const canPreview = !!(this._sacModelId && this._targetVersion && this._targetDate);
+            return `
+            <div style="margin-bottom:14px;border:2px solid #FFC947;border-radius:10px;background:#FFFDF0;overflow:hidden;">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#FFF8E1;gap:10px;flex-wrap:wrap;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span style="font-size:18px;">🔍</span>
+                  <div>
+                    <div style="font-size:13px;font-weight:800;color:#7A5A00;">Delta Preview — existing data in this region</div>
+                    <div style="font-size:11px;color:#9A7000;">
+                      ${canPreview
+                        ? 'Version: <strong>' + this._esc(this._targetVersion) + '</strong> · Period: <strong>' + this._esc(this._targetDate) + '</strong> · Model: <strong>' + this._esc(this._sacModelId) + '</strong>'
+                        : 'Set VERSION, PERIOD and MODEL ID to enable preview.'}
+                    </div>
+                  </div>
+                </div>
+                <button id="loadDeltaPreviewBtn" class="btn" type="button"
+                  ${canPreview ? '' : 'disabled'}
+                  style="background:${canPreview ? '#FFC947' : '#D9D9D9'};color:${canPreview ? '#3D2800' : '#888'};font-weight:700;font-size:12px;padding:7px 16px;border-radius:6px;border:none;cursor:${canPreview ? 'pointer' : 'default'};">
+                  ${dp.loading ? '⏳ Loading…' : '📊 Load Preview'}
+                </button>
+              </div>
+              ${dp.loading ? '<div style="padding:20px;text-align:center;color:#9A7000;font-size:12px;">Fetching data from SAC DIS…</div>' : ''}
+              ${dp.error ? `<div style="padding:12px 16px;font-size:12px;color:#BB0000;background:#FFF0F0;border-top:1px solid #FFCCCC;">⚠️ ${this._esc(dp.error)}</div>` : ''}
+              ${dp.loaded && !dp.loading && !dp.error ? (
+                dp.rows.length === 0
+                  ? `<div style="padding:14px 16px;font-size:12px;color:#556B82;border-top:1px solid #FFE082;">
+                      <strong>No existing data</strong> found for Version <em>${this._esc(this._targetVersion)}</em> · Period <em>${this._esc(this._targetDate)}</em>.
+                      This delta load will insert all rows as new records.
+                    </div>`
+                  : `<div style="padding:8px 16px 14px;border-top:1px solid #FFE082;">
+                      <div style="font-size:11px;color:#9A7000;font-weight:700;margin-bottom:6px;">${dp.rows.length} existing row(s) — these will be updated or preserved depending on key match:</div>
+                      <div class="tbl-wrap" style="max-height:220px;overflow:auto;">
+                        <table>
+                          <thead><tr>${dp.cols.map(c => '<th>' + this._esc(c) + '</th>').join('')}</tr></thead>
+                          <tbody>${dp.rows.map(r => '<tr>' + dp.cols.map(c => '<td>' + this._esc(r[c] ?? '') + '</td>').join('') + '</tr>').join('')}</tbody>
+                        </table>
+                      </div>
+                    </div>`
+              ) : ''}
+            </div>`;
+          })() : ''}
 
           ${this._step === 1 ? `
             ${this._renderFormatConfigBar(false)}
