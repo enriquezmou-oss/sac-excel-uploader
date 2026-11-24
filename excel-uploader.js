@@ -19,9 +19,14 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.4.0';
+const _EPM_VERSION = '3.5.0';
 
 const _EPM_CHANGELOG = [
+  { v: '3.5.0', date: '2026-11-24', title: 'All UI messages in English + Delta load warning',
+    items: ['All user-visible messages translated to English (toasts, audit status, model picker, DIS block).',
+            'Delta load strategy now shows ⚠️ warning badge: "replaces matching records, does not sum amounts".',
+            'Fixed misleading Delta description ("Appends / incremental update" → "Replaces matching key records").',
+            'Delta console.log warning added in _callDISApi to surface the replace-not-sum behavior in devtools.'] },
   { v: '3.4.0', date: '2026-11-23', title: 'Detección de filas rechazadas por SAC DIS (invalidrecords)',
     items: ['Tras COMPLETED, el widget consulta GET /jobs/{jobId}/invalidrecords.',
             'Si hay filas rechazadas: estado cambia a "⚠️ CARGA PARCIAL", toast muestra el motivo.',
@@ -501,7 +506,7 @@ class ExcelUploaderPro extends HTMLElement {
           }
         }
       } else if (!resp.ok) {
-        throw new Error('HTTP ' + resp.status + (resp.status === 401 || resp.status === 403 ? ' — Sin permisos DIS' : ''));
+        throw new Error('HTTP ' + resp.status + (resp.status === 401 || resp.status === 403 ? ' — No DIS permissions' : ''));
       } else {
         const meta = await resp.json().catch(() => ({}));
         this._sacModelName  = meta.description || meta.name || this._sacModelId;
@@ -685,7 +690,7 @@ class ExcelUploaderPro extends HTMLElement {
       })).filter(m => m.id);
     } catch (err) {
       this._sacModels = [];
-      this._notify('Error listando modelos SAC: ' + err.message, 'error');
+      this._notify('Error listing SAC models: ' + err.message, 'error');
     }
     this._sacModelsLoading = false;
     this._render();
@@ -739,9 +744,12 @@ class ExcelUploaderPro extends HTMLElement {
     const _setLoading = (txt) => { this._loadingText = txt; this._render(); };
 
     // ── 0. Resolve DIS internal GUID ─────────────────────────────────────────
-    _setLoading('🔍 Resolviendo ID del modelo en SAC DIS…');
+    _setLoading('🔍 Resolving model ID in SAC DIS…');
     const disModelId = await this._resolveDISModelId();
     console.log('[DIS] usando modelId:', disModelId, '| técnico:', this._sacModelId, '| GUID en caché:', this._sacDISModelId || '(vacío)');
+    if (this._loadStrategy === 'DELTA') {
+      console.log('[DIS] Load strategy: DELTA — note: DIS replaces matching key combinations, does not add amounts to existing values');
+    }
 
     // ── 1. Build CSV (columns + data rows) ───────────────────────────────────
     // Filter out display-only columns that must not be sent to DIS
@@ -775,7 +783,7 @@ class ExcelUploaderPro extends HTMLElement {
     console.log('[DIS] CSV rows:', csvLines.length - 1, '| first row:', csvLines[1] || '(vacío)');
 
     // ── 2. CSRF token ─────────────────────────────────────────────────────────
-    _setLoading('🔑 Obteniendo CSRF token de SAC DIS…');
+    _setLoading('🔑 Fetching CSRF token from SAC DIS…');
     const importType = this._sacImportType || 'privateFactData';
     const csrfResp = await fetch(DIS + '/models/' + encodeURIComponent(disModelId) + '/' + importType, {
       method: 'GET', credentials: 'include',
@@ -808,7 +816,7 @@ class ExcelUploaderPro extends HTMLElement {
     if (!jobCreateResp?.ok) {
       let msg = 'Upload+Create HTTP ' + (jobCreateResp?.status || '?');
       try { const b = await jobCreateResp.json(); msg = b?.error?.message || b?.message || msg; } catch (_) {}
-      throw new Error(msg + ' — Verifica el nombre técnico del modelo en SAC Modeler');
+      throw new Error(msg + ' — Check the model technical name in SAC Modeler');
     }
     if (usedImportType && usedImportType !== this._sacImportType) {
       this._sacImportType = usedImportType;
@@ -819,7 +827,7 @@ class ExcelUploaderPro extends HTMLElement {
     const jobCreateBody = await jobCreateResp.json().catch(() => ({}));
     const jobId  = jobCreateBody.jobID || jobCreateBody.jobId || jobCreateBody.id;
     const jobUrl = jobCreateBody.jobURL || jobCreateBody.jobUrl || '';
-    if (!jobId) throw new Error('SAC DIS no devolvió jobID: ' + JSON.stringify(jobCreateBody));
+    if (!jobId) throw new Error('SAC DIS did not return a jobID: ' + JSON.stringify(jobCreateBody));
     console.log('[DIS] jobId:', jobId, '| jobURL:', jobUrl || '(none)', '| importType:', usedImportType);
 
     // ── 4. Upload CSV data (two-step tenant: job created empty) ──────────────
@@ -856,7 +864,7 @@ class ExcelUploaderPro extends HTMLElement {
     }
 
     // ── 5. Run the job ────────────────────────────────────────────────────────
-    _setLoading('🚀 Aplicando datos al modelo ' + this._sacModelId + '…');
+    _setLoading('🚀 Applying data to model ' + this._sacModelId + '…');
     const runResp = await fetch(DIS + '/jobs/' + jobId + '/run', {
       method: 'POST', credentials: 'include',
       headers: { 'x-csrf-token': csrfToken, ...DIS_HEADER }
@@ -872,7 +880,7 @@ class ExcelUploaderPro extends HTMLElement {
     }
 
     // ── 6. Poll GET /jobs/{jobId} until successful ────────────────────────────
-    _setLoading('⏳ Esperando confirmación de SAC DIS…');
+    _setLoading('⏳ Waiting for SAC DIS confirmation…');
     const pollResult = await this._pollJobStatus(
       DIS + '/jobs/' + jobId,
       ['SUCCESSFUL', 'SUCCESS', 'COMPLETED', 'COMPLETED_WITH_FAILURES', 'COMPLETE'],
@@ -919,9 +927,9 @@ class ExcelUploaderPro extends HTMLElement {
         throw new Error('SAC DIS job ' + status + ': ' + (inner.message || inner.errorMessage || body.message || JSON.stringify(inner).slice(0, 200)));
       }
       if (status === 'READY_FOR_DATA' && i >= 4) {
-        throw new Error('SAC DIS: el job no recibió datos (sigue en READY_FOR_DATA tras ' + (i+1) + ' intentos). Revisa los permisos DIS o el nombre técnico del modelo.');
+        throw new Error('SAC DIS: job did not receive data (still READY_FOR_DATA after ' + (i+1) + ' attempts). Check DIS permissions or model technical name.');
       }
-      if (_setLoading) _setLoading('⏳ SAC DIS: ' + (status || 'procesando') + '…');
+      if (_setLoading) _setLoading('⏳ SAC DIS: ' + (status || 'processing') + '…');
     }
     throw new Error('Timeout esperando SAC DIS (URL: ' + statusUrl + ')');
   }
@@ -1244,7 +1252,7 @@ class ExcelUploaderPro extends HTMLElement {
       badge.innerHTML = base + ' → <strong style="color:#5BBFFF;">' + this._esc(this._sacModelId) + '</strong>';
       badge.style.cssText = 'background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;';
     } else {
-      badge.innerHTML = base + ' <span style="color:#B45309;font-weight:600;">(sin Model ID — solo evento)</span>';
+      badge.innerHTML = base + ' <span style="color:#B45309;font-weight:600;">(no Model ID — event only)</span>';
       badge.style.cssText = 'background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;';
     }
   }
@@ -1337,7 +1345,7 @@ class ExcelUploaderPro extends HTMLElement {
         this._autoMapColumns();
         const mappedCnt  = Object.keys(this._columnMapping || {}).length;
         const exclCnt    = (this._disExcludedCols || []).length;
-        this._notify('⚡ Mapeo por defecto aplicado — ' + mappedCnt + ' mapeadas, ' + exclCnt + ' excluidas', 'info');
+        this._notify('⚡ Default mapping applied — ' + mappedCnt + ' mapped, ' + exclCnt + ' excluded', 'info');
       });
     }
 
@@ -1357,8 +1365,8 @@ class ExcelUploaderPro extends HTMLElement {
         const totalCols = (this._requiredColumns || []).length;
         const exclCnt   = (this._disExcludedCols || []).length;
         const msg = totalCols === 0
-          ? '💾 Mapeo guardado — carga un fichero para ver las columnas'
-          : '✅ Mapeo guardado — ' + mappedCnt + '/' + (totalCols - exclCnt) + ' columnas mapeadas' + (exclCnt > 0 ? ', ' + exclCnt + ' excluidas' : '') + ' — ¡puedes continuar!';
+          ? '💾 Mapping saved — load a file to see columns'
+          : '✅ Mapping saved — ' + mappedCnt + '/' + (totalCols - exclCnt) + ' columns mapped' + (exclCnt > 0 ? ', ' + exclCnt + ' excluded' : '') + ' — you can proceed!';
         this._notify(msg, mappedCnt > 0 || exclCnt > 0 ? 'success' : 'info');
       });
     }
@@ -2105,7 +2113,7 @@ class ExcelUploaderPro extends HTMLElement {
         // ── SAC DIS write-back ─────────────────────────────────────────────
         if (this._sacModelId) {
           this._isLoading = true;
-          this._loadingText = '📤 Iniciando importación a ' + this._sacModelId + '…';
+          this._loadingText = '📤 Starting import to ' + this._sacModelId + '…';
           this._render();
           let disResult;
           try {
@@ -2116,7 +2124,7 @@ class ExcelUploaderPro extends HTMLElement {
             // Update audit record with real DIS error — do NOT show "Synchronized"
             const idx = this._history.findIndex(h => h.id === loadId);
             if (idx !== -1) {
-              this._history[idx].status   = '❌ ERROR DIS';
+              this._history[idx].status   = '❌ DIS ERROR';
               this._history[idx].disStatus = 'ERROR';
               this._history[idx].disError  = err.message;
               this._saveHistory();
@@ -2133,18 +2141,18 @@ class ExcelUploaderPro extends HTMLElement {
           const idx = this._history.findIndex(h => h.id === loadId);
           if (idx !== -1) {
             if (failed > 0 || jobStatus === 'COMPLETED_WITH_FAILURES') {
-              const writtenTxt = written != null ? written + ' grabadas, ' : '';
-              this._history[idx].status    = '⚠️ CARGA PARCIAL — ' + writtenTxt + failed + ' rechazadas';
+              const writtenTxt = written != null ? written + ' written, ' : '';
+              this._history[idx].status    = '⚠️ PARTIAL LOAD — ' + writtenTxt + failed + ' rejected';
               this._history[idx].disStatus = 'PARTIAL';
               if (invRecs.length > 0) {
                 // Store first error reason for display in audit detail
                 const firstErr = invRecs[0];
                 const reason   = firstErr?.errorMessage || firstErr?.message || firstErr?.error || JSON.stringify(firstErr).slice(0, 120);
-                this._history[idx].disError = failed + ' fila(s) rechazada(s) por SAC DIS: ' + reason;
+                this._history[idx].disError = failed + ' row(s) rejected by SAC DIS: ' + reason;
               }
             } else {
-              const writtenTxt = written != null ? ' — ' + written + ' filas' : '';
-              this._history[idx].status    = '🟢 CARGA COMPLETA' + writtenTxt;
+              const writtenTxt = written != null ? ' — ' + written + ' rows' : '';
+              this._history[idx].status    = '🟢 LOAD COMPLETE' + writtenTxt;
               this._history[idx].disStatus = 'OK';
             }
             this._history[idx].disWrittenRows = written;
@@ -2164,11 +2172,12 @@ class ExcelUploaderPro extends HTMLElement {
         // Final notification — only "success" if DIS actually wrote the data
         const finalRec = this._history.find(h => h.id === loadId);
         if (!this._sacModelId || finalRec?.disStatus === 'OK') {
-          const infoRows = finalRec?.disWrittenRows != null ? ' — ' + finalRec.disWrittenRows + ' filas grabadas' : '';
-          this._notify('🟢 CARGA COMPLETA — ' + loadId + ' · ' + this._loadStrategy + infoRows + ' → SAP Analytics Cloud ✅', 'success');
+          const infoRows = finalRec?.disWrittenRows != null ? ' — ' + finalRec.disWrittenRows + ' rows written' : '';
+          const deltaNote = this._loadStrategy === 'DELTA' ? ' · Delta: matching records were replaced, not summed' : '';
+          this._notify('🟢 LOAD COMPLETE — ' + loadId + ' · ' + this._loadStrategy + infoRows + ' → SAP Analytics Cloud ✅' + deltaNote, 'success');
         } else if (finalRec?.disStatus === 'PARTIAL') {
           const reason = finalRec.disError ? ' · ' + finalRec.disError.slice(0, 120) : '';
-          this._notify('⚠️ CARGA PARCIAL — ' + loadId + ': ' + (finalRec.disWrittenRows || '0') + ' grabadas, ' + (finalRec.disFailedRows || '?') + ' rechazadas. Revisa la auditoría.' + reason, 'warning');
+          this._notify('⚠️ PARTIAL LOAD — ' + loadId + ': ' + (finalRec.disWrittenRows || '0') + ' written, ' + (finalRec.disFailedRows || '?') + ' rejected. Check the audit log.' + reason, 'warning');
         }
       });
     }
@@ -2963,10 +2972,10 @@ class ExcelUploaderPro extends HTMLElement {
 
             ${rec.disStatus ? `<div style="margin:8px 0 4px;padding:12px 16px;border-radius:8px;font-size:13px;font-weight:700;border:2px solid ${rec.disStatus === 'OK' ? '#107E3E' : rec.disStatus === 'PARTIAL' ? '#E9730C' : '#BB0000'};background:${rec.disStatus === 'OK' ? '#E6F9EC' : rec.disStatus === 'PARTIAL' ? '#FFF8E1' : '#FFF0F0'};color:${rec.disStatus === 'OK' ? '#107E3E' : rec.disStatus === 'PARTIAL' ? '#7A5A00' : '#BB0000'};">
               <div style="display:flex;align-items:center;gap:10px;">
-                ${rec.disStatus === 'OK' ? this._renderSemaphoreDot('GREEN') + ' SAC DIS: CARGA COMPLETA' + (rec.disWrittenRows != null ? ' — <strong>' + rec.disWrittenRows + ' filas grabadas en el modelo</strong>' : '') : ''}
-                ${rec.disStatus === 'PARTIAL' ? this._renderSemaphoreDot('AMBER') + ' SAC DIS: CARGA PARCIAL — ' + (rec.disWrittenRows != null ? '<strong>' + rec.disWrittenRows + ' grabadas</strong>, ' : '') + '<strong>' + (rec.disFailedRows || '?') + ' rechazadas</strong> por el modelo' : ''}
-                ${rec.disStatus === 'ERROR' ? this._renderSemaphoreDot('RED') + ' SAC DIS ERROR: ' + this._esc(rec.disError || 'Error desconocido') : ''}
-                ${rec.disStatus === 'PENDING' ? this._renderSemaphoreDot('BLUE') + ' SAC DIS: Pendiente de confirmación' : ''}
+                ${rec.disStatus === 'OK' ? this._renderSemaphoreDot('GREEN') + ' SAC DIS: LOAD COMPLETE' + (rec.disWrittenRows != null ? ' — <strong>' + rec.disWrittenRows + ' rows written to model</strong>' : '') : ''}
+                ${rec.disStatus === 'PARTIAL' ? this._renderSemaphoreDot('AMBER') + ' SAC DIS: PARTIAL LOAD — ' + (rec.disWrittenRows != null ? '<strong>' + rec.disWrittenRows + ' written</strong>, ' : '') + '<strong>' + (rec.disFailedRows || '?') + ' rejected</strong> by model' : ''}
+                ${rec.disStatus === 'ERROR' ? this._renderSemaphoreDot('RED') + ' SAC DIS ERROR: ' + this._esc(rec.disError || 'Unknown error') : ''}
+                ${rec.disStatus === 'PENDING' ? this._renderSemaphoreDot('BLUE') + ' SAC DIS: Pending confirmation' : ''}
               </div>
               ${(rec.disStatus === 'PARTIAL' || rec.disStatus === 'ERROR') && rec.disError ? `<div style="margin-top:6px;padding:8px 10px;border-radius:6px;background:rgba(0,0,0,0.05);font-size:11px;font-weight:600;font-family:monospace;white-space:pre-wrap;line-height:1.5;">${this._esc(rec.disError)}</div>` : ''}
             </div>` : ''}
@@ -3349,14 +3358,14 @@ class ExcelUploaderPro extends HTMLElement {
                 <span style="font-size:18px;">⚡</span>
                 <span>
                   <span class="strategy-btn-title">DELTA LOAD</span>
-                  <span class="strategy-btn-sub">Appends / incremental update</span>
+                  <span class="strategy-btn-sub">Replaces matching key records</span>
                 </span>
               </button>
             </div>
             <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
               ${this._loadStrategy === 'FULL'
                 ? '<span style="background:#EBF5FF;color:#005CB9;border:1px solid #B3D4FF;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">📦 Full — overwrites target slice</span>'
-                : '<span style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">⚡ Delta — appends records</span>'}
+                : '<span style="background:#FFF3CD;color:#8A5700;border:1px solid #FFCC66;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;">⚠️ Delta — replaces matching records, does not sum</span>'}
             </div>
             <div style="width:100%;display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding-top:12px;border-top:1px dashed #D9E0E6;margin-top:4px;">
               <span style="font-weight:800;color:#1D2D3E;font-size:12px;padding-bottom:2px;">🎯 SAC Load Target:</span>
@@ -3444,15 +3453,15 @@ class ExcelUploaderPro extends HTMLElement {
                       <button id="closeModelPickerBtn" type="button" style="background:none;border:none;cursor:pointer;font-size:14px;color:#556B82;padding:0 2px;">✕</button>
                     </div>
                     <div style="padding:6px 10px;border-bottom:1px solid #E9EEF3;flex-shrink:0;">
-                      <input type="text" id="modelPickerFilterInp" placeholder="🔍 Buscar por descripción, nombre técnico o ID…"
+                      <input type="text" id="modelPickerFilterInp" placeholder="🔍 Search by description, technical name or ID…"
                         value="${this._esc(this._modelPickerFilter)}"
                         style="width:100%;box-sizing:border-box;border:1px solid #C0CDD8;border-radius:4px;padding:5px 8px;font-size:12px;outline:none;font-family:inherit;" />
                     </div>
                     <div style="overflow-y:auto;flex:1;">
                     ${this._sacModelsLoading
-                      ? '<div style="padding:20px;text-align:center;color:#556B82;font-size:12px;">⏳ Cargando modelos…</div>'
+                      ? '<div style="padding:20px;text-align:center;color:#556B82;font-size:12px;">⏳ Loading models…</div>'
                       : filtered.length === 0
-                        ? `<div style="padding:20px;text-align:center;color:#BB0000;font-size:12px;">${filterTerm ? 'Sin resultados para "' + this._esc(filterTerm) + '"' : 'Sin modelos disponibles o sin permisos DIS'}</div>`
+                        ? `<div style="padding:20px;text-align:center;color:#BB0000;font-size:12px;">${filterTerm ? 'No results for "' + this._esc(filterTerm) + '"' : 'No models available or no DIS permissions'}</div>`
                         : renderGroup('📋 Planning', '#2E7D32', planning) + renderGroup('📊 Actual / Otros', '#005CB9', other)
                     }
                     </div>
@@ -3559,7 +3568,7 @@ class ExcelUploaderPro extends HTMLElement {
               ${this._targetVersion && this._targetDate
                 ? (this._sacModelId
                     ? '<span class="sac-target-badge" style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">✅ ' + this._esc(this._targetVersion) + ' · ' + this._esc(this._targetDate) + ' → ' + this._esc(this._sacModelId) + '</span>'
-                    : '<span class="sac-target-badge" style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">✅ ' + this._esc(this._targetVersion) + ' · ' + this._esc(this._targetDate) + ' <span style=\'color:#B45309\'>(sin Model ID — solo evento)</span></span>'
+                    : '<span class="sac-target-badge" style="background:#E6F9EC;color:#107E3E;border:1px solid #A3E6BF;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">✅ ' + this._esc(this._targetVersion) + ' · ' + this._esc(this._targetDate) + ' <span style=\'color:#B45309\'>(no Model ID — event only)</span></span>'
                   )
                 : '<span class="sac-target-badge" style="background:#FFF8E6;color:#B45309;border:1px solid #FCD34D;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;">⚠️ Configura Version y Period antes de sincronizar</span>'
               }
