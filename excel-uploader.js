@@ -19,7 +19,7 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.11.4';
+const _EPM_VERSION = '3.11.5';
 
 const _EPM_CHANGELOG = [
   { v: '3.11.1', date: '2026-11-25', title: 'Fix: Update vs Append behavior, Version/Date filter in accumulation, user detection',
@@ -1204,59 +1204,14 @@ class ExcelUploaderPro extends HTMLElement {
     const isNonReplace = this._importMethod === 'update' || this._importMethod === 'append';
     if (isNonReplace) {
       const isAccumMode = sacRows.some(r => r._wasAccumulated);
-      const modeLabel  = this._importMethod === 'update' ? (isAccumMode ? 'Update (Acumular)' : 'Update') : (isAccumMode ? 'Append (Acumular)' : 'Append');
+      const modeLabel  = this._importMethod === 'update' ? (isAccumMode ? 'Update + Accumulate' : 'Update') : (isAccumMode ? 'Append + Accumulate' : 'Append');
       const ver        = this._targetVersion || '—';
       const dat        = this._targetDate    || '—';
-      let rowCountLine = '';
-
-      if (this._existingDataInfo && typeof this._existingDataInfo === 'object') {
-        // ── Source A: SAC Table_1 bridge (injected by story script) ──────────────
-        const rc = Number(this._existingDataInfo.rowCount ?? 0);
-        if (rc > 0) {
-          rowCountLine = '📊 ' + rc + ' existing row(s) found in model (via story table).\n\n';
-        } else if (this._existingDataInfo.hasData === false) {
-          rowCountLine = '✅ No existing data found for this Version/Period (via story table).\n\n';
-        }
-      } else {
-        // ── Source B: OData Export endpoint fallback ──────────────────────────────
-        _setLoading('🔍 Checking for existing data for Version=' + ver + ' / Date=' + dat + '…');
-        try {
-          const existing = await this._fetchExistingDataOData(ver === '—' ? null : ver, dat === '—' ? null : dat);
-          if (existing && existing.length > 0) {
-            rowCountLine = '📊 ' + existing.length + ' existing row(s) found.\n\n';
-          }
-        } catch (_) {}
-      }
-
-      // Build per-row accumulation preview for confirm dialog
-      let accumPreview = '';
-      if (isAccumMode) {
-        accumPreview = '📊 Accumulated totals (existing + increment → final to upload):\n';
-        for (const r of sacRows) {
-          if (!r._wasAccumulated) continue;
-          const prevKeys = Object.keys(r).filter(k => k.startsWith('_prevVal_'));
-          const idCol = sacCols.find(c =>
-            !c.startsWith('_') &&
-            !prevKeys.map(pk => pk.replace('_prevVal_', '')).includes(c) &&
-            c !== 'Version' && c !== 'Date'
-          ) || sacCols[0];
-          for (const pk of prevKeys) {
-            const mCol = pk.replace('_prevVal_', '');
-            const prev = Number(r[pk] || 0);
-            const total = parseFloat(r[mCol]) || 0;
-            const inc   = total - prev;
-            accumPreview += '  ' + (r[idCol] || '?') + ' [' + mCol + ']: '
-              + prev.toLocaleString() + ' + ' + inc.toLocaleString()
-              + ' → ' + total.toLocaleString() + '\n';
-          }
-        }
-        accumPreview += '\n';
-      }
 
       const disNote = isAccumMode
         ? 'Accumulate mode: the widget sums your uploaded increments to the existing SAC values before sending to DIS.\nSAC DIS will store the final accumulated totals shown above.'
         : this._importMethod === 'update'
-          ? 'Update mode: SAC DIS replaces matching rows with the uploaded values.\nRows in SAC that are NOT in the Excel are automatically appended to the CSV so DIS never deletes them.\nIf existingDataInfo has data, the widget adds those preserved rows before uploading.'
+          ? 'Update mode: SAC DIS replaces matching rows with the uploaded values.\nRows in SAC that are NOT in the Excel are automatically appended to the CSV so DIS never deletes them.\nIf existingDataInfo is populated, the widget adds those preserved rows before uploading.'
           : 'Append mode: adds new rows; existing rows with matching keys are replaced.\nOnly available for public versions (factData). For private versions, DIS replaces the full block.';
       const proceed = await this._showConfirmModal({ modeLabel, ver, dat, sacRows, sacCols, isAccumMode, disNote });
       if (!proceed) {
