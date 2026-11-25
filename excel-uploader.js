@@ -19,7 +19,7 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.11.5';
+const _EPM_VERSION = '3.11.6';
 
 const _EPM_CHANGELOG = [
   { v: '3.11.1', date: '2026-11-25', title: 'Fix: Update vs Append behavior, Version/Date filter in accumulation, user detection',
@@ -2408,8 +2408,20 @@ class ExcelUploaderPro extends HTMLElement {
     const backToAuditListBtn = shadow.getElementById('backToAuditListBtn');
     if (backToAuditListBtn) backToAuditListBtn.addEventListener('click', () => { this._selectedAuditId = null; this._render(); });
 
-    const publishReadyBtn = shadow.getElementById('publishReadyBtn');
-    if (publishReadyBtn) publishReadyBtn.addEventListener('click', () => { this._showPublishModal = true; this._render(); });
+    const refreshTableBtn = shadow.getElementById('refreshTableBtn');
+    if (refreshTableBtn) refreshTableBtn.addEventListener('click', () => {
+      this._notify('↺ Refreshing SAC table…', 'info');
+      this.dispatchEvent(new CustomEvent('dataReady', { bubbles: true, composed: true }));
+    });
+
+    const publishVersionBtn = shadow.getElementById('publishVersionBtn');
+    if (publishVersionBtn) publishVersionBtn.addEventListener('click', () => {
+      this._notify('📢 Publish requested — connect onPublishRequested in the SAC story to your planning model.', 'info');
+      this.dispatchEvent(new CustomEvent('publishRequested', {
+        bubbles: true, composed: true,
+        detail: { modelId: this._sacModelId, version: this._targetVersion, date: this._targetDate }
+      }));
+    });
 
     const closePublishModalBtn = shadow.getElementById('closePublishModalBtn');
     if (closePublishModalBtn) closePublishModalBtn.addEventListener('click', () => { this._showPublishModal = false; this._render(); });
@@ -2697,24 +2709,6 @@ class ExcelUploaderPro extends HTMLElement {
         if (!this._sacModelId || finalRec?.disStatus === 'OK') {
           const infoRows = finalRec?.disWrittenRows != null ? ' — ' + finalRec.disWrittenRows + ' rows written' : '';
           this._notify('🟢 LOAD COMPLETE — ' + loadId + ' · ' + this._loadStrategy + infoRows + ' → SAP Analytics Cloud ✅', 'success');
-          if (this._sacModelId) {
-            const shadow = this._shadow;
-            this._reloadTimer = setTimeout(() => {
-              this._notify('🔄 Recargando página SAC… Haz clic en el widget para cancelar.', 'info');
-              this._reloadTimer = setTimeout(() => window.location.reload(), 4000);
-            }, 3000);
-            this._reloadCancelHandler = () => {
-              if (!this._reloadTimer) return;
-              clearTimeout(this._reloadTimer);
-              this._reloadTimer = null;
-              shadow.removeEventListener('click', this._reloadCancelHandler);
-              shadow.removeEventListener('keydown', this._reloadCancelHandler);
-              this._reloadCancelHandler = null;
-              this._notify('ℹ️ Recarga cancelada. Refresca la tabla SAC manualmente cuando quieras.', 'info');
-            };
-            shadow.addEventListener('click', this._reloadCancelHandler);
-            shadow.addEventListener('keydown', this._reloadCancelHandler);
-          }
         } else if (finalRec?.disStatus === 'PARTIAL') {
           const reason = finalRec.disError ? ' · ' + finalRec.disError.slice(0, 120) : '';
           this._notify('⚠️ PARTIAL LOAD — ' + loadId + ': ' + (finalRec.disWrittenRows || '0') + ' written, ' + (finalRec.disFailedRows || '?') + ' rejected. Check the audit log.' + reason, 'warning');
@@ -2743,7 +2737,7 @@ class ExcelUploaderPro extends HTMLElement {
         ) || sacCols[0] || 'Item';
 
         const thead = '<tr><th style="text-align:left;padding:6px 10px;color:#7BA3C0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid rgba(100,180,255,0.15);">'
-          + keyCol + '</th>'
+          + this._esc(keyCol) + '</th>'
           + measureCols.map(() =>
               '<th style="text-align:right;padding:6px 8px;color:#7BA3C0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid rgba(100,180,255,0.15);">Existing</th>'
             + '<th style="text-align:right;padding:6px 8px;color:#7BA3C0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid rgba(100,180,255,0.15);">+ Upload</th>'
@@ -2761,7 +2755,7 @@ class ExcelUploaderPro extends HTMLElement {
               + '<td style="text-align:right;padding:5px 8px;color:#5BB8F5;font-size:12px;">+' + inc.toLocaleString() + '</td>'
               + '<td style="text-align:right;padding:5px 8px;color:#E8F4FD;font-weight:600;font-size:12px;">' + total.toLocaleString() + '</td>';
           }).join('');
-          return '<tr><td style="padding:5px 10px;color:#C8DFF0;font-size:12px;">' + (r[keyCol] || '—') + '</td>' + cells + '</tr>';
+          return '<tr><td style="padding:5px 10px;color:#C8DFF0;font-size:12px;">' + this._esc(r[keyCol] || '—') + '</td>' + cells + '</tr>';
         }).join('');
 
         tableHTML = '<div style="background:#0F1E2E;border:1px solid rgba(100,180,255,0.12);border-radius:8px;overflow:hidden;">'
@@ -2798,7 +2792,7 @@ class ExcelUploaderPro extends HTMLElement {
               + '<div style="color:rgba(255,255,255,0.6);font-size:11px;margin-top:1px;">Upload Confirmation</div>'
             + '</div>'
             + '<div style="margin-left:auto;background:' + badgeColor + ';color:#fff;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;letter-spacing:.5px;white-space:nowrap;">'
-              + modeLabel.toUpperCase()
+              + this._esc(modeLabel.toUpperCase())
             + '</div>'
           + '</div>'
 
@@ -2810,11 +2804,11 @@ class ExcelUploaderPro extends HTMLElement {
               + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
                 + '<div>'
                   + '<div style="color:#7BA3C0;font-size:10px;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Version</div>'
-                  + '<div style="color:#E8F4FD;font-size:15px;font-weight:700;">' + ver + '</div>'
+                  + '<div style="color:#E8F4FD;font-size:15px;font-weight:700;">' + this._esc(ver) + '</div>'
                 + '</div>'
                 + '<div>'
                   + '<div style="color:#7BA3C0;font-size:10px;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Period</div>'
-                  + '<div style="color:#E8F4FD;font-size:15px;font-weight:700;">' + dat + '</div>'
+                  + '<div style="color:#E8F4FD;font-size:15px;font-weight:700;">' + this._esc(dat) + '</div>'
                 + '</div>'
               + '</div>'
               + '<div style="border-top:1px solid rgba(100,180,255,0.1);margin-top:10px;padding-top:10px;font-size:12px;">' + rowsSummary + '</div>'
@@ -2826,7 +2820,7 @@ class ExcelUploaderPro extends HTMLElement {
             // Info note
             + '<div style="background:rgba(0,112,242,0.08);border:1px solid rgba(0,112,242,0.22);border-radius:8px;padding:12px 14px;display:flex;gap:10px;align-items:flex-start;">'
               + '<svg width="16" height="16" viewBox="0 0 16 16" style="flex-shrink:0;margin-top:1px;"><circle cx="8" cy="8" r="7" stroke="#5BB8F5" stroke-width="1.2" fill="none"/><text x="8" y="12.5" text-anchor="middle" font-size="9.5" fill="#5BB8F5" font-weight="bold">i</text></svg>'
-              + '<div style="color:#96C4E8;font-size:12px;line-height:1.65;">' + disNote.replace(/\n\s*/g, '<br>').replace(/^ℹ️\s*/, '') + '</div>'
+              + '<div style="color:#96C4E8;font-size:12px;line-height:1.65;">' + this._esc(disNote).replace(/\n\s*/g, '<br>') + '</div>'
             + '</div>'
 
           + '</div>'
@@ -2903,10 +2897,28 @@ class ExcelUploaderPro extends HTMLElement {
     );
 
     const toNum = v => parseFloat(String(v ?? 0).replace(/,/g, '')) || 0;
+
+    // Pre-group uploaded rows by composite key to handle duplicate keys in Excel.
+    // Measures are summed within each key group before crossing with existing SAC rows.
+    const keyOf = row => keyCols.map(k => cleanId(row[k])).join('||');
+    const groupedMap = new Map();
+    for (const row of uploadedSacRows) {
+      const k = keyOf(row);
+      if (!groupedMap.has(k)) {
+        groupedMap.set(k, { ...row });
+      } else {
+        const agg = groupedMap.get(k);
+        for (const mCol of activeMeasureCols) {
+          agg[mCol] = String(toNum(agg[mCol]) + toNum(row[mCol]));
+        }
+      }
+    }
+    const deduplicatedRows = Array.from(groupedMap.values());
+
     const matchedExistingIdx = new Set();
 
-    // 1. Process uploaded rows: accumulate (append) or replace (update) matched existing rows
-    const mergedRows = uploadedSacRows.map(uploaded => {
+    // 1. Process deduplicated uploaded rows: accumulate (append) or replace (update)
+    const mergedRows = deduplicatedRows.map(uploaded => {
       const exIdx = filteredExisting.findIndex(ex =>
         keyCols.every(k => cleanId(ex[k]) === cleanId(uploaded[k]))
       );
@@ -3499,7 +3511,7 @@ class ExcelUploaderPro extends HTMLElement {
               <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;">
                 <li style="font-size:12px;color:#5A4200;line-height:1.5;">You need <em>Create and Edit Stories</em> and <em>Planning</em> permissions to publish.</li>
                 <li style="font-size:12px;color:#5A4200;line-height:1.5;">If you loaded with <strong>DELTA</strong> strategy, publishing updates only the matching key records and inserts new ones — non-matching rows in the model are preserved.</li>
-                <li style="font-size:12px;color:#5A4200;line-height:1.5;">If the Publish option is greyed out, contact your SAC administrator to verify your permissions on model <strong>PLAN_CAPEX_PLANNING</strong>.</li>
+                <li style="font-size:12px;color:#5A4200;line-height:1.5;">If the Publish option is greyed out, contact your SAC administrator to verify your permissions on model <strong>${this._esc(this._sacModelId || 'your model')}</strong>.</li>
               </ul>
             </div>
           </div>
@@ -3833,13 +3845,16 @@ class ExcelUploaderPro extends HTMLElement {
             ${rec.disStatus === 'OK' ? `
             <div style="margin:8px 0 4px;padding:14px 18px;border-radius:8px;background:linear-gradient(135deg,#E6F9EC,#EBF7FF);border:2px solid #107E3E;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
               <div style="display:flex;align-items:center;gap:12px;">
-                <span style="font-size:22px;line-height:1;">📋</span>
+                <span style="font-size:22px;line-height:1;">✅</span>
                 <div>
-                  <div style="font-size:13px;font-weight:800;color:#107E3E;">Data loaded — review the snapshot below, then publish when ready</div>
-                  <div style="font-size:11px;color:#1D6B2E;margin-top:3px;">Once you have verified the rows, publish the planning version in SAP Analytics Cloud to make it visible to all users.</div>
+                  <div style="font-size:13px;font-weight:800;color:#107E3E;">Data loaded successfully into SAC</div>
+                  <div style="font-size:11px;color:#1D6B2E;margin-top:3px;">Refresh the SAC table to see the new values, then publish when ready.</div>
                 </div>
               </div>
-              <button class="btn" id="publishReadyBtn" type="button" style="background:#107E3E;color:#FFF;padding:8px 16px;font-size:12px;font-weight:700;border-radius:6px;white-space:nowrap;border:none;cursor:pointer;">📢 How to Publish</button>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn" id="refreshTableBtn" type="button" style="background:#0070F2;color:#FFF;padding:8px 16px;font-size:12px;font-weight:700;border-radius:6px;white-space:nowrap;border:none;cursor:pointer;">↺ Refresh SAC Table</button>
+                <button class="btn" id="publishVersionBtn" type="button" style="background:#107E3E;color:#FFF;padding:8px 16px;font-size:12px;font-weight:700;border-radius:6px;white-space:nowrap;border:none;cursor:pointer;">📢 Publish Version</button>
+              </div>
             </div>
             ` : ''}
 
@@ -4230,8 +4245,8 @@ class ExcelUploaderPro extends HTMLElement {
                 {
                   id: 'append', icon: '➕', label: 'Append',
                   desc: isPrivate
-                    ? 'Suma los valores del Excel a los datos existentes (acumulación client-side). Inserta filas nuevas y conserva las que no están en el Excel. Igual que Update pero con intención de incremento.'
-                    : 'Acumula los valores de medida para las claves de dimensión coincidentes (suma a los importes existentes).',
+                    ? 'Sums Excel values to existing SAC data (client-side accumulation). Inserts new rows and preserves rows not in the Excel. Same as Update but with increment intent.'
+                    : 'Accumulates measure values for matching dimension keys (adds to existing amounts).',
                   note: null
                 },
               ];
@@ -4335,7 +4350,7 @@ class ExcelUploaderPro extends HTMLElement {
                   return `
                   <div id="modelPickerDropdown" style="position:absolute;z-index:9999;top:calc(100% + 2px);left:0;min-width:420px;max-height:360px;display:flex;flex-direction:column;background:#fff;border:1px solid #0070F2;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);">
                     <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid #E9EEF3;background:#F8FAFC;border-radius:8px 8px 0 0;flex-shrink:0;">
-                      <span style="font-weight:700;font-size:11px;color:#1D2D3E;">Modelos SAC DIS — ${filtered.length} de ${this._sacModels.length}</span>
+                      <span style="font-weight:700;font-size:11px;color:#1D2D3E;">SAC DIS Models — ${filtered.length} of ${this._sacModels.length}</span>
                       <button id="closeModelPickerBtn" type="button" style="background:none;border:none;cursor:pointer;font-size:14px;color:#556B82;padding:0 2px;">✕</button>
                     </div>
                     <div style="padding:6px 10px;border-bottom:1px solid #E9EEF3;flex-shrink:0;">
