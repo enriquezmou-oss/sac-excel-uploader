@@ -19,9 +19,17 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.10.0';
+const _EPM_VERSION = '3.11.0';
 
 const _EPM_CHANGELOG = [
+  { v: '3.11.0', date: '2026-11-25', title: '3 bug fixes + client-side accumulation for Update mode',
+    items: [
+      'Fix: auto page reload (v3.10.0) was too fast (1.8+2.2 s). Now 3+4 s = 7 s total. Any click or keydown inside the widget cancels the reload — user sees "Recarga cancelada" toast and can review the Audit Monitor without being interrupted.',
+      'Fix: CSV/TXT audit export was missing IMPORT_METHOD column in the Audit Activity Log section (logHeaders had 10 columns but data rows had 11). Now aligned with the XLSX export.',
+      'Fix: Append button description for privateFactData incorrectly said "Accumulates measure values". Corrected to: "SAC DIS with privateFactData REPLACES matching rows — does NOT accumulate."',
+      'Feature — client-side accumulation: when Update mode is used AND the SAC story script passes existingDataInfo with a "rows" array (actual current values, not just rowCount), the widget adds the uploaded increments to the existing SAC values before sending to DIS. The confirm dialog shows a per-row preview: existing + increment → final. DIS receives the final accumulated totals.',
+      'SAC story script update required to enable accumulation: replace the existing existingDataInfo assignment with the extended version (see CHANGELOG.md for the script template).',
+    ] },
   { v: '3.10.0', date: '2026-11-25', title: 'Auto-reload SAC page after LOAD COMPLETE',
     items: [
       'After a successful DIS upload (🟢 LOAD COMPLETE), the widget automatically reloads the SAC story page so the updated data is visible immediately — no manual refresh needed.',
@@ -333,6 +341,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._docClickBound       = false;
     this._docClickHandler     = null;
     this._reloadTimer         = null;
+    this._reloadCancelHandler = null;
     this._existingDataInfo    = null; // set by SAC story script via existingDataInfo property
     this._ensureXLSX();
     if (this._sacModelId) this._fetchModelInfo();
@@ -355,6 +364,11 @@ class ExcelUploaderPro extends HTMLElement {
     if (this._searchRaf) cancelAnimationFrame(this._searchRaf);
     if (this._auditSearchRaf) cancelAnimationFrame(this._auditSearchRaf);
     if (this._reloadTimer) { clearTimeout(this._reloadTimer); this._reloadTimer = null; }
+    if (this._reloadCancelHandler && this._shadow) {
+      this._shadow.removeEventListener('click', this._reloadCancelHandler);
+      this._shadow.removeEventListener('keydown', this._reloadCancelHandler);
+      this._reloadCancelHandler = null;
+    }
     if (this._docClickHandler) {
       document.removeEventListener('click', this._docClickHandler);
       this._docClickHandler = null;
@@ -1171,9 +1185,17 @@ class ExcelUploaderPro extends HTMLElement {
     // ── 1b. For Update/Append: data check + confirm before uploading ─────────────
     // Primary source: existingDataInfo property set by SAC story script (Table_1).
     // Fallback: OData Export endpoint (returns 400 on most tenants — requires OAuth).
+
+    // Client-side accumulation: if Update mode and existingDataInfo carries row data,
+    // add uploaded increments to existing values before sending to DIS.
+    if (this._importMethod === 'update' && this._existingDataInfo?.rows?.length > 0) {
+      sacRows = this._accumulateWithExisting(sacRows, this._existingDataInfo.rows, sacCols);
+    }
+
     const isNonReplace = this._importMethod === 'update' || this._importMethod === 'append';
     if (isNonReplace) {
-      const modeLabel  = this._importMethod === 'update' ? 'Update' : 'Append';
+      const isAccumMode = this._importMethod === 'update' && sacRows.some(r => r._wasAccumulated);
+      const modeLabel  = this._importMethod === 'update' ? (isAccumMode ? 'Update (Accumulate)' : 'Update') : 'Append';
       const ver        = this._targetVersion || '—';
       const dat        = this._targetDate    || '—';
       let rowCountLine = '';
@@ -1197,12 +1219,40 @@ class ExcelUploaderPro extends HTMLElement {
         } catch (_) {}
       }
 
-      const disNote = this._importMethod === 'update'
-        ? 'ℹ️ Update: SAC DIS replaces matching rows with the values you upload.\n   Upload the FINAL value you want (e.g. 160,000), not the increment (e.g. 60,000).\n'
-        : 'ℹ️ Append: adds new rows; existing rows with matching keys are REPLACED, not accumulated.\n   Only available for public versions (factData). For private versions DIS replaces matching rows.\n';
+      // Build per-row accumulation preview for confirm dialog
+      let accumPreview = '';
+      if (isAccumMode) {
+        accumPreview = '📊 Accumulated totals (existing + increment → final to upload):\n';
+        for (const r of sacRows) {
+          if (!r._wasAccumulated) continue;
+          const prevKeys = Object.keys(r).filter(k => k.startsWith('_prevVal_'));
+          const idCol = sacCols.find(c =>
+            !c.startsWith('_') &&
+            !prevKeys.map(pk => pk.replace('_prevVal_', '')).includes(c) &&
+            c !== 'Version' && c !== 'Date'
+          ) || sacCols[0];
+          for (const pk of prevKeys) {
+            const mCol = pk.replace('_prevVal_', '');
+            const prev = Number(r[pk] || 0);
+            const total = parseFloat(r[mCol]) || 0;
+            const inc   = total - prev;
+            accumPreview += '  ' + (r[idCol] || '?') + ' [' + mCol + ']: '
+              + prev.toLocaleString() + ' + ' + inc.toLocaleString()
+              + ' → ' + total.toLocaleString() + '\n';
+          }
+        }
+        accumPreview += '\n';
+      }
+
+      const disNote = isAccumMode
+        ? 'ℹ️ Accumulate mode: the widget adds your uploaded increments to the existing SAC values.\n   SAC DIS will store the final accumulated totals shown above.\n'
+        : this._importMethod === 'update'
+          ? 'ℹ️ Update: SAC DIS replaces matching rows with the values you upload.\n   Upload the FINAL value you want (e.g. 160,000), not the increment (e.g. 60,000).\n   Tip: pass row data via existingDataInfo to enable automatic accumulation.\n'
+          : 'ℹ️ Append: adds new rows; existing rows with matching keys are REPLACED, not accumulated.\n   Only available for public versions (factData). For private versions DIS replaces matching rows.\n';
       const proceed = window.confirm(
         '⚠️ ' + modeLabel + ' — confirm upload\n\n' +
         rowCountLine +
+        accumPreview +
         'Version : ' + ver + '\n' +
         'Period  : ' + dat + '\n\n' +
         disNote + '\n' +
@@ -1215,8 +1265,8 @@ class ExcelUploaderPro extends HTMLElement {
       }
     }
 
-    // Build CSV from (merged) sacRows
-    const sacColsFinal = sacRows.length > 0 ? Object.keys(sacRows[0]) : sacCols;
+    // Build CSV from sacRows — filter out system/accumulation helper fields
+    const sacColsFinal = sacRows.length > 0 ? Object.keys(sacRows[0]).filter(k => !k.startsWith('_')) : sacCols;
     const csvLines = [sacColsFinal.join(',')];
     for (const r of sacRows) {
       const vals = sacColsFinal.map(col => {
@@ -2688,10 +2738,22 @@ class ExcelUploaderPro extends HTMLElement {
           const infoRows = finalRec?.disWrittenRows != null ? ' — ' + finalRec.disWrittenRows + ' rows written' : '';
           this._notify('🟢 LOAD COMPLETE — ' + loadId + ' · ' + this._loadStrategy + infoRows + ' → SAP Analytics Cloud ✅', 'success');
           if (this._sacModelId) {
+            const shadow = this._shadow;
             this._reloadTimer = setTimeout(() => {
-              this._notify('🔄 Recargando página SAC para mostrar los datos actualizados…', 'info');
-              this._reloadTimer = setTimeout(() => window.location.reload(), 2200);
-            }, 1800);
+              this._notify('🔄 Recargando página SAC… Haz clic en el widget para cancelar.', 'info');
+              this._reloadTimer = setTimeout(() => window.location.reload(), 4000);
+            }, 3000);
+            this._reloadCancelHandler = () => {
+              if (!this._reloadTimer) return;
+              clearTimeout(this._reloadTimer);
+              this._reloadTimer = null;
+              shadow.removeEventListener('click', this._reloadCancelHandler);
+              shadow.removeEventListener('keydown', this._reloadCancelHandler);
+              this._reloadCancelHandler = null;
+              this._notify('ℹ️ Recarga cancelada. Refresca la tabla SAC manualmente cuando quieras.', 'info');
+            };
+            shadow.addEventListener('click', this._reloadCancelHandler);
+            shadow.addEventListener('keydown', this._reloadCancelHandler);
           }
         } else if (finalRec?.disStatus === 'PARTIAL') {
           const reason = finalRec.disError ? ' · ' + finalRec.disError.slice(0, 120) : '';
@@ -2699,6 +2761,54 @@ class ExcelUploaderPro extends HTMLElement {
         }
       });
     }
+  }
+
+  _accumulateWithExisting(uploadedSacRows, existingRows, sacCols) {
+    if (!uploadedSacRows.length || !existingRows.length) return uploadedSacRows;
+
+    // Identify measure SAC column IDs from loaded model dimensions
+    const measureIds = new Set(
+      (this._sacModelDimensions || [])
+        .filter(d => d.isMeasure)
+        .map(d => d.id.toUpperCase())
+    );
+
+    // Fallback: treat numeric columns as measures if dimension info not loaded
+    const activeMeasureCols = measureIds.size > 0
+      ? sacCols.filter(c => measureIds.has(c.toUpperCase()))
+      : sacCols.filter(c => {
+          const s = uploadedSacRows.find(r => r[c] !== undefined && r[c] !== '');
+          return s && !isNaN(parseFloat(s[c]));
+        });
+
+    if (!activeMeasureCols.length) return uploadedSacRows;
+
+    const measureSet = new Set(activeMeasureCols.map(c => c.toUpperCase()));
+    // Key cols = all SAC cols that are not measures, not VERSION / DATE (auto-set at widget level)
+    const keyCols = sacCols.filter(c =>
+      !measureSet.has(c.toUpperCase()) && c !== 'Version' && c !== 'Date'
+    );
+
+    const toNum = v => parseFloat(String(v ?? 0).replace(/,/g, '')) || 0;
+
+    return uploadedSacRows.map(uploaded => {
+      const existing = existingRows.find(ex =>
+        keyCols.every(k =>
+          String(ex[k] ?? '').trim().toUpperCase() === String(uploaded[k] ?? '').trim().toUpperCase()
+        )
+      );
+      if (!existing) return uploaded; // no match → insert as new row
+
+      const result = { ...uploaded };
+      for (const mCol of activeMeasureCols) {
+        const existVal = toNum(existing[mCol]);
+        const uploadVal = toNum(uploaded[mCol]);
+        result[mCol] = String(existVal + uploadVal);
+        result['_prevVal_' + mCol] = existVal;
+      }
+      result._wasAccumulated = true;
+      return result;
+    });
   }
 
   _createNewValidationRule() {
@@ -3046,7 +3156,7 @@ class ExcelUploaderPro extends HTMLElement {
 
       if (cfg.includeAuditDetail && allChangeLogs.length > 0) {
         content += LF_CH + '--- AUDIT ACTIVITY LOG ---' + LF_CH;
-        const logHeaders = ['LOAD_ID', 'LOAD_STRATEGY', 'LOAD_DATE', 'SAP_USER', 'EVENT_TIME', 'ACTION_TYPE', 'TARGET', 'DESCRIPTION', 'PREVIOUS_VALUE', 'NEW_VALUE'];
+        const logHeaders = ['LOAD_ID', 'LOAD_STRATEGY', 'IMPORT_METHOD', 'LOAD_DATE', 'SAP_USER', 'EVENT_TIME', 'ACTION_TYPE', 'TARGET', 'DESCRIPTION', 'PREVIOUS_VALUE', 'NEW_VALUE'];
         content += logHeaders.map(fmtCell).join(sep) + LF_CH;
         allChangeLogs.forEach(l => { content += l.map(fmtCell).join(sep) + LF_CH; });
       }
@@ -3942,7 +4052,7 @@ class ExcelUploaderPro extends HTMLElement {
                 {
                   id: 'append', icon: '➕', label: 'Append',
                   desc: isPrivate
-                    ? 'Accumulates measure values for matching dimension keys (adds to existing amounts). Public versions (factData) only.'
+                    ? 'SAC DIS with privateFactData (planning) REPLACES matching rows — does NOT accumulate. Accumulation only works with public factData models. Use Update + accumulate mode (widget-side) instead.'
                     : 'Accumulates measure values for matching dimension keys (adds to existing amounts).',
                   note: isPrivate
                     ? '⚠️ Append is only available for public fact data (factData). For private planning versions (privateFactData) SAC DIS will Replace matching rows regardless of this setting.'

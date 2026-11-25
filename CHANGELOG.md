@@ -5,7 +5,47 @@ Format: **[version] — date — summary**
 
 ---
 
-## [3.10.0] — 2026-11-25
+## [3.11.0] — 2026-11-25
+
+### 3 bug fixes + client-side accumulation para Update mode
+
+- **Fix: recarga automática más generosa y cancelable** — el reload pasaba demasiado rápido (1.8+2.2 s). Ahora tarda 3+4 s = 7 s en total. Cualquier clic o tecla dentro del widget cancela la recarga y muestra "Recarga cancelada — refresca la tabla SAC manualmente cuando quieras."
+- **Fix: IMPORT_METHOD faltaba en CSV/TXT** — el Audit Activity Log de las exportaciones CSV/TXT tenía 10 columnas en la cabecera pero 11 en los datos (faltaba IMPORT_METHOD). Ahora alineado con el XLSX.
+- **Fix: descripción de Append para privateFactData incorrecta** — decía "acumula valores" cuando en realidad DIS reemplaza las filas. Corregido.
+- **Feature: acumulación client-side en Update mode** — cuando el script SAC pasa `existingDataInfo` con un array `rows` (valores actuales por fila), el widget suma los incrementos que subes con los valores existentes antes de enviar a DIS. El diálogo de confirmación muestra un preview por fila: `existente + incremento → total final`. DIS recibe los totales acumulados.
+
+#### Script SAC actualizado (reemplaza el `onResultChanged` de Table_1)
+
+```javascript
+// Table_1 → onResultChanged
+// Pasa los valores actuales al widget para habilitar acumulación automática
+var data   = Table_1.getDataBinding().getData();
+var rows   = [];
+var i;
+for (i = 0; i < data.rows.length; i++) {
+  var r = data.rows[i];
+  // Ajusta los nombres de columna para que coincidan con tu Excel
+  rows.push({
+    CAPEX_ITEM:  r["CAPEX_ITEM"],        // ← clave dimensional
+    AMOUNT:      parseFloat(r["AMOUNT"] || r["H1"] || 0),  // ← medida
+    COMPANY:     r["COMPANY"],
+    COSTCENTER:  r["COSTCENTER"],
+    ASSET_CLASS: r["ASSET_CLASS"],
+    CAPITALIZED: r["CAPITALIZED"]
+  });
+}
+ExcelUploaderPro_1.existingDataInfo = JSON.stringify({
+  rowCount: rows.length,
+  hasData:  rows.length > 0,
+  rows:     rows         // ← NUEVO: valores reales por fila
+});
+```
+
+> **Nota**: los nombres de columna en el objeto `rows` deben coincidir con los nombres de dimensión SAC que usa el widget (los que aparecen en la cabecera del CSV enviado a DIS). Consulta el mapeo de columnas configurado en el widget para verificarlos.
+
+---
+
+
 
 ### Auto-reload SAC page after LOAD COMPLETE
 
