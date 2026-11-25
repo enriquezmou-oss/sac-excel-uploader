@@ -5,6 +5,18 @@ Format: **[version] — date — summary**
 
 ---
 
+## [3.9.7] — 2026-11-25
+
+### 4 bug fixes + import method warnings per data type
+
+- **Fix Bug 1 (duplicate click listener)** — `document.addEventListener('click', …)` inside `_bindEvents()` was registered on every `_render()`, accumulating duplicate listeners with every UI update. Fixed with a `_docClickBound` one-time guard. Also fixed a state desync: clicking outside the model picker now sets `this._showModelPicker = false` (previously only hid the DOM element without updating state).
+- **Fix Bug 2 (dead Delta Preview block)** — the Delta Preview card in the render template was conditioned on `this._loadStrategy === 'DELTA'`, which is always `'FULL'` since the Full/Delta toggle was removed in v3.9.5. The entire permanently-false block is removed, along with the unreachable DELTA branch in `_callDISApi`.
+- **Fix Bug 3 (orphaned merge code)** — `_mergePlanningData()` method and the `_mergeWarningMsg` toast handler were left over from the v3.9.3 client-side merge approach (removed in v3.9.5). Both are now deleted.
+- **Fix Bug 4 (phantom audit record on cancel)** — the audit record was added to `_history` and `propertiesChanged` was dispatched **before** `_callDISApi` was called. If the user cancelled the confirmation dialog, a phantom record appeared in the Audit Monitor with no actual upload. Fix: `_callDISApi` now returns `{ cancelled: true }` on cancel; the caller immediately removes the phantom record before returning.
+- **Feature: import method warnings** — the Append button is now visually disabled (greyed out, `cursor:not-allowed`, tooltip) when `_sacImportType === 'privateFactData'`. An amber warning banner explains: *"Append is only available for public fact data (factData). For private planning versions SAC DIS will Replace matching rows regardless."* All three method descriptions updated with clearer language about DIS behaviour.
+
+---
+
 ## [3.9.6] — 2026-11-24
 
 ### SAC story bridge: data check via Table_1
