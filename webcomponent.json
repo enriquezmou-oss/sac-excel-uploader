@@ -1,6 +1,6 @@
 {
   "id": "com.sap.sac.exceluploaderpro",
-  "version": "3.11.5",
+  "version": "3.11.6",
   "name": "Excel Planning Uploader Pro",
   "description": "Multi-Sheet Consolidation, Transform & Convert, Alert Semaphores for SAC Planning",
   "newInstancePrefix": "ExcelUploaderPro_",
@@ -12,7 +12,7 @@
     {
       "kind": "main",
       "tag": "custom-excel-uploader-pro",
-      "url": "https://cdn.jsdelivr.net/gh/enriquezmou-oss/sac-excel-uploader@edcefda/excel-uploader.js",
+      "url": "https://cdn.jsdelivr.net/gh/enriquezmou-oss/sac-excel-uploader@69787ce/excel-uploader.js",
       "integrity": "",
       "ignoreIntegrity": true
     }
@@ -50,7 +50,10 @@
   },
   "events": {
     "dataReady": {
-      "description": "Triggered when the user clicks Synchronize on validated records"
+      "description": "Fired after a successful DIS upload and when the user clicks Refresh SAC Table. Connect to Table_1.getDataSource().refreshData() in the SAC story."
+    },
+    "publishRequested": {
+      "description": "Fired when the user clicks Publish Version. Connect to your planning model publish action in the SAC story. Detail: { modelId, version, date }."
     }
   }
 }
