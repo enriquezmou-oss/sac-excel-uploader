@@ -244,6 +244,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._xlsxReady = typeof XLSX !== 'undefined';
     this._showHelpModal = false;
     this._showChangelog = false;
+    this._changelogTab = 'changelog'; // 'changelog' | 'roadmap'
     this._showPublishModal = false;
 
     this._loadStrategy  = 'FULL';
@@ -1776,6 +1777,10 @@ class ExcelUploaderPro extends HTMLElement {
     const closeChangelogBtn = shadow.getElementById('closeChangelogBtn');
     if (toggleChangelogBtn) toggleChangelogBtn.addEventListener('click', () => { this._showChangelog = !this._showChangelog; this._showHelpModal = false; this._render(); });
     if (closeChangelogBtn) closeChangelogBtn.addEventListener('click', () => { this._showChangelog = false; this._render(); });
+    const tabChangelogBtn = shadow.getElementById('tabChangelogBtn');
+    const tabRoadmapBtn   = shadow.getElementById('tabRoadmapBtn');
+    if (tabChangelogBtn) tabChangelogBtn.addEventListener('click', () => { this._changelogTab = 'changelog'; this._render(); });
+    if (tabRoadmapBtn)   tabRoadmapBtn.addEventListener('click',   () => { this._changelogTab = 'roadmap';   this._render(); });
 
     shadow.querySelectorAll('.strategy-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -3268,6 +3273,46 @@ class ExcelUploaderPro extends HTMLElement {
           </ul>
         </div>`;
     }).join('');
+
+    const roadmapItems = [
+      { quarter: 'Q4 2026', status: 'next', color: '#0064D9', items: [
+        { icon: '🔄', title: 'refreshData() tras carga', desc: 'Reemplazar window.location.reload() por Table_1.getDataSource().refreshData() en onDataReady — sin perder filtros ni sesión.' },
+        { icon: '📅', title: 'Autorrelleno Version / Period desde Table_1', desc: 'Pasar targetVersion y targetDate desde los filtros activos de Table_1 al widget vía existingDataInfo, eliminando la entrada manual.' },
+        { icon: '🔀', title: 'Version + Date en existingDataInfo.rows', desc: 'Incluir Version y Date en cada fila del payload para que _accumulateWithExisting filtre solo el período correcto y evite mezclar datos de otros meses.' },
+      ]},
+      { quarter: 'Q1 2027', status: 'planned', color: '#107E3E', items: [
+        { icon: '💾', title: 'Optimización localStorage audit', desc: 'Guardar snapshots completos solo en las 5 últimas cargas; para las anteriores, conservar solo metadatos. Previene QuotaExceededError con ficheros grandes.' },
+        { icon: '🔎', title: 'Delta automático', desc: 'Detectar qué filas cambiaron respecto a la última carga y subir solo el delta, reduciendo el volumen enviado a DIS.' },
+        { icon: '🗺️', title: 'Galería de plantillas de mapeo', desc: 'Perfiles predefinidos de mapeo de columnas para los modelos SAC más comunes (CAPEX, OPEX, Headcount). Cargar en un clic.' },
+      ]},
+      { quarter: 'Q2 2027', status: 'idea', color: '#E76500', items: [
+        { icon: '🤖', title: 'Mapeo de columnas asistido por IA', desc: 'Sugerir automáticamente el mapeo columna-dimensión usando el nombre y los valores de muestra del Excel contra las dimensiones del modelo SAC.' },
+        { icon: '🔗', title: 'Integración con SAC Data Actions', desc: 'Disparar una Data Action predefinida automáticamente al finalizar la carga, para ejecutar distribuciones o cálculos derivados.' },
+        { icon: '📊', title: 'Upload a múltiples modelos', desc: 'Subir a más de un modelo SAC en la misma sesión desde distintas pestañas del Excel, con confirmación por modelo.' },
+      ]},
+    ];
+
+    const roadmapHtml = roadmapItems.map(group => {
+      const statusLabel = group.status === 'next' ? '⚡ En progreso' : group.status === 'planned' ? '📋 Planificado' : '💡 Idea';
+      return `
+        <div style="margin-bottom:14px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <span style="background:${group.color};color:#FFF;border-radius:12px;padding:2px 12px;font-size:11px;font-weight:700;">${group.quarter}</span>
+            <span style="font-size:11px;color:#8A9BB0;">${statusLabel}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px;">
+            ${group.items.map(item => `
+              <div style="border:1px solid #D9E0E6;border-left:3px solid ${group.color};border-radius:6px;padding:9px 12px;background:#FAFBFC;">
+                <div style="font-size:13px;font-weight:600;color:#1D2D3E;margin-bottom:3px;">${item.icon} ${this._esc(item.title)}</div>
+                <div style="font-size:11px;color:#556B82;line-height:1.5;">${this._esc(item.desc)}</div>
+              </div>`).join('')}
+          </div>
+        </div>`;
+    }).join('');
+
+    const isChangelog = (this._changelogTab || 'changelog') === 'changelog';
+    const tabStyle = (active) => `padding:7px 18px;border-radius:16px;border:none;font-size:12px;font-weight:${active?'700':'500'};cursor:pointer;background:${active?'#1D2D3E':'transparent'};color:${active?'#FFF':'#556B82'};transition:all .15s;`;
+
     return `
       <div class="help-modal-overlay">
         <div class="help-modal-card">
@@ -3275,14 +3320,18 @@ class ExcelUploaderPro extends HTMLElement {
             <div style="display:flex;align-items:center;gap:10px;">
               <span style="background:#107E3E;color:#FFF;width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;">★</span>
               <div>
-                <h3 style="margin:0;color:#1D2D3E;font-size:16px;">What's New — Excel Planning Uploader Pro</h3>
-                <span style="font-size:11px;color:#556B82;">Version history and improvements</span>
+                <h3 style="margin:0;color:#1D2D3E;font-size:16px;">Excel Planning Uploader Pro</h3>
+                <span style="font-size:11px;color:#556B82;">v${_EPM_VERSION} · Version history &amp; Roadmap</span>
               </div>
             </div>
             <button class="btn" id="closeChangelogBtn" type="button">✕ Close</button>
           </div>
-          <div style="display:flex;flex-direction:column;gap:10px;max-height:420px;overflow:auto;">
-            ${rows}
+          <div style="display:flex;gap:4px;background:#F0F2F5;border-radius:20px;padding:3px;margin-bottom:14px;width:fit-content;">
+            <button id="tabChangelogBtn" type="button" style="${tabStyle(isChangelog)}">📋 What's New</button>
+            <button id="tabRoadmapBtn"   type="button" style="${tabStyle(!isChangelog)}">🗺️ Roadmap</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px;max-height:400px;overflow:auto;">
+            ${isChangelog ? rows : roadmapHtml}
           </div>
         </div>
       </div>`;
