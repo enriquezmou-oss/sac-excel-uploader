@@ -19,9 +19,15 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.9.8';
+const _EPM_VERSION = '3.9.9';
 
 const _EPM_CHANGELOG = [
+  { v: '3.9.9', date: '2026-11-25', title: '3 fixes: confirm dialog DIS note, listener cleanup, XLSX export method column',
+    items: [
+      'Confirmation dialog for Update/Append now explains clearly that DIS replaces matching rows — it does NOT accumulate values. For Update, the note reads "Upload the FINAL value you want (e.g. 160,000), not the increment (e.g. 60,000)".',
+      'Memory leak fixed: document click listener (model picker close) is now stored as _docClickHandler and removed in disconnectedCallback when the widget is destroyed.',
+      'XLSX/CSV/TXT audit export now includes IMPORT_METHOD column in both the main data sheet and the Audit_Activity_Log sheet.',
+    ] },
   { v: '3.9.8', date: '2026-11-25', title: 'Audit Monitor: strategy+method column, SAP user detection, SAC Help link',
     items: [
       'Audit Monitor Strategy column now shows import method badge alongside load strategy: "FULL 🗑️ Replace", "FULL ✏️ Update", "FULL ➕ Append". Audit detail panel also updated.',
@@ -318,6 +324,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._sacDimError         = '';
     this._sacDimPanelOpen     = true;
     this._docClickBound       = false;
+    this._docClickHandler     = null;
     this._existingDataInfo    = null; // set by SAC story script via existingDataInfo property
     this._ensureXLSX();
     if (this._sacModelId) this._fetchModelInfo();
@@ -339,6 +346,11 @@ class ExcelUploaderPro extends HTMLElement {
     if (this._toastTimer) clearTimeout(this._toastTimer);
     if (this._searchRaf) cancelAnimationFrame(this._searchRaf);
     if (this._auditSearchRaf) cancelAnimationFrame(this._auditSearchRaf);
+    if (this._docClickHandler) {
+      document.removeEventListener('click', this._docClickHandler);
+      this._docClickHandler = null;
+      this._docClickBound = false;
+    }
   }
 
   // ── SAC manifest property: currentUser ───────────────────────────────────────
@@ -1176,12 +1188,15 @@ class ExcelUploaderPro extends HTMLElement {
         } catch (_) {}
       }
 
+      const disNote = this._importMethod === 'update'
+        ? 'ℹ️ Update: SAC DIS replaces matching rows with the values you upload.\n   Upload the FINAL value you want (e.g. 160,000), not the increment (e.g. 60,000).\n'
+        : 'ℹ️ Append: adds new rows; existing rows with matching keys are REPLACED, not accumulated.\n   Only available for public versions (factData). For private versions DIS replaces matching rows.\n';
       const proceed = window.confirm(
         '⚠️ ' + modeLabel + ' — confirm upload\n\n' +
         rowCountLine +
         'Version : ' + ver + '\n' +
         'Period  : ' + dat + '\n\n' +
-        'SAC DIS will replace any existing rows whose dimension keys match the uploaded data.\n\n' +
+        disNote + '\n' +
         'Continue?'
       );
       if (!proceed) {
@@ -1788,14 +1803,15 @@ class ExcelUploaderPro extends HTMLElement {
     }
     if (!this._docClickBound) {
       this._docClickBound = true;
-      document.addEventListener('click', (e) => {
+      this._docClickHandler = (e) => {
         const picker = this._shadow && this._shadow.getElementById('modelPickerDropdown');
         const btn    = this._shadow && this._shadow.getElementById('browseModelsBtn');
         if (picker && !picker.contains(e.target) && e.target !== btn) {
           picker.style.display = 'none';
           this._showModelPicker = false;
         }
-      });
+      };
+      document.addEventListener('click', this._docClickHandler);
     }
 
     const sacDimPanelHeader = shadow.getElementById('sacDimPanelHeader');
@@ -2980,7 +2996,7 @@ class ExcelUploaderPro extends HTMLElement {
       }];
     }
 
-    const baseHeaders = ['LOAD_ID', 'LOAD_STRATEGY', 'SEMAPHORE_STATUS', 'TIMESTAMP', 'SAP_USER', 'ROW_NUM', 'SOURCE_WORKBOOK_SHEET'];
+    const baseHeaders = ['LOAD_ID', 'LOAD_STRATEGY', 'IMPORT_METHOD', 'SEMAPHORE_STATUS', 'TIMESTAMP', 'SAP_USER', 'ROW_NUM', 'SOURCE_WORKBOOK_SHEET'];
     if (cfg.includeComments) baseHeaders.push('BUSINESS_COMMENTS');
     if (cfg.includeAuditDetail) baseHeaders.push('AUDIT_TRACEABILITY_STATE', 'CELL_MODIFICATION_HISTORY');
     const finalHeaders = [...baseHeaders, ...chosenCols];
@@ -2993,14 +3009,14 @@ class ExcelUploaderPro extends HTMLElement {
         const editedCols = r._editedCols || {};
         const editSummary = Object.keys(editedCols).map(c => c + ': ' + editedCols[c].from + ' -> ' + editedCols[c].to).join(' | ');
         const stateLabel = r._isManual ? 'NEW / CLONED IN WIDGET' : (Object.keys(editedCols).length > 0 ? 'EDITED (' + Object.keys(editedCols).length + ' cols)' : 'ORIGINAL EXCEL');
-        const rowArr = [rec.id, rec.loadStrategy || 'FULL', rec.semaphoreStatus || 'GREEN', rec.timestamp, rec.user, r._rowNum, r._sourceFile];
+        const rowArr = [rec.id, rec.loadStrategy || 'FULL', rec.importMethod || 'replace', rec.semaphoreStatus || 'GREEN', rec.timestamp, rec.user, r._rowNum, r._sourceFile];
         if (cfg.includeComments) rowArr.push(r._fileComment || rec.file || 'No comment');
         if (cfg.includeAuditDetail) rowArr.push(stateLabel, editSummary || 'No changes');
         chosenCols.forEach(col => rowArr.push(r[col] ?? ''));
         dataRows.push(rowArr);
       });
       if (cfg.includeAuditDetail && rec.changeLog) {
-        rec.changeLog.forEach(l => allChangeLogs.push([rec.id, rec.loadStrategy || 'FULL', rec.timestamp, rec.user, l.time, l.type, l.target, l.detail, l.oldVal, l.newVal]));
+        rec.changeLog.forEach(l => allChangeLogs.push([rec.id, rec.loadStrategy || 'FULL', rec.importMethod || 'replace', rec.timestamp, rec.user, l.time, l.type, l.target, l.detail, l.oldVal, l.newVal]));
       }
     });
 
@@ -3044,7 +3060,7 @@ class ExcelUploaderPro extends HTMLElement {
     }
 
     if (cfg.includeAuditDetail && allChangeLogs.length > 0) {
-      const logHeader = ['LOAD_ID', 'LOAD_STRATEGY', 'LOAD_DATE', 'SAP_USER', 'EVENT_TIME', 'ACTION_TYPE', 'TARGET', 'DESCRIPTION', 'PREVIOUS_VALUE', 'NEW_VALUE'];
+      const logHeader = ['LOAD_ID', 'LOAD_STRATEGY', 'IMPORT_METHOD', 'LOAD_DATE', 'SAP_USER', 'EVENT_TIME', 'ACTION_TYPE', 'TARGET', 'DESCRIPTION', 'PREVIOUS_VALUE', 'NEW_VALUE'];
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([logHeader, ...allChangeLogs]), 'Audit_Activity_Log');
     }
 

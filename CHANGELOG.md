@@ -5,7 +5,17 @@ Format: **[version] — date — summary**
 
 ---
 
-## [3.9.8] — 2026-11-25
+## [3.9.9] — 2026-11-25
+
+### 3 fixes: confirm dialog DIS note, listener cleanup, XLSX export method column
+
+- **Confirm dialog clarified** — Update/Append confirmation dialog now explicitly warns that SAC DIS **replaces** matching rows and does **not** accumulate values. For Update: *"Upload the FINAL value you want (e.g. 160,000), not the increment (e.g. 60,000)."*
+- **Memory leak fixed** — the `document` click listener (closes model picker) was never removed when the widget disconnected. Now stored as `_docClickHandler` and removed in `disconnectedCallback`.
+- **XLSX/CSV/TXT export: `IMPORT_METHOD` column added** — both the main data sheet and the `Audit_Activity_Log` sheet now include the import method (`replace` / `update` / `append`) alongside the load strategy.
+
+---
+
+
 
 ### Audit Monitor: strategy+method column, SAP user detection, SAC Help link
 
