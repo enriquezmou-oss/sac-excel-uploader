@@ -19,9 +19,18 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.11.0';
+const _EPM_VERSION = '3.11.1';
 
 const _EPM_CHANGELOG = [
+  { v: '3.11.1', date: '2026-11-25', title: 'Fix: Update vs Append behavior, Version/Date filter in accumulation, user detection',
+    items: [
+      'Fix: Update mode now correctly replaces matching row values with the uploaded value. Accumulation (_accumulateWithExisting) now only runs for Append mode, not Update.',
+      'Fix: _accumulateWithExisting now filters existingRows by this._targetVersion and this._targetDate before matching, preventing cross-period accumulation when Table_1 shows multiple months or versions.',
+      'Fix: user auto-detection in _fetchModelInfo now always retries after DIS auth, regardless of the current _currentUser value. Removes leftover DEFAULT_USER guard.',
+      'feat: Roadmap tab added to What\'s New panel (Q4 2026 / Q1-Q2 2027 items).',
+      'feat: Append button enabled for privateFactData with client-side accumulation. Description updated in Spanish.',
+      'fix: audit always shows the real runtime SAC user, not the Story Builder configured value.',
+    ] },
   { v: '3.11.0', date: '2026-11-25', title: '3 bug fixes + client-side accumulation for Update mode',
     items: [
       'Fix: auto page reload (v3.10.0) was too fast (1.8+2.2 s). Now 3+4 s = 7 s total. Any click or keydown inside the widget cancels the reload — user sees "Recarga cancelada" toast and can review the Audit Monitor without being interrupted.',
@@ -660,10 +669,8 @@ class ExcelUploaderPro extends HTMLElement {
         this._sacModelName  = meta.description || meta.name || this._sacModelId;
         this._sacModelState = 'ok';
         this._fetchModelDimensions().catch(() => {});
-        // Re-try user discovery now that DIS auth is confirmed working
-        if (this._currentUser === 'SAP User (Planning)') {
-          this._discoverTenantUUID(base).catch(() => {});
-        }
+        // Always re-try user discovery after DIS auth to get the real runtime user
+        this._discoverTenantUUID(base).catch(() => {});
         // populate description for MODEL NAME display field
         if (meta.description && meta.description !== this._sacModelId) {
           this._sacModelDesc = meta.description;
@@ -1187,9 +1194,10 @@ class ExcelUploaderPro extends HTMLElement {
     // Primary source: existingDataInfo property set by SAC story script (Table_1).
     // Fallback: OData Export endpoint (returns 400 on most tenants — requires OAuth).
 
-    // Client-side accumulation: Update and Append modes sum uploaded increments to
-    // existing SAC values before sending to DIS (which always replaces on privateFactData).
-    if ((this._importMethod === 'update' || this._importMethod === 'append') && this._existingDataInfo?.rows?.length > 0) {
+    // Client-side accumulation: Append mode sums uploaded increments to existing SAC values
+    // before sending to DIS (which always replaces on privateFactData).
+    // Update mode replaces the matching row value with the uploaded value directly.
+    if (this._importMethod === 'append' && this._existingDataInfo?.rows?.length > 0) {
       sacRows = this._accumulateWithExisting(sacRows, this._existingDataInfo.rows, sacCols);
     }
 
@@ -2771,6 +2779,19 @@ class ExcelUploaderPro extends HTMLElement {
   _accumulateWithExisting(uploadedSacRows, existingRows, sacCols) {
     if (!uploadedSacRows.length || !existingRows.length) return uploadedSacRows;
 
+    // If existingRows carry Version/Date, filter to match the active target period
+    // to avoid matching rows from other months or versions present in Table_1
+    let filteredExisting = existingRows;
+    const tv = (this._targetVersion || '').trim().toUpperCase();
+    const td = (this._targetDate    || '').trim().toUpperCase();
+    if (tv && existingRows[0]?.Version !== undefined) {
+      filteredExisting = filteredExisting.filter(r => String(r.Version ?? '').trim().toUpperCase() === tv);
+    }
+    if (td && existingRows[0]?.Date !== undefined) {
+      filteredExisting = filteredExisting.filter(r => String(r.Date ?? '').trim().toUpperCase() === td);
+    }
+    if (!filteredExisting.length) return uploadedSacRows;
+
     // Identify measure SAC column IDs from loaded model dimensions
     const measureIds = new Set(
       (this._sacModelDimensions || [])
@@ -2798,7 +2819,7 @@ class ExcelUploaderPro extends HTMLElement {
     const toNum = v => parseFloat(String(v ?? 0).replace(/,/g, '')) || 0;
 
     return uploadedSacRows.map(uploaded => {
-      const existing = existingRows.find(ex =>
+      const existing = filteredExisting.find(ex =>
         keyCols.every(k =>
           String(ex[k] ?? '').trim().toUpperCase() === String(uploaded[k] ?? '').trim().toUpperCase()
         )
