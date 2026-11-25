@@ -426,6 +426,9 @@ class ExcelUploaderPro extends HTMLElement {
     }
   }
 
+  // SAC story script bridge — callable from Application Builder via webcomponent.json "methods"
+  setExistingDataInfo(dataJson) { this.existingDataInfo = dataJson; }
+
   _storageGet(key) {
     try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
   }
