@@ -19,7 +19,7 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.11.3';
+const _EPM_VERSION = '3.11.4';
 
 const _EPM_CHANGELOG = [
   { v: '3.11.1', date: '2026-11-25', title: 'Fix: Update vs Append behavior, Version/Date filter in accumulation, user detection',
@@ -1254,19 +1254,11 @@ class ExcelUploaderPro extends HTMLElement {
       }
 
       const disNote = isAccumMode
-        ? 'ℹ️ Accumulate mode: the widget adds your uploaded increments to the existing SAC values.\n   SAC DIS will store the final accumulated totals shown above.\n'
+        ? 'Accumulate mode: the widget sums your uploaded increments to the existing SAC values before sending to DIS.\nSAC DIS will store the final accumulated totals shown above.'
         : this._importMethod === 'update'
-          ? 'ℹ️ Update: reemplaza los valores de las filas que coincidan con las claves del Excel.\n   Las filas de SAC que NO están en el Excel se preservan automáticamente en el CSV enviado a DIS.\n   Si existingDataInfo tiene datos, el widget añade esas filas al CSV antes de enviarlo.\n'
-          : 'ℹ️ Append: adds new rows; existing rows with matching keys are REPLACED, not accumulated.\n   Only available for public versions (factData). For private versions DIS replaces matching rows.\n';
-      const proceed = window.confirm(
-        '⚠️ ' + modeLabel + ' — confirm upload\n\n' +
-        rowCountLine +
-        accumPreview +
-        'Version : ' + ver + '\n' +
-        'Period  : ' + dat + '\n\n' +
-        disNote + '\n' +
-        'Continue?'
-      );
+          ? 'Update mode: SAC DIS replaces matching rows with the uploaded values.\nRows in SAC that are NOT in the Excel are automatically appended to the CSV so DIS never deletes them.\nIf existingDataInfo has data, the widget adds those preserved rows before uploading.'
+          : 'Append mode: adds new rows; existing rows with matching keys are replaced.\nOnly available for public versions (factData). For private versions, DIS replaces the full block.';
+      const proceed = await this._showConfirmModal({ modeLabel, ver, dat, sacRows, sacCols, isAccumMode, disNote });
       if (!proceed) {
         this._isLoading = false;
         this._render();
@@ -2776,6 +2768,138 @@ class ExcelUploaderPro extends HTMLElement {
     }
   }
 
+  _showConfirmModal({ modeLabel, ver, dat, sacRows, sacCols, isAccumMode, disNote }) {
+    return new Promise(resolve => {
+      const uploadedRows  = sacRows.filter(r => !r._wasPreserved);
+      const preservedRows = sacRows.filter(r => r._wasPreserved);
+      const accumRows     = sacRows.filter(r => r._wasAccumulated);
+      const uploadedCount  = uploadedRows.length;
+      const preservedCount = preservedRows.length;
+      const totalCount     = sacRows.length;
+
+      // Build accumulation table
+      let tableHTML = '';
+      if (isAccumMode && accumRows.length) {
+        const measureCols = Object.keys(accumRows[0])
+          .filter(k => k.startsWith('_prevVal_'))
+          .map(k => k.replace('_prevVal_', ''));
+        const keyCol = sacCols.find(c =>
+          !c.startsWith('_') && !measureCols.includes(c) && c !== 'Version' && c !== 'Date'
+        ) || sacCols[0] || 'Item';
+
+        const thead = '<tr><th style="text-align:left;padding:6px 10px;color:#7BA3C0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid rgba(100,180,255,0.15);">'
+          + keyCol + '</th>'
+          + measureCols.map(() =>
+              '<th style="text-align:right;padding:6px 8px;color:#7BA3C0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid rgba(100,180,255,0.15);">Existing</th>'
+            + '<th style="text-align:right;padding:6px 8px;color:#7BA3C0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid rgba(100,180,255,0.15);">+ Upload</th>'
+            + '<th style="text-align:right;padding:6px 8px;color:#7BA3C0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid rgba(100,180,255,0.15);">= Final</th>'
+          ).join('') + '</tr>';
+
+        const tbody = accumRows.map(r => {
+          const prevKeys = Object.keys(r).filter(k => k.startsWith('_prevVal_'));
+          const cells = prevKeys.map(pk => {
+            const mCol  = pk.replace('_prevVal_', '');
+            const prev  = Number(r[pk] || 0);
+            const total = parseFloat(r[mCol]) || 0;
+            const inc   = total - prev;
+            return '<td style="text-align:right;padding:5px 8px;color:#96C4E8;font-size:12px;">' + prev.toLocaleString() + '</td>'
+              + '<td style="text-align:right;padding:5px 8px;color:#5BB8F5;font-size:12px;">+' + inc.toLocaleString() + '</td>'
+              + '<td style="text-align:right;padding:5px 8px;color:#E8F4FD;font-weight:600;font-size:12px;">' + total.toLocaleString() + '</td>';
+          }).join('');
+          return '<tr><td style="padding:5px 10px;color:#C8DFF0;font-size:12px;">' + (r[keyCol] || '—') + '</td>' + cells + '</tr>';
+        }).join('');
+
+        tableHTML = '<div style="background:#0F1E2E;border:1px solid rgba(100,180,255,0.12);border-radius:8px;overflow:hidden;">'
+          + '<div style="padding:8px 12px;background:rgba(100,180,255,0.05);border-bottom:1px solid rgba(100,180,255,0.1);color:#5BB8F5;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;">Accumulated Totals</div>'
+          + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">'
+          + '<thead>' + thead + '</thead>'
+          + '<tbody>' + tbody + '</tbody>'
+          + '</table></div></div>';
+      }
+
+      // Mode badge color
+      const isUpdate = modeLabel.toLowerCase().includes('update');
+      const badgeColor = isAccumMode ? '#27AE60' : (isUpdate ? '#E67E22' : '#0070F2');
+
+      // Rows summary chips
+      const rowsSummary = '<span style="color:#5BB8F5;font-weight:700;">' + uploadedCount + '</span> <span style="color:#7BA3C0;">from Excel</span>'
+        + (preservedCount > 0 ? ' &nbsp;·&nbsp; <span style="color:#27AE60;font-weight:700;">' + preservedCount + '</span> <span style="color:#7BA3C0;">preserved</span>' : '')
+        + ' &nbsp;·&nbsp; <span style="color:#E8F4FD;font-weight:700;">' + totalCount + '</span> <span style="color:#7BA3C0;">total rows sent to DIS</span>';
+
+      // SAP logo SVG
+      const sapLogo = '<svg width="36" height="22" viewBox="0 0 36 22" xmlns="http://www.w3.org/2000/svg"><rect width="36" height="22" rx="3" fill="white"/><text x="18" y="16" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-size="13" fill="#0057B8">SAP</text></svg>';
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,8,20,0.82);display:flex;align-items:center;justify-content:center;z-index:9999;backdrop-filter:blur(6px);font-family:"72","SAP 72",Arial,sans-serif;';
+
+      overlay.innerHTML = ''
+        + '<div style="background:#0D1B2A;border:1px solid rgba(100,180,255,0.18);border-radius:14px;width:540px;max-width:93vw;max-height:88vh;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,0.75);display:flex;flex-direction:column;">'
+
+          // Header
+          + '<div style="background:linear-gradient(135deg,#0057B8 0%,#0070F2 100%);padding:16px 20px;display:flex;align-items:center;gap:12px;">'
+            + sapLogo
+            + '<div>'
+              + '<div style="color:#fff;font-size:14px;font-weight:700;letter-spacing:.3px;">Excel Planning Uploader Pro</div>'
+              + '<div style="color:rgba(255,255,255,0.6);font-size:11px;margin-top:1px;">Upload Confirmation</div>'
+            + '</div>'
+            + '<div style="margin-left:auto;background:' + badgeColor + ';color:#fff;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;letter-spacing:.5px;white-space:nowrap;">'
+              + modeLabel.toUpperCase()
+            + '</div>'
+          + '</div>'
+
+          // Body
+          + '<div style="padding:18px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:14px;">'
+
+            // Target card
+            + '<div style="background:#162436;border:1px solid rgba(100,180,255,0.12);border-radius:8px;padding:14px 16px;">'
+              + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
+                + '<div>'
+                  + '<div style="color:#7BA3C0;font-size:10px;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Version</div>'
+                  + '<div style="color:#E8F4FD;font-size:15px;font-weight:700;">' + ver + '</div>'
+                + '</div>'
+                + '<div>'
+                  + '<div style="color:#7BA3C0;font-size:10px;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Period</div>'
+                  + '<div style="color:#E8F4FD;font-size:15px;font-weight:700;">' + dat + '</div>'
+                + '</div>'
+              + '</div>'
+              + '<div style="border-top:1px solid rgba(100,180,255,0.1);margin-top:10px;padding-top:10px;font-size:12px;">' + rowsSummary + '</div>'
+            + '</div>'
+
+            // Accumulation table (only if accumulate mode)
+            + tableHTML
+
+            // Info note
+            + '<div style="background:rgba(0,112,242,0.08);border:1px solid rgba(0,112,242,0.22);border-radius:8px;padding:12px 14px;display:flex;gap:10px;align-items:flex-start;">'
+              + '<svg width="16" height="16" viewBox="0 0 16 16" style="flex-shrink:0;margin-top:1px;"><circle cx="8" cy="8" r="7" stroke="#5BB8F5" stroke-width="1.2" fill="none"/><text x="8" y="12.5" text-anchor="middle" font-size="9.5" fill="#5BB8F5" font-weight="bold">i</text></svg>'
+              + '<div style="color:#96C4E8;font-size:12px;line-height:1.65;">' + disNote.replace(/\n\s*/g, '<br>').replace(/^ℹ️\s*/, '') + '</div>'
+            + '</div>'
+
+          + '</div>'
+
+          // Footer
+          + '<div style="padding:14px 20px;border-top:1px solid rgba(100,180,255,0.1);display:flex;justify-content:flex-end;gap:10px;background:#0D1B2A;">'
+            + '<button class="epm-modal-cancel" style="background:transparent;border:1px solid rgba(100,180,255,0.3);color:#7BA3C0;padding:8px 22px;border-radius:7px;font-size:13px;cursor:pointer;font-family:inherit;transition:border-color .15s,color .15s;">Cancel</button>'
+            + '<button class="epm-modal-ok" style="background:linear-gradient(135deg,#0057B8,#0070F2);border:none;color:#fff;padding:8px 26px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.3px;transition:filter .15s;">Upload to SAC &rarr;</button>'
+          + '</div>'
+
+        + '</div>';
+
+      this._shadow.appendChild(overlay);
+
+      const cancelBtn = overlay.querySelector('.epm-modal-cancel');
+      const okBtn     = overlay.querySelector('.epm-modal-ok');
+
+      cancelBtn.addEventListener('mouseenter', () => { cancelBtn.style.borderColor = 'rgba(100,180,255,0.65)'; cancelBtn.style.color = '#E8F4FD'; });
+      cancelBtn.addEventListener('mouseleave', () => { cancelBtn.style.borderColor = 'rgba(100,180,255,0.3)';  cancelBtn.style.color = '#7BA3C0'; });
+      okBtn.addEventListener('mouseenter', () => { okBtn.style.filter = 'brightness(1.15)'; });
+      okBtn.addEventListener('mouseleave', () => { okBtn.style.filter = 'brightness(1)'; });
+
+      cancelBtn.addEventListener('click', () => { overlay.remove(); resolve(false); });
+      okBtn.addEventListener('click',     () => { overlay.remove(); resolve(true); });
+      overlay.addEventListener('click',   e => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+    });
+  }
+
   _accumulateWithExisting(uploadedSacRows, existingRows, sacCols) {
     if (!uploadedSacRows.length || !existingRows.length) return uploadedSacRows;
 
@@ -2860,7 +2984,7 @@ class ExcelUploaderPro extends HTMLElement {
         else if (col === 'Date') preserved[col] = this._targetDate ? String(this._targetDate) : '';
         else                     preserved[col] = rawClean(ex[col]);
       });
-      mergedRows.push(preserved);
+      mergedRows.push({ ...preserved, _wasPreserved: true });
     });
 
     return mergedRows;
