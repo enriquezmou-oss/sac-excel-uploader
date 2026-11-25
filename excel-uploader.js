@@ -19,7 +19,7 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.11.2';
+const _EPM_VERSION = '3.11.3';
 
 const _EPM_CHANGELOG = [
   { v: '3.11.1', date: '2026-11-25', title: 'Fix: Update vs Append behavior, Version/Date filter in accumulation, user detection',
@@ -1194,10 +1194,10 @@ class ExcelUploaderPro extends HTMLElement {
     // Primary source: existingDataInfo property set by SAC story script (Table_1).
     // Fallback: OData Export endpoint (returns 400 on most tenants — requires OAuth).
 
-    // Client-side accumulation: Append mode sums uploaded increments to existing SAC values
-    // before sending to DIS (which always replaces on privateFactData).
-    // Update mode replaces the matching row value with the uploaded value directly.
-    if (this._importMethod === 'append' && this._existingDataInfo?.rows?.length > 0) {
+    // Client-side merge: runs for both update and append when existingDataInfo is populated.
+    // Append → sums existing + uploaded values; Update → replaces matching values with uploaded.
+    // In both cases all unmatched existing rows are preserved so DIS never erases them.
+    if ((this._importMethod === 'update' || this._importMethod === 'append') && this._existingDataInfo?.rows?.length > 0) {
       sacRows = this._accumulateWithExisting(sacRows, this._existingDataInfo.rows, sacCols);
     }
 
@@ -1256,7 +1256,7 @@ class ExcelUploaderPro extends HTMLElement {
       const disNote = isAccumMode
         ? 'ℹ️ Accumulate mode: the widget adds your uploaded increments to the existing SAC values.\n   SAC DIS will store the final accumulated totals shown above.\n'
         : this._importMethod === 'update'
-          ? 'ℹ️ Update: SAC DIS replaces matching rows with the values you upload.\n   Upload the FINAL value you want (e.g. 160,000), not the increment (e.g. 60,000).\n   Tip: pass row data via existingDataInfo to enable automatic accumulation.\n'
+          ? 'ℹ️ Update: reemplaza los valores de las filas que coincidan con las claves del Excel.\n   Las filas de SAC que NO están en el Excel se preservan automáticamente en el CSV enviado a DIS.\n   Si existingDataInfo tiene datos, el widget añade esas filas al CSV antes de enviarlo.\n'
           : 'ℹ️ Append: adds new rows; existing rows with matching keys are REPLACED, not accumulated.\n   Only available for public versions (factData). For private versions DIS replaces matching rows.\n';
       const proceed = window.confirm(
         '⚠️ ' + modeLabel + ' — confirm upload\n\n' +
@@ -2779,27 +2779,35 @@ class ExcelUploaderPro extends HTMLElement {
   _accumulateWithExisting(uploadedSacRows, existingRows, sacCols) {
     if (!uploadedSacRows.length || !existingRows.length) return uploadedSacRows;
 
-    // If existingRows carry Version/Date, filter to match the active target period
-    // to avoid matching rows from other months or versions present in Table_1
+    // Strip SAC hierarchical prefixes ([DIM].[H1].&[ID] → ID) before comparing
+    const cleanId = (v) => {
+      const s = String(v ?? '').trim();
+      const m = s.match(/&\[([^\]]+)\]/);
+      return (m ? m[1] : s).toUpperCase();
+    };
+    const rawClean = (v) => {
+      const s = String(v ?? '').trim();
+      const m = s.match(/&\[([^\]]+)\]/);
+      return m ? m[1] : s;
+    };
+
     let filteredExisting = existingRows;
     const tv = (this._targetVersion || '').trim().toUpperCase();
     const td = (this._targetDate    || '').trim().toUpperCase();
     if (tv && existingRows[0]?.Version !== undefined) {
-      filteredExisting = filteredExisting.filter(r => String(r.Version ?? '').trim().toUpperCase() === tv);
+      filteredExisting = filteredExisting.filter(r => cleanId(r.Version) === tv);
     }
     if (td && existingRows[0]?.Date !== undefined) {
-      filteredExisting = filteredExisting.filter(r => String(r.Date ?? '').trim().toUpperCase() === td);
+      filteredExisting = filteredExisting.filter(r => cleanId(r.Date) === td);
     }
     if (!filteredExisting.length) return uploadedSacRows;
 
-    // Identify measure SAC column IDs from loaded model dimensions
     const measureIds = new Set(
       (this._sacModelDimensions || [])
         .filter(d => d.isMeasure)
         .map(d => d.id.toUpperCase())
     );
 
-    // Fallback: treat numeric columns as measures if dimension info not loaded
     const activeMeasureCols = measureIds.size > 0
       ? sacCols.filter(c => measureIds.has(c.toUpperCase()))
       : sacCols.filter(c => {
@@ -2811,31 +2819,51 @@ class ExcelUploaderPro extends HTMLElement {
     if (!activeMeasureCols.length) return uploadedSacRows;
 
     const measureSet = new Set(activeMeasureCols.map(c => c.toUpperCase()));
-    // Key cols = all SAC cols that are not measures, not VERSION / DATE (auto-set at widget level)
     const keyCols = sacCols.filter(c =>
       !measureSet.has(c.toUpperCase()) && c !== 'Version' && c !== 'Date'
     );
 
     const toNum = v => parseFloat(String(v ?? 0).replace(/,/g, '')) || 0;
+    const matchedExistingIdx = new Set();
 
-    return uploadedSacRows.map(uploaded => {
-      const existing = filteredExisting.find(ex =>
-        keyCols.every(k =>
-          String(ex[k] ?? '').trim().toUpperCase() === String(uploaded[k] ?? '').trim().toUpperCase()
-        )
+    // 1. Process uploaded rows: accumulate (append) or replace (update) matched existing rows
+    const mergedRows = uploadedSacRows.map(uploaded => {
+      const exIdx = filteredExisting.findIndex(ex =>
+        keyCols.every(k => cleanId(ex[k]) === cleanId(uploaded[k]))
       );
-      if (!existing) return uploaded; // no match → insert as new row
+      if (exIdx === -1) return uploaded; // new row — insert as-is
 
+      matchedExistingIdx.add(exIdx);
+      const existing = filteredExisting[exIdx];
       const result = { ...uploaded };
-      for (const mCol of activeMeasureCols) {
-        const existVal = toNum(existing[mCol]);
-        const uploadVal = toNum(uploaded[mCol]);
-        result[mCol] = String(existVal + uploadVal);
-        result['_prevVal_' + mCol] = existVal;
+
+      if (this._importMethod === 'append') {
+        for (const mCol of activeMeasureCols) {
+          const existVal  = toNum(existing[mCol]);
+          const uploadVal = toNum(uploaded[mCol]);
+          result[mCol] = String(existVal + uploadVal);
+          result['_prevVal_' + mCol] = existVal;
+        }
+        result._wasAccumulated = true;
       }
-      result._wasAccumulated = true;
+      // update mode: uploaded values already win — no change needed, existing key was just matched
       return result;
     });
+
+    // 2. Preserve all existing SAC rows that were NOT in the uploaded Excel
+    //    Without this DIS would erase them (it replaces the whole Version+Date block)
+    filteredExisting.forEach((ex, idx) => {
+      if (matchedExistingIdx.has(idx)) return;
+      const preserved = {};
+      sacCols.forEach(col => {
+        if (col === 'Version')   preserved[col] = this._targetVersion || '';
+        else if (col === 'Date') preserved[col] = this._targetDate ? String(this._targetDate) : '';
+        else                     preserved[col] = rawClean(ex[col]);
+      });
+      mergedRows.push(preserved);
+    });
+
+    return mergedRows;
   }
 
   _createNewValidationRule() {
