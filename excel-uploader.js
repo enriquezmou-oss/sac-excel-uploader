@@ -1189,16 +1189,16 @@ class ExcelUploaderPro extends HTMLElement {
     // Primary source: existingDataInfo property set by SAC story script (Table_1).
     // Fallback: OData Export endpoint (returns 400 on most tenants — requires OAuth).
 
-    // Client-side accumulation: if Update mode and existingDataInfo carries row data,
-    // add uploaded increments to existing values before sending to DIS.
-    if (this._importMethod === 'update' && this._existingDataInfo?.rows?.length > 0) {
+    // Client-side accumulation: Update and Append modes sum uploaded increments to
+    // existing SAC values before sending to DIS (which always replaces on privateFactData).
+    if ((this._importMethod === 'update' || this._importMethod === 'append') && this._existingDataInfo?.rows?.length > 0) {
       sacRows = this._accumulateWithExisting(sacRows, this._existingDataInfo.rows, sacCols);
     }
 
     const isNonReplace = this._importMethod === 'update' || this._importMethod === 'append';
     if (isNonReplace) {
-      const isAccumMode = this._importMethod === 'update' && sacRows.some(r => r._wasAccumulated);
-      const modeLabel  = this._importMethod === 'update' ? (isAccumMode ? 'Update (Accumulate)' : 'Update') : 'Append';
+      const isAccumMode = sacRows.some(r => r._wasAccumulated);
+      const modeLabel  = this._importMethod === 'update' ? (isAccumMode ? 'Update (Acumular)' : 'Update') : (isAccumMode ? 'Append (Acumular)' : 'Append');
       const ver        = this._targetVersion || '—';
       const dat        = this._targetDate    || '—';
       let rowCountLine = '';
@@ -4056,11 +4056,9 @@ class ExcelUploaderPro extends HTMLElement {
                 {
                   id: 'append', icon: '➕', label: 'Append',
                   desc: isPrivate
-                    ? 'SAC DIS with privateFactData (planning) REPLACES matching rows — does NOT accumulate. Accumulation only works with public factData models. Use Update + accumulate mode (widget-side) instead.'
-                    : 'Accumulates measure values for matching dimension keys (adds to existing amounts).',
-                  note: isPrivate
-                    ? '⚠️ Append is only available for public fact data (factData). For private planning versions (privateFactData) SAC DIS will Replace matching rows regardless of this setting.'
-                    : null
+                    ? 'Suma los valores del Excel a los datos existentes (acumulación client-side). Inserta filas nuevas y conserva las que no están en el Excel. Igual que Update pero con intención de incremento.'
+                    : 'Acumula los valores de medida para las claves de dimensión coincidentes (suma a los importes existentes).',
+                  note: null
                 },
               ];
               const active = METHODS.find(m => m.id === this._importMethod) || METHODS[0];
@@ -4069,11 +4067,9 @@ class ExcelUploaderPro extends HTMLElement {
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
                   <div style="display:flex;gap:6px;">
                     ${METHODS.map(m => {
-                      const isDisabled = m.id === 'append' && isPrivate;
                       const isActive   = this._importMethod === m.id;
                       return `<button class="method-btn" data-method="${m.id}" type="button"
-                        ${isDisabled ? 'disabled title="Not available for privateFactData — SAC DIS does not support Append on private planning versions"' : ''}
-                        style="padding:7px 18px;border-radius:20px;border:2px solid ${isActive ? '#0064D9' : (isDisabled ? '#E0E0E0' : '#D9E0E6')};background:${isActive ? '#EBF5FF' : (isDisabled ? '#F5F5F5' : '#FFF')};color:${isActive ? '#0064D9' : (isDisabled ? '#AAAAAA' : '#556B82')};font-size:12px;font-weight:${isActive ? '800' : '600'};cursor:${isDisabled ? 'not-allowed' : 'pointer'};transition:all .15s;opacity:${isDisabled ? '0.6' : '1'};">
+                        style="padding:7px 18px;border-radius:20px;border:2px solid ${isActive ? '#0064D9' : '#D9E0E6'};background:${isActive ? '#EBF5FF' : '#FFF'};color:${isActive ? '#0064D9' : '#556B82'};font-size:12px;font-weight:${isActive ? '800' : '600'};cursor:pointer;transition:all .15s;">
                         ${m.icon} ${m.label}
                       </button>`;
                     }).join('')}
