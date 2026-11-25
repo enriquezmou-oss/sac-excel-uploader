@@ -1,6 +1,6 @@
 {
   "id": "com.sap.sac.exceluploaderpro",
-  "version": "3.11.1",
+  "version": "3.11.2",
   "name": "Excel Planning Uploader Pro",
   "description": "Multi-Sheet Consolidation, Transform & Convert, Alert Semaphores for SAC Planning",
   "newInstancePrefix": "ExcelUploaderPro_",
@@ -41,10 +41,11 @@
   },
   "methods": {
     "setExistingDataInfo": {
-      "description": "Passes current Table_1 row values to the widget for client-side accumulation in Update mode",
+      "description": "Passes current Table_1 row values to the widget for client-side accumulation in Append mode",
       "parameters": [
         { "name": "dataJson", "type": "string" }
-      ]
+      ],
+      "body": "this.existingDataInfo = dataJson;"
     }
   },
   "events": {
