@@ -19,9 +19,16 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.9.9';
+const _EPM_VERSION = '3.10.0';
 
 const _EPM_CHANGELOG = [
+  { v: '3.10.0', date: '2026-11-25', title: 'Auto-reload SAC page after LOAD COMPLETE',
+    items: [
+      'After a successful DIS upload (🟢 LOAD COMPLETE), the widget automatically reloads the SAC story page so the updated data is visible immediately — no manual refresh needed.',
+      'Sequence: success toast shown for ~1.8 s, then a brief "Recargando página SAC…" notice, then window.location.reload().',
+      'Reload only triggers when a SAC model is connected and DIS status is OK. Partial loads do not auto-reload.',
+      'Reload timer stored in _reloadTimer and cancelled in disconnectedCallback.',
+    ] },
   { v: '3.9.9', date: '2026-11-25', title: '3 fixes: confirm dialog DIS note, listener cleanup, XLSX export method column',
     items: [
       'Confirmation dialog for Update/Append now explains clearly that DIS replaces matching rows — it does NOT accumulate values. For Update, the note reads "Upload the FINAL value you want (e.g. 160,000), not the increment (e.g. 60,000)".',
@@ -325,6 +332,7 @@ class ExcelUploaderPro extends HTMLElement {
     this._sacDimPanelOpen     = true;
     this._docClickBound       = false;
     this._docClickHandler     = null;
+    this._reloadTimer         = null;
     this._existingDataInfo    = null; // set by SAC story script via existingDataInfo property
     this._ensureXLSX();
     if (this._sacModelId) this._fetchModelInfo();
@@ -346,6 +354,7 @@ class ExcelUploaderPro extends HTMLElement {
     if (this._toastTimer) clearTimeout(this._toastTimer);
     if (this._searchRaf) cancelAnimationFrame(this._searchRaf);
     if (this._auditSearchRaf) cancelAnimationFrame(this._auditSearchRaf);
+    if (this._reloadTimer) { clearTimeout(this._reloadTimer); this._reloadTimer = null; }
     if (this._docClickHandler) {
       document.removeEventListener('click', this._docClickHandler);
       this._docClickHandler = null;
@@ -2678,6 +2687,12 @@ class ExcelUploaderPro extends HTMLElement {
         if (!this._sacModelId || finalRec?.disStatus === 'OK') {
           const infoRows = finalRec?.disWrittenRows != null ? ' — ' + finalRec.disWrittenRows + ' rows written' : '';
           this._notify('🟢 LOAD COMPLETE — ' + loadId + ' · ' + this._loadStrategy + infoRows + ' → SAP Analytics Cloud ✅', 'success');
+          if (this._sacModelId) {
+            this._reloadTimer = setTimeout(() => {
+              this._notify('🔄 Recargando página SAC para mostrar los datos actualizados…', 'info');
+              this._reloadTimer = setTimeout(() => window.location.reload(), 2200);
+            }, 1800);
+          }
         } else if (finalRec?.disStatus === 'PARTIAL') {
           const reason = finalRec.disError ? ' · ' + finalRec.disError.slice(0, 120) : '';
           this._notify('⚠️ PARTIAL LOAD — ' + loadId + ': ' + (finalRec.disWrittenRows || '0') + ' written, ' + (finalRec.disFailedRows || '?') + ' rejected. Check the audit log.' + reason, 'warning');

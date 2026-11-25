@@ -5,6 +5,17 @@ Format: **[version] — date — summary**
 
 ---
 
+## [3.10.0] — 2026-11-25
+
+### Auto-reload SAC page after LOAD COMPLETE
+
+- **Auto page reload** — tras una carga exitosa (🟢 LOAD COMPLETE), el widget recarga automáticamente la página SAC para mostrar los datos actualizados. No se necesita refrescar la tabla manualmente.
+- **Secuencia**: toast de éxito visible ~1.8 s → aviso "🔄 Recargando página SAC para mostrar los datos actualizados…" → `window.location.reload()` a los 2.2 s.
+- **Solo en carga OK**: el reload solo se dispara cuando hay un SAC model conectado y el DIS status es OK. Las cargas parciales (PARTIAL LOAD) no recargan la página.
+- **Sin leaks**: el timer se guarda en `_reloadTimer` y se cancela en `disconnectedCallback`.
+
+---
+
 ## [3.9.9] — 2026-11-25
 
 ### 3 fixes: confirm dialog DIS note, listener cleanup, XLSX export method column
