@@ -5,7 +5,17 @@ Format: **[version] — date — summary**
 
 ---
 
-## [3.9.7] — 2026-11-25
+## [3.9.8] — 2026-11-25
+
+### Audit Monitor: strategy+method column, SAP user detection, SAC Help link
+
+- **Audit Monitor — Strategy column** — now shows the import method alongside the load strategy: `FULL 🗑️ Replace`, `FULL ✏️ Update`, `FULL ➕ Append`. The audit detail panel also shows the combined value. Works for both new and historical records.
+- **SAP User auto-detection enhanced** — added SAC-specific global paths (`sap.sac.app.accessControl.currentUser`, `sap.sac.app.context.user`, `sap.sac.DataImport.user`) and two additional REST endpoints. User discovery is now retried a second time after the DIS authentication succeeds, improving the chance of resolving the actual logged-in user.
+- **SAP Analytics Cloud badge** — now a clickable link to `help.sap.com/docs/SAP_ANALYTICS_CLOUD` (opens in new tab).
+
+---
+
+
 
 ### 4 bug fixes + import method warnings per data type
 

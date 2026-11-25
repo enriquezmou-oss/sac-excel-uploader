@@ -19,9 +19,15 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.9.7';
+const _EPM_VERSION = '3.9.8';
 
 const _EPM_CHANGELOG = [
+  { v: '3.9.8', date: '2026-11-25', title: 'Audit Monitor: strategy+method column, SAP user detection, SAC Help link',
+    items: [
+      'Audit Monitor Strategy column now shows import method badge alongside load strategy: "FULL 🗑️ Replace", "FULL ✏️ Update", "FULL ➕ Append". Audit detail panel also updated.',
+      'SAP user auto-detection enhanced: added SAC-specific global paths (sap.sac.app.accessControl, sap.sac.app.context) and additional REST endpoints. User discovery is retried after DIS auth succeeds to improve detection rate.',
+      'SAP Analytics Cloud header badge is now a clickable link to help.sap.com/docs/SAP_ANALYTICS_CLOUD.',
+    ] },
   { v: '3.9.7', date: '2026-11-25', title: '4 bug fixes + import method warnings per data type',
     items: [
       'Fix Bug 1: document.addEventListener("click") in _bindEvents() was added on every _render(), accumulating duplicate listeners. Now guarded by _docClickBound flag — registered once per widget instance. Clicking outside the model picker now also sets _showModelPicker = false (state was desynced before).',
@@ -611,6 +617,10 @@ class ExcelUploaderPro extends HTMLElement {
         this._sacModelName  = meta.description || meta.name || this._sacModelId;
         this._sacModelState = 'ok';
         this._fetchModelDimensions().catch(() => {});
+        // Re-try user discovery now that DIS auth is confirmed working
+        if (this._currentUser === 'SAP User (Planning)') {
+          this._discoverTenantUUID(base).catch(() => {});
+        }
         // populate description for MODEL NAME display field
         if (meta.description && meta.description !== this._sacModelId) {
           this._sacModelDesc = meta.description;
@@ -745,6 +755,11 @@ class ExcelUploaderPro extends HTMLElement {
           || window?.sap?.umi?.config?.user?.name
           || window?.SapAnalyticsCloud?.currentUser?.loginName
           || window?.SapAnalyticsCloud?.currentUser?.name
+          || window?.sap?.sac?.app?.accessControl?.currentUser?.loginName
+          || window?.sap?.sac?.app?.accessControl?.currentUser?.name
+          || window?.sap?.sac?.app?.context?.user?.loginName
+          || window?.sap?.sac?.app?.context?.user?.name
+          || window?.sap?.sac?.DataImport?.user?.loginName
           || window?.sapbi_page?.model?.getProperty?.('/user/name')
           || window?.sapbi_page?.model?.getProperty?.('/user/loginName')
           || null;
@@ -806,11 +821,14 @@ class ExcelUploaderPro extends HTMLElement {
         }
       }
     } catch (_) {}
-    // Last resort: try SAC /api/v1/users/me or similar current-user endpoints
+    // Last resort: try SAC user endpoints — wider list covering SAC-specific paths
     const userEndpoints = [
       sessionBase + '/api/v1/users/me',
       sessionBase + '/sap/fpa/api/users/me',
       sessionBase + '/sap/fpa/services/rest/session/currentUser',
+      sessionBase + '/sap/fpa/services/rest/fpa/user',
+      sessionBase + '/sap/bi/aad/is/fpa/api/app/v1/users/currentUser',
+      sessionBase + '/sap/fpa/services/rest/session',
     ];
     for (const url of userEndpoints) {
       try {
@@ -3474,7 +3492,7 @@ class ExcelUploaderPro extends HTMLElement {
             ${this._renderAuditExportConfigurator(cols, true)}
 
             <div class="metrics-bar" style="grid-template-columns:repeat(7,1fr);">
-              <div class="metric-box"><div class="metric-title">🔄 Load Strategy</div><div class="metric-val" style="font-size:13px;color:#0064D9;">${this._esc(rec.loadStrategy || 'FULL')}</div></div>
+              <div class="metric-box"><div class="metric-title">🔄 Load Strategy</div><div class="metric-val" style="font-size:13px;color:#0064D9;">${this._esc(rec.loadStrategy || 'FULL')} · ${this._esc({'replace':'🗑️ Replace','update':'✏️ Update','append':'➕ Append'}[rec.importMethod] || rec.importMethod || '🗑️ Replace')}</div></div>
               <div class="metric-box"><div class="metric-title">🏷️ Version</div><div class="metric-val" style="font-size:13px;color:#1D3A6E;">${this._esc(rec.targetVersion || '—')}</div></div>
               <div class="metric-box"><div class="metric-title">📅 Period</div><div class="metric-val" style="font-size:13px;color:#5B21B6;">${this._esc(rec.targetDate || '—')}</div></div>
               <div class="metric-box"><div class="metric-title">🕒 Timestamp</div><div class="metric-val" style="font-size:13px;">${this._esc(rec.timestamp)}</div></div>
@@ -3614,7 +3632,7 @@ class ExcelUploaderPro extends HTMLElement {
             ${this._history.length > 0 ? this._history.map(h => `
               <tr class="audit-row-link" data-load-id="${this._esc(h.id)}" style="cursor:pointer;">
                 <td><strong style="color:#0064D9;text-decoration:underline;">${this._esc(h.id)}</strong></td>
-                <td><span style="background:#EBF5FF;color:#005CB9;padding:2px 8px;border-radius:10px;font-weight:700;font-size:11px;">${this._esc(h.loadStrategy || 'FULL')}</span></td>
+                <td><span style="background:#EBF5FF;color:#005CB9;padding:2px 8px;border-radius:10px;font-weight:700;font-size:11px;">${this._esc(h.loadStrategy || 'FULL')}</span>${h.importMethod && h.importMethod !== 'replace' ? ' <span style="background:#FFF3E0;color:#E65100;padding:2px 7px;border-radius:10px;font-weight:700;font-size:10px;">' + this._esc({'update':'✏️ Update','append':'➕ Append'}[h.importMethod] || h.importMethod) + '</span>' : ' <span style="background:#F0FFF4;color:#166534;padding:2px 7px;border-radius:10px;font-weight:700;font-size:10px;">🗑️ Replace</span>'}</td>
                 <td><span style="background:#F0F4FF;color:#1D3A6E;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${this._esc(h.targetVersion || '—')}</span></td>
                 <td><span style="background:#F5F0FF;color:#5B21B6;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${this._esc(h.targetDate || '—')}</span></td>
                 <td>${this._esc(h.user)}</td>
@@ -3827,7 +3845,7 @@ class ExcelUploaderPro extends HTMLElement {
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:12px;">
-            <span class="sap-badge-env">☁️ SAP Analytics Cloud</span>
+            <a href="https://help.sap.com/docs/SAP_ANALYTICS_CLOUD" target="_blank" rel="noopener" class="sap-badge-env" style="text-decoration:none;" title="SAP Analytics Cloud — Help Portal">☁️ SAP Analytics Cloud</a>
             <button class="help-icon-btn" id="toggleChangelogBtn" type="button" title="What's New — version history">
               <span style="background:#107E3E;color:#FFF;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;">★</span>
               <span>What's New</span>
