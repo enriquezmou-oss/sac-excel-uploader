@@ -1,6 +1,6 @@
 {
   "id": "com.sap.sac.exceluploaderpro",
-  "version": "3.11.0",
+  "version": "3.11.1",
   "name": "Excel Planning Uploader Pro",
   "description": "Multi-Sheet Consolidation, Transform & Convert, Alert Semaphores for SAC Planning",
   "newInstancePrefix": "ExcelUploaderPro_",
@@ -12,7 +12,7 @@
     {
       "kind": "main",
       "tag": "custom-excel-uploader-pro",
-      "url": "https://cdn.jsdelivr.net/gh/enriquezmou-oss/sac-excel-uploader@8f2a88f/excel-uploader.js",
+      "url": "https://cdn.jsdelivr.net/gh/enriquezmou-oss/sac-excel-uploader@f1e8391/excel-uploader.js",
       "integrity": "",
       "ignoreIntegrity": true
     }
@@ -39,7 +39,14 @@
       "default": ""
     }
   },
-  "methods": {},
+  "methods": {
+    "setExistingDataInfo": {
+      "description": "Passes current Table_1 row values to the widget for client-side accumulation in Update mode",
+      "parameters": [
+        { "name": "dataJson", "type": "string" }
+      ]
+    }
+  },
   "events": {
     "dataReady": {
       "description": "Triggered when the user clicks Synchronize on validated records"
