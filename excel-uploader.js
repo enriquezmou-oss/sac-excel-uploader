@@ -19,7 +19,7 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.11.6';
+const _EPM_VERSION = '3.11.7';
 
 const _EPM_CHANGELOG = [
   { v: '3.11.1', date: '2026-11-25', title: 'Fix: Update vs Append behavior, Version/Date filter in accumulation, user detection',
@@ -2726,7 +2726,7 @@ class ExcelUploaderPro extends HTMLElement {
       const preservedCount = preservedRows.length;
       const totalCount     = sacRows.length;
 
-      // Build accumulation table
+      // Build accumulation table (Fiori light style)
       let tableHTML = '';
       if (isAccumMode && accumRows.length) {
         const measureCols = Object.keys(accumRows[0])
@@ -2736,99 +2736,102 @@ class ExcelUploaderPro extends HTMLElement {
           !c.startsWith('_') && !measureCols.includes(c) && c !== 'Version' && c !== 'Date'
         ) || sacCols[0] || 'Item';
 
-        const thead = '<tr><th style="text-align:left;padding:6px 10px;color:#7BA3C0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid rgba(100,180,255,0.15);">'
-          + this._esc(keyCol) + '</th>'
+        const thStyle = 'text-align:right;padding:6px 10px;color:#8B9BAC;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #E8ECF0;white-space:nowrap;';
+        const thStyleLeft = 'text-align:left;padding:6px 10px;color:#8B9BAC;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #E8ECF0;';
+        const thead = '<tr><th style="' + thStyleLeft + '">' + this._esc(keyCol) + '</th>'
           + measureCols.map(() =>
-              '<th style="text-align:right;padding:6px 8px;color:#7BA3C0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid rgba(100,180,255,0.15);">Existing</th>'
-            + '<th style="text-align:right;padding:6px 8px;color:#7BA3C0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid rgba(100,180,255,0.15);">+ Upload</th>'
-            + '<th style="text-align:right;padding:6px 8px;color:#7BA3C0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid rgba(100,180,255,0.15);">= Final</th>'
+              '<th style="' + thStyle + '">Existing</th>'
+            + '<th style="' + thStyle + '">+ Upload</th>'
+            + '<th style="' + thStyle + '">= Total</th>'
           ).join('') + '</tr>';
 
-        const tbody = accumRows.map(r => {
+        const tbody = accumRows.map((r, ri) => {
           const prevKeys = Object.keys(r).filter(k => k.startsWith('_prevVal_'));
+          const rowBg = ri % 2 === 0 ? '#FFFFFF' : '#F7F9FB';
           const cells = prevKeys.map(pk => {
             const mCol  = pk.replace('_prevVal_', '');
             const prev  = Number(r[pk] || 0);
             const total = parseFloat(r[mCol]) || 0;
             const inc   = total - prev;
-            return '<td style="text-align:right;padding:5px 8px;color:#96C4E8;font-size:12px;">' + prev.toLocaleString() + '</td>'
-              + '<td style="text-align:right;padding:5px 8px;color:#5BB8F5;font-size:12px;">+' + inc.toLocaleString() + '</td>'
-              + '<td style="text-align:right;padding:5px 8px;color:#E8F4FD;font-weight:600;font-size:12px;">' + total.toLocaleString() + '</td>';
+            return '<td style="text-align:right;padding:5px 10px;color:#1D2D3E;font-size:12px;border-bottom:1px solid #F0F3F5;">' + prev.toLocaleString() + '</td>'
+              + '<td style="text-align:right;padding:5px 10px;color:#0070F2;font-size:12px;font-weight:600;border-bottom:1px solid #F0F3F5;">+' + inc.toLocaleString() + '</td>'
+              + '<td style="text-align:right;padding:5px 10px;color:#1D2D3E;font-size:12px;font-weight:700;border-bottom:1px solid #F0F3F5;">' + total.toLocaleString() + '</td>';
           }).join('');
-          return '<tr><td style="padding:5px 10px;color:#C8DFF0;font-size:12px;">' + this._esc(r[keyCol] || '—') + '</td>' + cells + '</tr>';
+          return '<tr style="background:' + rowBg + ';"><td style="padding:5px 10px;color:#1D2D3E;font-size:12px;border-bottom:1px solid #F0F3F5;">' + this._esc(r[keyCol] || '—') + '</td>' + cells + '</tr>';
         }).join('');
 
-        tableHTML = '<div style="background:#0F1E2E;border:1px solid rgba(100,180,255,0.12);border-radius:8px;overflow:hidden;">'
-          + '<div style="padding:8px 12px;background:rgba(100,180,255,0.05);border-bottom:1px solid rgba(100,180,255,0.1);color:#5BB8F5;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;">Accumulated Totals</div>'
+        tableHTML = '<div style="border:1px solid #E8ECF0;border-radius:6px;overflow:hidden;">'
+          + '<div style="padding:8px 12px;background:#F7F9FB;border-bottom:1px solid #E8ECF0;color:#1D2D3E;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;">Accumulated Totals</div>'
           + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">'
-          + '<thead>' + thead + '</thead>'
+          + '<thead style="background:#FAFAFA;">' + thead + '</thead>'
           + '<tbody>' + tbody + '</tbody>'
           + '</table></div></div>';
       }
 
-      // Mode badge color
+      // Mode badge
       const isUpdate = modeLabel.toLowerCase().includes('update');
-      const badgeColor = isAccumMode ? '#27AE60' : (isUpdate ? '#E67E22' : '#0070F2');
+      const badgeBg   = isAccumMode ? '#107E3E' : (isUpdate ? '#E76500' : '#0070F2');
+      const badgeText = '#fff';
 
-      // Rows summary chips
-      const rowsSummary = '<span style="color:#5BB8F5;font-weight:700;">' + uploadedCount + '</span> <span style="color:#7BA3C0;">from Excel</span>'
-        + (preservedCount > 0 ? ' &nbsp;·&nbsp; <span style="color:#27AE60;font-weight:700;">' + preservedCount + '</span> <span style="color:#7BA3C0;">preserved</span>' : '')
-        + ' &nbsp;·&nbsp; <span style="color:#E8F4FD;font-weight:700;">' + totalCount + '</span> <span style="color:#7BA3C0;">total rows sent to DIS</span>';
+      // Rows summary
+      const rowsSummary = '<span style="color:#0070F2;font-weight:700;">' + uploadedCount + '</span><span style="color:#8B9BAC;"> from Excel</span>'
+        + (preservedCount > 0 ? '&nbsp;&nbsp;<span style="color:#8B9BAC;">·</span>&nbsp;&nbsp;<span style="color:#107E3E;font-weight:700;">' + preservedCount + '</span><span style="color:#8B9BAC;"> preserved</span>' : '')
+        + '&nbsp;&nbsp;<span style="color:#8B9BAC;">·</span>&nbsp;&nbsp;<span style="color:#1D2D3E;font-weight:700;">' + totalCount + '</span><span style="color:#8B9BAC;"> total rows to DIS</span>';
 
-      // SAP logo SVG
-      const sapLogo = '<svg width="36" height="22" viewBox="0 0 36 22" xmlns="http://www.w3.org/2000/svg"><rect width="36" height="22" rx="3" fill="white"/><text x="18" y="16" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-size="13" fill="#0057B8">SAP</text></svg>';
+      // SAP logo — dark version for light header
+      const sapLogo = '<svg width="36" height="22" viewBox="0 0 36 22" xmlns="http://www.w3.org/2000/svg"><rect width="36" height="22" rx="3" fill="#0057B8"/><text x="18" y="16" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-size="13" fill="#fff">SAP</text></svg>';
 
       const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,8,20,0.82);display:flex;align-items:center;justify-content:center;z-index:9999;backdrop-filter:blur(6px);font-family:"72","SAP 72",Arial,sans-serif;';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:9999;font-family:"72","SAP 72",Arial,sans-serif;';
 
       overlay.innerHTML = ''
-        + '<div style="background:#0D1B2A;border:1px solid rgba(100,180,255,0.18);border-radius:14px;width:540px;max-width:93vw;max-height:88vh;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,0.75);display:flex;flex-direction:column;">'
+        + '<div style="background:#FFFFFF;border:1px solid #D1D7DD;border-radius:6px;width:560px;max-width:93vw;max-height:88vh;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.12);display:flex;flex-direction:column;">'
 
           // Header
-          + '<div style="background:linear-gradient(135deg,#0057B8 0%,#0070F2 100%);padding:16px 20px;display:flex;align-items:center;gap:12px;">'
+          + '<div style="background:#FAFAFA;border-bottom:1px solid #E8ECF0;padding:14px 20px;display:flex;align-items:center;gap:12px;">'
             + sapLogo
             + '<div>'
-              + '<div style="color:#fff;font-size:14px;font-weight:700;letter-spacing:.3px;">Excel Planning Uploader Pro</div>'
-              + '<div style="color:rgba(255,255,255,0.6);font-size:11px;margin-top:1px;">Upload Confirmation</div>'
+              + '<div style="color:#1D2D3E;font-size:14px;font-weight:700;letter-spacing:.2px;">Excel Planning Uploader Pro</div>'
+              + '<div style="color:#8B9BAC;font-size:11px;margin-top:2px;">Upload Confirmation</div>'
             + '</div>'
-            + '<div style="margin-left:auto;background:' + badgeColor + ';color:#fff;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;letter-spacing:.5px;white-space:nowrap;">'
+            + '<div style="margin-left:auto;background:' + badgeBg + ';color:' + badgeText + ';font-size:11px;font-weight:700;padding:3px 12px;border-radius:12px;letter-spacing:.4px;white-space:nowrap;">'
               + this._esc(modeLabel.toUpperCase())
             + '</div>'
           + '</div>'
 
           // Body
-          + '<div style="padding:18px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:14px;">'
+          + '<div style="padding:16px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:12px;">'
 
             // Target card
-            + '<div style="background:#162436;border:1px solid rgba(100,180,255,0.12);border-radius:8px;padding:14px 16px;">'
-              + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
+            + '<div style="background:#F7F9FB;border:1px solid #E8ECF0;border-radius:6px;padding:14px 16px;">'
+              + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">'
                 + '<div>'
-                  + '<div style="color:#7BA3C0;font-size:10px;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Version</div>'
-                  + '<div style="color:#E8F4FD;font-size:15px;font-weight:700;">' + this._esc(ver) + '</div>'
+                  + '<div style="color:#8B9BAC;font-size:10px;text-transform:uppercase;letter-spacing:.7px;margin-bottom:4px;">Version</div>'
+                  + '<div style="color:#1D2D3E;font-size:16px;font-weight:700;">' + this._esc(ver) + '</div>'
                 + '</div>'
                 + '<div>'
-                  + '<div style="color:#7BA3C0;font-size:10px;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Period</div>'
-                  + '<div style="color:#E8F4FD;font-size:15px;font-weight:700;">' + this._esc(dat) + '</div>'
+                  + '<div style="color:#8B9BAC;font-size:10px;text-transform:uppercase;letter-spacing:.7px;margin-bottom:4px;">Period</div>'
+                  + '<div style="color:#1D2D3E;font-size:16px;font-weight:700;">' + this._esc(dat) + '</div>'
                 + '</div>'
               + '</div>'
-              + '<div style="border-top:1px solid rgba(100,180,255,0.1);margin-top:10px;padding-top:10px;font-size:12px;">' + rowsSummary + '</div>'
+              + '<div style="border-top:1px solid #E8ECF0;padding-top:10px;font-size:12px;line-height:1.6;">' + rowsSummary + '</div>'
             + '</div>'
 
             // Accumulation table (only if accumulate mode)
             + tableHTML
 
             // Info note
-            + '<div style="background:rgba(0,112,242,0.08);border:1px solid rgba(0,112,242,0.22);border-radius:8px;padding:12px 14px;display:flex;gap:10px;align-items:flex-start;">'
-              + '<svg width="16" height="16" viewBox="0 0 16 16" style="flex-shrink:0;margin-top:1px;"><circle cx="8" cy="8" r="7" stroke="#5BB8F5" stroke-width="1.2" fill="none"/><text x="8" y="12.5" text-anchor="middle" font-size="9.5" fill="#5BB8F5" font-weight="bold">i</text></svg>'
-              + '<div style="color:#96C4E8;font-size:12px;line-height:1.65;">' + this._esc(disNote).replace(/\n\s*/g, '<br>') + '</div>'
+            + '<div style="background:#EEF5FE;border:1px solid #A8C8F5;border-radius:6px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start;">'
+              + '<svg width="16" height="16" viewBox="0 0 16 16" style="flex-shrink:0;margin-top:1px;"><circle cx="8" cy="8" r="7" stroke="#0070F2" stroke-width="1.5" fill="none"/><text x="8" y="12.5" text-anchor="middle" font-size="9.5" fill="#0070F2" font-weight="bold">i</text></svg>'
+              + '<div style="color:#1D2D3E;font-size:12px;line-height:1.65;">' + this._esc(disNote).replace(/\n\s*/g, '<br>') + '</div>'
             + '</div>'
 
           + '</div>'
 
           // Footer
-          + '<div style="padding:14px 20px;border-top:1px solid rgba(100,180,255,0.1);display:flex;justify-content:flex-end;gap:10px;background:#0D1B2A;">'
-            + '<button class="epm-modal-cancel" style="background:transparent;border:1px solid rgba(100,180,255,0.3);color:#7BA3C0;padding:8px 22px;border-radius:7px;font-size:13px;cursor:pointer;font-family:inherit;transition:border-color .15s,color .15s;">Cancel</button>'
-            + '<button class="epm-modal-ok" style="background:linear-gradient(135deg,#0057B8,#0070F2);border:none;color:#fff;padding:8px 26px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.3px;transition:filter .15s;">Upload to SAC &rarr;</button>'
+          + '<div style="padding:12px 20px;border-top:1px solid #E8ECF0;display:flex;justify-content:flex-end;gap:8px;background:#FAFAFA;">'
+            + '<button class="epm-modal-cancel" style="background:#FFFFFF;border:1px solid #E8ECF0;color:#1D2D3E;padding:7px 20px;border-radius:4px;font-size:13px;cursor:pointer;font-family:inherit;transition:background .12s,border-color .12s;">Cancel</button>'
+            + '<button class="epm-modal-ok" style="background:#0070F2;border:none;color:#fff;padding:7px 24px;border-radius:4px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.2px;transition:background .12s;">Upload to SAC &rarr;</button>'
           + '</div>'
 
         + '</div>';
@@ -2838,10 +2841,10 @@ class ExcelUploaderPro extends HTMLElement {
       const cancelBtn = overlay.querySelector('.epm-modal-cancel');
       const okBtn     = overlay.querySelector('.epm-modal-ok');
 
-      cancelBtn.addEventListener('mouseenter', () => { cancelBtn.style.borderColor = 'rgba(100,180,255,0.65)'; cancelBtn.style.color = '#E8F4FD'; });
-      cancelBtn.addEventListener('mouseleave', () => { cancelBtn.style.borderColor = 'rgba(100,180,255,0.3)';  cancelBtn.style.color = '#7BA3C0'; });
-      okBtn.addEventListener('mouseenter', () => { okBtn.style.filter = 'brightness(1.15)'; });
-      okBtn.addEventListener('mouseleave', () => { okBtn.style.filter = 'brightness(1)'; });
+      cancelBtn.addEventListener('mouseenter', () => { cancelBtn.style.background = '#F7F9FB'; cancelBtn.style.borderColor = '#D1D7DD'; });
+      cancelBtn.addEventListener('mouseleave', () => { cancelBtn.style.background = '#FFFFFF'; cancelBtn.style.borderColor = '#E8ECF0'; });
+      okBtn.addEventListener('mouseenter', () => { okBtn.style.background = '#0057B8'; });
+      okBtn.addEventListener('mouseleave', () => { okBtn.style.background = '#0070F2'; });
 
       cancelBtn.addEventListener('click', () => { overlay.remove(); resolve(false); });
       okBtn.addEventListener('click',     () => { overlay.remove(); resolve(true); });
