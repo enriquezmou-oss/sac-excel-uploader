@@ -2777,6 +2777,7 @@ class ExcelUploaderPro extends HTMLElement {
     const activeMeasureCols = measureIds.size > 0
       ? sacCols.filter(c => measureIds.has(c.toUpperCase()))
       : sacCols.filter(c => {
+          if (c === 'Version' || c === 'Date') return false;
           const s = uploadedSacRows.find(r => r[c] !== undefined && r[c] !== '');
           return s && !isNaN(parseFloat(s[c]));
         });
