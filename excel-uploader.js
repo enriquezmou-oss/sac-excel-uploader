@@ -237,7 +237,8 @@ class ExcelUploaderPro extends HTMLElement {
     this._filesQueue = [];
     this._rows = [];
     this._headers = [];
-    this._currentUser = 'SAP User (Planning)'; // overridden by manifest property setter below
+    this._currentUser = 'SAP User (Planning)';
+    this._configuredUser = null; // value set via Story Builder property — used only as fallback
     this._isLoading = false;
     this._loadingText = 'Processing files...';
     this._xlsxReady = typeof XLSX !== 'undefined';
@@ -382,7 +383,10 @@ class ExcelUploaderPro extends HTMLElement {
   get currentUser() { return this._currentUser; }
   set currentUser(val) {
     const v = String(val || '').trim();
-    if (v && v !== this._currentUser) {
+    if (!v) return;
+    // Store as configured fallback but never let Story Builder override a runtime-detected user
+    this._configuredUser = v;
+    if (!this._currentUser || this._currentUser === 'SAP User (Planning)') {
       this._currentUser = v;
       if (this._shadow && this._shadow.innerHTML) this._render();
     }
@@ -781,9 +785,9 @@ class ExcelUploaderPro extends HTMLElement {
       if (uuid && /^[0-9a-f-]{36}$/i.test(uuid)) {
         this._cachedTenantUUID = uuid;
       }
-      // Try to pick up user from SAC global state objects
+      // Always try to detect the real runtime user — overrides any Story Builder configured value
       const DEFAULT_USER = 'SAP User (Planning)';
-      if (this._currentUser === DEFAULT_USER || !this._currentUser) {
+      {
         const u = window?.__sap_umi_config?.user?.loginName
           || window?.__sap_umi_config?.user?.name
           || window?.__sap_umi_config?.loginName
@@ -826,13 +830,10 @@ class ExcelUploaderPro extends HTMLElement {
             const uuid = data?.tenantId || data?.tenant || data?.id || data?.data?.tenantId
               || data?.state?.tenantId || null;
             if (uuid && /^[0-9a-f-]{36}$/i.test(uuid)) this._cachedTenantUUID = uuid;
-            const DEFAULT_USER = 'SAP User (Planning)';
-            if (this._currentUser === DEFAULT_USER || !this._currentUser) {
-              const u = data?.user?.loginName || data?.user?.name || data?.loginName
-                || data?.userName || data?.user?.email || data?.state?.user?.loginName
-                || data?.data?.user?.loginName || null;
-              if (u) this._currentUser = u;
-            }
+            const u = data?.user?.loginName || data?.user?.name || data?.loginName
+              || data?.userName || data?.user?.email || data?.state?.user?.loginName
+              || data?.data?.user?.loginName || null;
+            if (u && u !== 'SAP User (Planning)') { this._currentUser = u; console.log('[User] detected from session GET:', u); }
             if (this._cachedTenantUUID) return this._cachedTenantUUID;
           }
         }
@@ -851,11 +852,8 @@ class ExcelUploaderPro extends HTMLElement {
         if (data) {
           const uuid = data?.tenantId || data?.tenant || data?.id || null;
           if (uuid && /^[0-9a-f-]{36}$/i.test(uuid)) { this._cachedTenantUUID = uuid; return uuid; }
-          const DEFAULT_USER = 'SAP User (Planning)';
-          if ((this._currentUser === DEFAULT_USER || !this._currentUser)) {
-            const u = data?.user?.loginName || data?.loginName || data?.userName || null;
-            if (u && u !== DEFAULT_USER) { this._currentUser = u; console.log('[User] auto-detected from session POST:', u); }
-          }
+          const u = data?.user?.loginName || data?.loginName || data?.userName || null;
+          if (u && u !== 'SAP User (Planning)') { this._currentUser = u; console.log('[User] auto-detected from session POST:', u); }
         }
       }
     } catch (_) {}
@@ -873,11 +871,10 @@ class ExcelUploaderPro extends HTMLElement {
         const r = await fetch(url, { credentials: 'include', headers: { 'Accept': 'application/json' } });
         if (r.ok) {
           const data = await r.json().catch(() => null);
-          const DEFAULT_USER = 'SAP User (Planning)';
-          if (data && (this._currentUser === DEFAULT_USER || !this._currentUser)) {
+          if (data) {
             const u = data?.loginName || data?.user?.loginName || data?.userName
               || data?.name || data?.email || data?.id || null;
-            if (u && u !== DEFAULT_USER) {
+            if (u && u !== 'SAP User (Planning)') {
               this._currentUser = u;
               console.log('[User] auto-detected from', url.replace(sessionBase, ''), ':', u);
               break;
