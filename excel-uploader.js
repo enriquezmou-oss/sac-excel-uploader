@@ -1,6 +1,6 @@
 /**
  * ExcelUploaderPro — SAP Analytics Cloud Custom Widget
- * Version: 3.12.0
+ * Version: 3.12.1
  * Requires: SheetJS (loaded via CDN automatically if not present)
  * Tag:      <custom-excel-uploader-pro>
  *
@@ -19,9 +19,14 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.12.0';
+const _EPM_VERSION = '3.12.1';
 
 const _EPM_CHANGELOG = [
+  { v: '3.12.1', date: '2026-11-26', title: 'Fix: model picker keyboard nav + topSyncBtn guard',
+    items: [
+      'Fix: model picker ↑↓ / Enter keyboard navigation was broken in Shadow DOM. document.activeElement always returns the shadow host, not the focused row. Changed to shadow.activeElement so ArrowDown, ArrowUp and Enter correctly detect the focused .sac-model-pick-row.',
+      'Fix: topSyncBtn deferred click now checks this._isLoading before firing finishBtn.click() — prevents double-trigger if a previous upload is still in progress when the 60 ms timeout fires.',
+    ] },
   { v: '3.12.0', date: '2026-11-26', title: 'Quick action bar: Sync and Publish buttons now visible at the top',
     items: [
       'Added a persistent quick-action bar between the header and nav tabs — always accessible regardless of active tab or wizard step.',
@@ -1824,7 +1829,7 @@ class ExcelUploaderPro extends HTMLElement {
         if (e.key === 'Escape') { this._showModelPicker = false; this._render(); return; }
         const rows = Array.from(pickerDropdown.querySelectorAll('.sac-model-pick-row'));
         if (!rows.length) return;
-        const focused = document.activeElement;
+        const focused = shadow.activeElement;
         const idx = rows.indexOf(focused);
         if (e.key === 'ArrowDown') { e.preventDefault(); (rows[idx + 1] || rows[0]).focus(); }
         if (e.key === 'ArrowUp')   { e.preventDefault(); (rows[idx - 1] || rows[rows.length - 1]).focus(); }
@@ -2458,6 +2463,7 @@ class ExcelUploaderPro extends HTMLElement {
         this._step = 3;
         this._render();
         setTimeout(() => {
+          if (this._isLoading) return;
           const fb = this._shadow && this._shadow.getElementById('finishBtn');
           if (fb) fb.click();
         }, 60);
