@@ -31,8 +31,8 @@ const _EPM_CHANGELOG = [
       '_evalAssistedCode(): new Function() compilation now wrapped in try/catch — a syntax error in a rule expression logs a warning and returns null instead of throwing and breaking the render cycle.',
       'No behavior change for any existing feature.',
     ] },
-    items: [
-      'Fix root cause: clicks inside picker (search input, model rows) were closing it immediately. In Shadow DOM, document click handler receives e.target = widget host — picker.contains(host) is always false. Fix: stopPropagation on the entire picker container.',
+  { v: '3.11.10', date: '2026-11-26', title: 'Model browser: fix Shadow DOM close bug + UX improvements',
+    items: [ (search input, model rows) were closing it immediately. In Shadow DOM, document click handler receives e.target = widget host — picker.contains(host) is always false. Fix: stopPropagation on the entire picker container.',
       'Keyboard navigation: ↑↓ arrows move between model rows, Enter selects, Escape closes.',
       'Auto-focus search input when picker opens and after models load — no manual click needed.',
       'Refresh button (↺) reloads model list without closing the picker.',
@@ -41,8 +41,8 @@ const _EPM_CHANGELOG = [
       'Picker wider (480px) with stronger shadow, larger search box with blue focus border.',
       'Keyboard hint footer: "↑↓ navigate · Enter select · Esc close".',
     ] },
-    items: [
-      'New get targetVersion() and get targetDate() property getters — the SAC story onPublishRequested handler can now read ExcelUploaderPro_1.targetVersion and ExcelUploaderPro_1.targetDate directly.',
+  { v: '3.11.9', date: '2026-11-26', title: 'targetVersion + targetDate exposed as readable SAC properties',
+    items: [ — the SAC story onPublishRequested handler can now read ExcelUploaderPro_1.targetVersion and ExcelUploaderPro_1.targetDate directly.',
       'Both properties declared in webcomponent.json manifest so SAC Application Builder recognises them in the script editor autocomplete.',
       'SAC onPublishRequested usage: var ver = ExcelUploaderPro_1.targetVersion; var dat = ExcelUploaderPro_1.targetDate; then pass to Table_1.getDataSource().triggerDataAction("DataAction_1").',
     ] },
@@ -4215,7 +4215,7 @@ class ExcelUploaderPro extends HTMLElement {
                 {
                   id: 'append', icon: '➕', label: 'Append',
                   desc: isPrivate
-                    ? 'Sums Excel values to existing SAC data (client-side accumulation). Inserts new rows and preserves rows not in the Excel. Same as Update but with increment intent.'
+                    ? 'Accumulates Excel values to existing SAC data: existing + uploaded → final value sent to DIS. New rows are inserted; rows not in the Excel are preserved. Use when uploading increments, not final totals.'
                     : 'Accumulates measure values for matching dimension keys (adds to existing amounts).',
                   note: null
                 },
