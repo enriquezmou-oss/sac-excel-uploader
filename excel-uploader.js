@@ -19,10 +19,20 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.11.9';
+const _EPM_VERSION = '3.11.10';
 
 const _EPM_CHANGELOG = [
-  { v: '3.11.9', date: '2026-11-26', title: 'targetVersion + targetDate exposed as readable SAC properties',
+  { v: '3.11.10', date: '2026-11-26', title: 'Model browser: fix Shadow DOM close bug + UX improvements',
+    items: [
+      'Fix root cause: clicks inside picker (search input, model rows) were closing it immediately. In Shadow DOM, document click handler receives e.target = widget host — picker.contains(host) is always false. Fix: stopPropagation on the entire picker container.',
+      'Keyboard navigation: ↑↓ arrows move between model rows, Enter selects, Escape closes.',
+      'Auto-focus search input when picker opens and after models load — no manual click needed.',
+      'Refresh button (↺) reloads model list without closing the picker.',
+      'Planning model detection improved: checks importType, modelType, type, and falls back to keyword inference (plan/budget/forecast in name or description).',
+      'Models sorted: active model first, then Planning, then Actual/Other — alphabetical within groups.',
+      'Picker wider (480px) with stronger shadow, larger search box with blue focus border.',
+      'Keyboard hint footer: "↑↓ navigate · Enter select · Esc close".',
+    ] },
     items: [
       'New get targetVersion() and get targetDate() property getters — the SAC story onPublishRequested handler can now read ExcelUploaderPro_1.targetVersion and ExcelUploaderPro_1.targetDate directly.',
       'Both properties declared in webcomponent.json manifest so SAC Application Builder recognises them in the script editor autocomplete.',
@@ -1014,6 +1024,11 @@ class ExcelUploaderPro extends HTMLElement {
     this._modelPickerFilter = '';
     this._sacModels         = [];
     this._render();
+    // Auto-focus search input after first render
+    requestAnimationFrame(() => {
+      const inp = this._shadow && this._shadow.getElementById('modelPickerFilterInp');
+      if (inp) inp.focus();
+    });
     try {
       const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
       const resp = await fetch(base + '/api/v1/dataimport/models', {
@@ -1023,18 +1038,47 @@ class ExcelUploaderPro extends HTMLElement {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const data = await resp.json().catch(() => null);
       const raw  = Array.isArray(data) ? data : (data?.d?.results || data?.value || data?.models || []);
+
+      const detectImportType = (m) => {
+        // Try direct fields first
+        const direct = m.importType || m.ImportType || m.import_type || m.type || m.modelType || m.ModelType || '';
+        if (direct) return direct;
+        // Infer from name/description keywords
+        const haystack = ((m.modelName || m.name || '') + ' ' + (m.modelDescription || m.description || '')).toLowerCase();
+        if (haystack.includes('plan') || haystack.includes('budget') || haystack.includes('forecast')) return 'privateFactData';
+        return 'factData';
+      };
+
       this._sacModels = raw.map(m => ({
         id:          m.modelID          || m.id      || m.modelId    || '',
         name:        m.modelName        || m.name    || '',
         description: m.modelDescription || m.description || m.label || '',
-        importType:  m.importType       || ''
+        importType:  detectImportType(m)
       })).filter(m => m.id);
+
+      // Sort: current model first, then Planning, then rest — alphabetical within each group
+      const curId = this._sacModelId || '';
+      this._sacModels.sort((a, b) => {
+        const aActive = (a.name || a.id) === curId ? 0 : 1;
+        const bActive = (b.name || b.id) === curId ? 0 : 1;
+        if (aActive !== bActive) return aActive - bActive;
+        const aP = a.importType === 'privateFactData' ? 0 : 1;
+        const bP = b.importType === 'privateFactData' ? 0 : 1;
+        if (aP !== bP) return aP - bP;
+        return (a.name || a.id).localeCompare(b.name || b.id);
+      });
+
     } catch (err) {
       this._sacModels = [];
       this._notify('Error listing SAC models: ' + err.message, 'error');
     }
     this._sacModelsLoading = false;
     this._render();
+    // Re-focus after loading completes
+    requestAnimationFrame(() => {
+      const inp = this._shadow && this._shadow.getElementById('modelPickerFilterInp');
+      if (inp) inp.focus();
+    });
   }
 
   // Resolves the SAC technical name (e.g. PLAN_CAPEX_PLANNING) to the DIS internal GUID
@@ -1842,14 +1886,33 @@ class ExcelUploaderPro extends HTMLElement {
     if (browseModelsBtn) {
       browseModelsBtn.addEventListener('click', (e) => { e.stopPropagation(); this._fetchSacModels(); });
     }
+
+    // Stop ALL clicks inside the picker from bubbling to document —
+    // Shadow DOM retargets e.target to the host, so picker.contains(e.target)
+    // is always false without this guard.
+    const pickerDropdown = shadow.getElementById('modelPickerDropdown');
+    if (pickerDropdown) {
+      pickerDropdown.addEventListener('click', (e) => { e.stopPropagation(); });
+      // Keyboard navigation inside picker
+      pickerDropdown.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { this._showModelPicker = false; this._render(); return; }
+        const rows = Array.from(pickerDropdown.querySelectorAll('.sac-model-pick-row'));
+        if (!rows.length) return;
+        const focused = document.activeElement;
+        const idx = rows.indexOf(focused);
+        if (e.key === 'ArrowDown') { e.preventDefault(); (rows[idx + 1] || rows[0]).focus(); }
+        if (e.key === 'ArrowUp')   { e.preventDefault(); (rows[idx - 1] || rows[rows.length - 1]).focus(); }
+        if (e.key === 'Enter' && idx >= 0) { e.preventDefault(); rows[idx].click(); }
+      });
+    }
+
     if (!this._docClickBound) {
       this._docClickBound = true;
       this._docClickHandler = (e) => {
         const picker = this._shadow && this._shadow.getElementById('modelPickerDropdown');
-        const btn    = this._shadow && this._shadow.getElementById('browseModelsBtn');
-        if (picker && !picker.contains(e.target) && e.target !== btn) {
-          picker.style.display = 'none';
+        if (picker && this._showModelPicker) {
           this._showModelPicker = false;
+          this._render();
         }
       };
       document.addEventListener('click', this._docClickHandler);
@@ -1925,9 +1988,16 @@ class ExcelUploaderPro extends HTMLElement {
       closeModelPickerBtn.addEventListener('click', () => { this._showModelPicker = false; this._render(); });
     }
 
+    const refreshModelsBtn = shadow.getElementById('refreshModelsBtn');
+    if (refreshModelsBtn) {
+      refreshModelsBtn.addEventListener('click', (e) => { e.stopPropagation(); this._fetchSacModels(); });
+    }
+
     shadow.querySelectorAll('.sac-model-pick-row').forEach(row => {
       row.addEventListener('mouseenter', () => { row.style.background = '#EBF5FF'; });
-      row.addEventListener('mouseleave', () => { row.style.background = ''; });
+      row.addEventListener('mouseleave', () => { row.style.background = row.dataset.modelName === this._sacModelId ? '#EBF5FF' : ''; });
+      row.addEventListener('focus',      () => { row.style.background = '#EBF5FF'; });
+      row.addEventListener('blur',       () => { row.style.background = row.dataset.modelName === this._sacModelId ? '#EBF5FF' : ''; });
       row.addEventListener('click', () => {
         const disGuid    = row.dataset.modelId;    // internal GUID
         const modelName  = row.dataset.modelName;  // technical name (preferred)
@@ -4359,11 +4429,12 @@ class ExcelUploaderPro extends HTMLElement {
                           ? `<span style="flex-shrink:0;font-size:10px;background:#F5F5F5;color:#556B82;padding:2px 7px;border-radius:10px;font-weight:600;">${this._esc(m.importType)}</span>`
                           : '';
                     return `<div class="sac-model-pick-row"
+                        tabindex="0"
                         data-model-id="${this._esc(m.id)}"
                         data-model-name="${this._esc(m.name || m.id)}"
                         data-model-desc="${this._esc(m.description || '')}"
                         data-import-type="${this._esc(m.importType || 'privateFactData')}"
-                        style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #F0F4F8;display:flex;justify-content:space-between;align-items:center;gap:8px;${isActive ? 'background:#EBF5FF;' : ''}">
+                        style="padding:8px 14px;cursor:pointer;border-bottom:1px solid #F0F4F8;display:flex;justify-content:space-between;align-items:center;gap:8px;outline:none;${isActive ? 'background:#EBF5FF;' : ''}">
                         <div style="min-width:0;flex:1;">
                           <div style="font-weight:${isActive ? '800' : '700'};font-size:12px;color:${isActive ? '#003F8A' : '#0064D9'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(m.name || m.id)}">${isActive ? '✓ ' : ''}${this._esc(m.name || m.id)}</div>
                           ${m.description ? `<div style="font-size:11px;color:#556B82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${this._esc(m.description)}">${this._esc(m.description)}</div>` : ''}
@@ -4378,24 +4449,29 @@ class ExcelUploaderPro extends HTMLElement {
                     ${items.map(renderRow).join('')}`;
 
                   return `
-                  <div id="modelPickerDropdown" style="position:absolute;z-index:9999;top:calc(100% + 2px);left:0;min-width:420px;max-height:360px;display:flex;flex-direction:column;background:#fff;border:1px solid #0070F2;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);">
-                    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;border-bottom:1px solid #E9EEF3;background:#F8FAFC;border-radius:8px 8px 0 0;flex-shrink:0;">
-                      <span style="font-weight:700;font-size:11px;color:#1D2D3E;">SAC DIS Models — ${filtered.length} of ${this._sacModels.length}</span>
-                      <button id="closeModelPickerBtn" type="button" style="background:none;border:none;cursor:pointer;font-size:14px;color:#556B82;padding:0 2px;">✕</button>
+                  <div id="modelPickerDropdown" style="position:absolute;z-index:9999;top:calc(100% + 4px);left:0;min-width:480px;max-height:420px;display:flex;flex-direction:column;background:#fff;border:1px solid #0070F2;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.18);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 14px;border-bottom:1px solid #E9EEF3;background:#F0F4FA;border-radius:8px 8px 0 0;flex-shrink:0;">
+                      <span style="font-weight:700;font-size:12px;color:#1D2D3E;">📋 SAC DIS Models — <span style="color:#0064D9;">${filtered.length}</span> of ${this._sacModels.length}</span>
+                      <button id="closeModelPickerBtn" type="button" style="background:none;border:none;cursor:pointer;font-size:16px;color:#556B82;padding:0 4px;line-height:1;" title="Close (Esc)">✕</button>
                     </div>
-                    <div style="padding:6px 10px;border-bottom:1px solid #E9EEF3;flex-shrink:0;">
-                      <input type="text" id="modelPickerFilterInp" placeholder="🔍 Search by description, technical name or ID…"
+                    <div style="padding:8px 10px;border-bottom:1px solid #E9EEF3;flex-shrink:0;">
+                      <input type="text" id="modelPickerFilterInp" placeholder="🔍  Search by name, description or ID…"
                         value="${this._esc(this._modelPickerFilter)}"
-                        style="width:100%;box-sizing:border-box;border:1px solid #C0CDD8;border-radius:4px;padding:5px 8px;font-size:12px;outline:none;font-family:inherit;" />
+                        autocomplete="off" spellcheck="false"
+                        style="width:100%;box-sizing:border-box;border:1px solid #0070F2;border-radius:6px;padding:7px 10px;font-size:13px;outline:none;font-family:inherit;background:#FAFCFF;" />
                     </div>
-                    <div style="overflow-y:auto;flex:1;">
+                    <div style="overflow-y:auto;flex:1;min-height:60px;">
                     ${this._sacModelsLoading
-                      ? '<div style="padding:20px;text-align:center;color:#556B82;font-size:12px;">⏳ Loading models…</div>'
+                      ? '<div style="padding:24px;text-align:center;color:#556B82;font-size:13px;">⏳ Loading models…</div>'
                       : filtered.length === 0
-                        ? `<div style="padding:20px;text-align:center;color:#BB0000;font-size:12px;">${filterTerm ? 'No results for "' + this._esc(filterTerm) + '"' : 'No models available or no DIS permissions'}</div>`
-                        : renderGroup('📋 Planning', '#2E7D32', planning) + renderGroup('📊 Actual / Otros', '#005CB9', other)
+                        ? `<div style="padding:24px;text-align:center;color:#BB0000;font-size:12px;">${filterTerm ? '🔍 No results for "<b>' + this._esc(filterTerm) + '</b>"' : '⚠️ No models available — check DIS permissions'}</div>`
+                        : renderGroup('📋 Planning', '#2E7D32', planning) + renderGroup('📊 Actual / Other', '#005CB9', other)
                     }
                     </div>
+                    ${!this._sacModelsLoading ? `<div style="padding:5px 14px;border-top:1px solid #E9EEF3;background:#FAFBFC;border-radius:0 0 8px 8px;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;">
+                      <span style="font-size:10px;color:#8A9BB0;">↑↓ navigate · Enter select · Esc close</span>
+                      <button id="refreshModelsBtn" type="button" style="background:none;border:1px solid #C0CDD8;border-radius:4px;padding:2px 8px;font-size:10px;color:#556B82;cursor:pointer;">↺ Refresh</button>
+                    </div>` : ''}
                   </div>`;
                 })() : ''}
               </div>
