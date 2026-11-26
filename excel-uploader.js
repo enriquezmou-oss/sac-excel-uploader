@@ -22,6 +22,26 @@ if (typeof ExcelUploaderPro === 'undefined') {
 const _EPM_VERSION = '3.11.9';
 
 const _EPM_CHANGELOG = [
+  { v: '3.11.9', date: '2026-11-26', title: 'targetVersion + targetDate exposed as readable SAC properties',
+    items: [
+      'New get targetVersion() and get targetDate() property getters — the SAC story onPublishRequested handler can now read ExcelUploaderPro_1.targetVersion and ExcelUploaderPro_1.targetDate directly.',
+      'Both properties declared in webcomponent.json manifest so SAC Application Builder recognises them in the script editor autocomplete.',
+      'SAC onPublishRequested usage: var ver = ExcelUploaderPro_1.targetVersion; var dat = ExcelUploaderPro_1.targetDate; then pass to Table_1.getDataSource().triggerDataAction("DataAction_1").',
+    ] },
+  { v: '3.11.8', date: '2026-11-26', title: 'Fix: SAC model browser button (🔍 SAC) now opens picker correctly',
+    items: [
+      'Root cause: the Shadow DOM retargets click events so document click handler (model picker close) saw e.target = widget host, not the inner button — picker opened and immediately closed.',
+      'Fix: added e.stopPropagation() to the browseModelsBtn click listener so the document handler never fires for inner-shadow clicks.',
+      'Model picker now stays open after clicking 🔍 SAC, correctly listing available SAC models.',
+    ] },
+  { v: '3.11.7', date: '2026-11-26', title: 'Confirm dialog redesigned to SAP Fiori light theme',
+    items: [
+      'Background changed from dark navy to SAP Fiori white (#FFFFFF / #FAFAFA) with standard SAP border and shadow.',
+      'Header: #FAFAFA background, SAP 72 font, dark geometric logo mark.',
+      'Info box uses SAP light blue (#EEF5FE) instead of dark panel.',
+      'Upload button uses SAP primary blue (#0070F2); Cancel button uses white/grey outline.',
+      'Accumulation increment values highlighted in #0070F2 for readability.',
+    ] },
   { v: '3.11.1', date: '2026-11-25', title: 'Fix: Update vs Append behavior, Version/Date filter in accumulation, user detection',
     items: [
       'Fix: Update mode now correctly replaces matching row values with the uploaded value. Accumulation (_accumulateWithExisting) now only runs for Append mode, not Update.',
@@ -3420,25 +3440,30 @@ class ExcelUploaderPro extends HTMLElement {
     }).join('');
 
     const roadmapItems = [
-      { quarter: 'Q4 2026', status: 'next', color: '#0064D9', items: [
-        { icon: '🔄', title: 'refreshData() tras carga', desc: 'Reemplazar window.location.reload() por Table_1.getDataSource().refreshData() en onDataReady — sin perder filtros ni sesión.' },
-        { icon: '📅', title: 'Autorrelleno Version / Period desde Table_1', desc: 'Pasar targetVersion y targetDate desde los filtros activos de Table_1 al widget vía existingDataInfo, eliminando la entrada manual.' },
-        { icon: '🔀', title: 'Version + Date en existingDataInfo.rows', desc: 'Incluir Version y Date en cada fila del payload para que _accumulateWithExisting filtre solo el período correcto y evite mezclar datos de otros meses.' },
+      { quarter: 'Q4 2026', status: 'done', color: '#107E3E', items: [
+        { icon: '✅', title: 'refreshData() tras carga', desc: 'Implementado en la historia SAC: ExcelUploaderPro_1 → onDataReady llama a Table_1.getDataSource().refreshData() — sin perder filtros ni sesión.' },
+        { icon: '✅', title: 'targetVersion / targetDate como propiedades SAC', desc: 'v3.11.9: get targetVersion() y get targetDate() expuestos como propiedades legibles. El script onPublishRequested puede leer ExcelUploaderPro_1.targetVersion y pasarlos a DataAction_1.' },
+        { icon: '✅', title: 'Version + Date en filtro de acumulación', desc: 'v3.11.1: _accumulateWithExisting filtra existingRows por targetVersion y targetDate antes de acumular — evita mezclar datos de otros meses o versiones.' },
       ]},
-      { quarter: 'Q1 2027', status: 'planned', color: '#107E3E', items: [
+      { quarter: 'Q1 2027', status: 'next', color: '#0064D9', items: [
+        { icon: '🔀', title: 'Disparar DataAction automáticamente tras carga', desc: 'Llamar a Table_1.getDataSource().triggerDataAction("DataAction_1") desde onDataReady para ejecutar distribuciones o cálculos derivados sin acción manual.' },
         { icon: '💾', title: 'Optimización localStorage audit', desc: 'Guardar snapshots completos solo en las 5 últimas cargas; para las anteriores, conservar solo metadatos. Previene QuotaExceededError con ficheros grandes.' },
         { icon: '🔎', title: 'Delta automático', desc: 'Detectar qué filas cambiaron respecto a la última carga y subir solo el delta, reduciendo el volumen enviado a DIS.' },
-        { icon: '🗺️', title: 'Galería de plantillas de mapeo', desc: 'Perfiles predefinidos de mapeo de columnas para los modelos SAC más comunes (CAPEX, OPEX, Headcount). Cargar en un clic.' },
       ]},
-      { quarter: 'Q2 2027', status: 'idea', color: '#E76500', items: [
+      { quarter: 'Q2 2027', status: 'planned', color: '#E76500', items: [
+        { icon: '🗺️', title: 'Galería de plantillas de mapeo', desc: 'Perfiles predefinidos de mapeo de columnas para los modelos SAC más comunes (CAPEX, OPEX, Headcount). Cargar en un clic.' },
         { icon: '🤖', title: 'Mapeo de columnas asistido por IA', desc: 'Sugerir automáticamente el mapeo columna-dimensión usando el nombre y los valores de muestra del Excel contra las dimensiones del modelo SAC.' },
-        { icon: '🔗', title: 'Integración con SAC Data Actions', desc: 'Disparar una Data Action predefinida automáticamente al finalizar la carga, para ejecutar distribuciones o cálculos derivados.' },
         { icon: '📊', title: 'Upload a múltiples modelos', desc: 'Subir a más de un modelo SAC en la misma sesión desde distintas pestañas del Excel, con confirmación por modelo.' },
+      ]},
+      { quarter: 'Q3 2027', status: 'idea', color: '#8A9BB0', items: [
+        { icon: '🔗', title: 'Integración con SAC Data Actions', desc: 'Configurar desde el Builder qué Data Action lanzar al finalizar la carga, sin necesitar script en la historia.' },
+        { icon: '🔔', title: 'Notificaciones SAC Teams / email', desc: 'Enviar resumen de carga a un canal de Teams o email configurado, con enlace directo al Audit Monitor.' },
+        { icon: '🌐', title: 'Soporte multi-tenant', desc: 'Cambiar entre tenants SAC distintos desde la configuración del widget sin editar la historia.' },
       ]},
     ];
 
     const roadmapHtml = roadmapItems.map(group => {
-      const statusLabel = group.status === 'next' ? '⚡ En progreso' : group.status === 'planned' ? '📋 Planificado' : '💡 Idea';
+      const statusLabel = group.status === 'done' ? '✅ Completado' : group.status === 'next' ? '⚡ En progreso' : group.status === 'planned' ? '📋 Planificado' : '💡 Idea';
       return `
         <div style="margin-bottom:14px;">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
