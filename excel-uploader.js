@@ -1,6 +1,6 @@
 /**
  * ExcelUploaderPro — SAP Analytics Cloud Custom Widget
- * Version: 3.11.11
+ * Version: 3.12.0
  * Requires: SheetJS (loaded via CDN automatically if not present)
  * Tag:      <custom-excel-uploader-pro>
  *
@@ -19,9 +19,17 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.11.11';
+const _EPM_VERSION = '3.12.0';
 
 const _EPM_CHANGELOG = [
+  { v: '3.12.0', date: '2026-11-26', title: 'Quick action bar: Sync and Publish buttons now visible at the top',
+    items: [
+      'Added a persistent quick-action bar between the header and nav tabs — always accessible regardless of active tab or wizard step.',
+      '"🚀 Sync to SAC" button: runs all pre-flight checks (version, period, blocking alerts, row count) and triggers DIS upload. Disabled when no rows are loaded; reduced opacity when blocking errors exist.',
+      '"📢 Publish" button: fires the publishRequested SAC event immediately from any tab — no need to scroll to Audit Monitor.',
+      'Status strip shows current row count, global semaphore signal, and active Version + Period target.',
+      'Semaphore dot (green/amber/red/purple) in the status strip updates live as validation rules run.',
+    ] },
   { v: '3.11.11', date: '2026-11-26', title: 'Dead code removed · localStorage audit trimming · new Function safety',
     items: [
       'Removed dead methods: _fetchDeltaPreview, _fetchExistingDataOData (replaced by existingDataInfo bridge in v3.9.6+), _renderPublishModal / _showPublishModal (modal was never triggered).',
@@ -32,7 +40,8 @@ const _EPM_CHANGELOG = [
       'No behavior change for any existing feature.',
     ] },
   { v: '3.11.10', date: '2026-11-26', title: 'Model browser: fix Shadow DOM close bug + UX improvements',
-    items: [ (search input, model rows) were closing it immediately. In Shadow DOM, document click handler receives e.target = widget host — picker.contains(host) is always false. Fix: stopPropagation on the entire picker container.',
+    items: [
+      'Root cause: document-level click handler used to close the model picker was receiving e.target = shadow host for all inner clicks (search input, model rows) were closing it immediately. In Shadow DOM, document click handler receives e.target = widget host — picker.contains(host) is always false. Fix: stopPropagation on the entire picker container.',
       'Keyboard navigation: ↑↓ arrows move between model rows, Enter selects, Escape closes.',
       'Auto-focus search input when picker opens and after models load — no manual click needed.',
       'Refresh button (↺) reloads model list without closing the picker.',
@@ -42,7 +51,8 @@ const _EPM_CHANGELOG = [
       'Keyboard hint footer: "↑↓ navigate · Enter select · Esc close".',
     ] },
   { v: '3.11.9', date: '2026-11-26', title: 'targetVersion + targetDate exposed as readable SAC properties',
-    items: [ — the SAC story onPublishRequested handler can now read ExcelUploaderPro_1.targetVersion and ExcelUploaderPro_1.targetDate directly.',
+    items: [
+      'get targetVersion and get targetDate read-only properties added — the SAC story onPublishRequested handler can now read ExcelUploaderPro_1.targetVersion and ExcelUploaderPro_1.targetDate directly.',
       'Both properties declared in webcomponent.json manifest so SAC Application Builder recognises them in the script editor autocomplete.',
       'SAC onPublishRequested usage: var ver = ExcelUploaderPro_1.targetVersion; var dat = ExcelUploaderPro_1.targetDate; then pass to Table_1.getDataSource().triggerDataAction("DataAction_1").',
     ] },
@@ -2431,6 +2441,40 @@ class ExcelUploaderPro extends HTMLElement {
       }));
     });
 
+    // ── Top bar quick-action buttons ────────────────────────────────────────
+    const topSyncBtn = shadow.getElementById('topSyncBtn');
+    if (topSyncBtn) {
+      topSyncBtn.addEventListener('click', () => {
+        if (!this._targetVersion || !this._targetDate) {
+          this._notify('⚠️ Set Version and Period (🎯 SAC Load Target) before synchronizing.', 'error'); return;
+        }
+        const s = this._getAlertStats();
+        if (this._rows.length === 0) { this._notify('No active data rows to load.', 'error'); return; }
+        if (s.blockingRows > 0) { this._notify('Cannot synchronize: ' + s.blockingRows + ' row(s) have BLOCKING alerts.', 'error'); return; }
+        if ((s.preventiveRows > 0 || s.checkRows > 0) && !this._acknowledgeNonBlocking) {
+          this._notify('Please confirm review of preventive and check alerts before synchronizing.', 'error'); return;
+        }
+        this._activeTab = 'uploaderTab';
+        this._step = 3;
+        this._render();
+        setTimeout(() => {
+          const fb = this._shadow && this._shadow.getElementById('finishBtn');
+          if (fb) fb.click();
+        }, 60);
+      });
+    }
+
+    const topPublishBtn = shadow.getElementById('topPublishBtn');
+    if (topPublishBtn) {
+      topPublishBtn.addEventListener('click', () => {
+        this._notify('📢 Publish requested — connect onPublishRequested in the SAC story to your planning model.', 'info');
+        this.dispatchEvent(new CustomEvent('publishRequested', {
+          bubbles: true, composed: true,
+          detail: { modelId: this._sacModelId, version: this._targetVersion, date: this._targetDate }
+        }));
+      });
+    }
+
 
     const clearHistoryBtn = shadow.getElementById('clearHistoryBtn');
     if (clearHistoryBtn) {
@@ -4128,6 +4172,20 @@ class ExcelUploaderPro extends HTMLElement {
         pre::-webkit-scrollbar-track { background: #0D1B2A; border-radius: 3px; }
         pre::-webkit-scrollbar-thumb { background: #0070F2; border-radius: 3px; }
         pre::-webkit-scrollbar-thumb:hover { background: #74D8FF; }
+        .quick-action-bar { display:flex; align-items:center; justify-content:space-between; padding:8px 24px; background:#FFFFFF; border-bottom:1px solid #E5E9EC; gap:12px; flex-wrap:wrap; }
+        .qab-status { display:flex; align-items:center; gap:8px; min-width:0; overflow:hidden; }
+        .qab-status-text { font-size:12px; color:#556B82; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .sem-dot-sm { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+        .sem-dot-sm.sem-GREEN  { background:#107E3E; box-shadow:0 0 0 3px rgba(16,126,62,.18); }
+        .sem-dot-sm.sem-RED    { background:#BB0000; box-shadow:0 0 0 3px rgba(187,0,0,.18); }
+        .sem-dot-sm.sem-AMBER  { background:#E9730C; box-shadow:0 0 0 3px rgba(233,115,12,.18); }
+        .sem-dot-sm.sem-PURPLE { background:#6D28D9; box-shadow:0 0 0 3px rgba(109,40,217,.18); }
+        .btn-qab { padding:7px 14px; font-size:12px; font-weight:700; border-radius:6px; cursor:pointer; border:none; display:inline-flex; align-items:center; gap:5px; white-space:nowrap; transition:all 0.15s ease; }
+        .btn-qab-sync { background:#0070F2; color:#FFFFFF; }
+        .btn-qab-sync:hover { background:#005CB9; }
+        .btn-qab-sync:disabled { opacity:0.4; cursor:not-allowed; }
+        .btn-qab-publish { background:#107E3E; color:#FFFFFF; }
+        .btn-qab-publish:hover { background:#0C6230; }
       </style>
 
       <div class="main-card">
@@ -4157,6 +4215,30 @@ class ExcelUploaderPro extends HTMLElement {
             <button class="help-icon-btn" id="toggleHelpBtn" type="button" title="Interactive Help Guide">
               <span style="background:#0070F2;color:#FFF;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;">?</span>
               <span>Help</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="quick-action-bar">
+          <div class="qab-status">
+            <span class="sem-dot-sm sem-${globalSemaphore}"></span>
+            <span style="font-weight:700;font-size:12px;color:#1D2D3E;">${totalRows} row${totalRows !== 1 ? 's' : ''}</span>
+            <span class="qab-status-text">· ${globalSemaphoreText}</span>
+            ${this._targetVersion
+              ? `<span class="qab-status-text" style="color:#0064D9;font-weight:600;">· Version: <b>${this._esc(this._targetVersion)}</b> · Period: <b>${this._esc(this._targetDate)}</b></span>`
+              : `<span class="qab-status-text" style="color:#788FA6;">· No target version set</span>`
+            }
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button class="btn-qab btn-qab-sync" id="topSyncBtn" type="button"
+              ${totalRows === 0 ? 'disabled' : ''}
+              ${stats.blockingRows > 0 ? 'style="opacity:0.55;"' : ''}
+              title="${totalRows === 0 ? 'Load an Excel file first' : stats.blockingRows > 0 ? 'Resolve ' + stats.blockingRows + ' blocking error(s) first' : 'Upload ' + totalRows + ' row(s) to SAC · ' + this._loadStrategy}">
+              🚀 Sync to SAC
+            </button>
+            <button class="btn-qab btn-qab-publish" id="topPublishBtn" type="button"
+              title="${this._targetVersion ? 'Publish version ' + this._esc(this._targetVersion) + ' to SAC' : 'Publish planning version to SAC'}">
+              📢 Publish
             </button>
           </div>
         </div>
