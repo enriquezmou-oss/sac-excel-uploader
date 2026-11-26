@@ -19,7 +19,7 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.11.7';
+const _EPM_VERSION = '3.11.8';
 
 const _EPM_CHANGELOG = [
   { v: '3.11.1', date: '2026-11-25', title: 'Fix: Update vs Append behavior, Version/Date filter in accumulation, user detection',
@@ -1818,7 +1818,7 @@ class ExcelUploaderPro extends HTMLElement {
 
     const browseModelsBtn = shadow.getElementById('browseModelsBtn');
     if (browseModelsBtn) {
-      browseModelsBtn.addEventListener('click', () => this._fetchSacModels());
+      browseModelsBtn.addEventListener('click', (e) => { e.stopPropagation(); this._fetchSacModels(); });
     }
     if (!this._docClickBound) {
       this._docClickBound = true;
