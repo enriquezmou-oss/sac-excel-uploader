@@ -19,7 +19,7 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.11.8';
+const _EPM_VERSION = '3.11.9';
 
 const _EPM_CHANGELOG = [
   { v: '3.11.1', date: '2026-11-25', title: 'Fix: Update vs Append behavior, Version/Date filter in accumulation, user detection',
@@ -431,6 +431,8 @@ class ExcelUploaderPro extends HTMLElement {
   //   ExcelUploaderPro_1.existingDataInfo = JSON.stringify({rowCount: N, hasData: true/false});
   // The widget shows this in the Update/Append confirmation dialog.
   get existingDataInfo() { return this._existingDataInfo ? JSON.stringify(this._existingDataInfo) : ''; }
+  get targetVersion()    { return this._targetVersion || ''; }
+  get targetDate()       { return this._targetDate    || ''; }
   set existingDataInfo(val) {
     try {
       const parsed = val ? JSON.parse(String(val)) : null;

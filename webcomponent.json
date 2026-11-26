@@ -1,6 +1,6 @@
 {
   "id": "com.sap.sac.exceluploaderpro",
-  "version": "3.11.8",
+  "version": "3.11.9",
   "name": "Excel Planning Uploader Pro",
   "description": "Multi-Sheet Consolidation, Transform & Convert, Alert Semaphores for SAC Planning",
   "newInstancePrefix": "ExcelUploaderPro_",
@@ -35,6 +35,14 @@
       "default": ""
     },
     "existingDataInfo": {
+      "type": "string",
+      "default": ""
+    },
+    "targetVersion": {
+      "type": "string",
+      "default": ""
+    },
+    "targetDate": {
       "type": "string",
       "default": ""
     }
