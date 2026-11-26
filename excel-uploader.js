@@ -1,6 +1,6 @@
 /**
  * ExcelUploaderPro — SAP Analytics Cloud Custom Widget
- * Version: 3.12.1
+ * Version: 3.12.2
  * Requires: SheetJS (loaded via CDN automatically if not present)
  * Tag:      <custom-excel-uploader-pro>
  *
@@ -19,9 +19,14 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.12.1';
+const _EPM_VERSION = '3.12.2';
 
 const _EPM_CHANGELOG = [
+  { v: '3.12.2', date: '2026-11-26', title: '🔄 Refresh button in top bar · Roadmap updated',
+    items: [
+      'Added 🔄 Refresh button to the quick-action bar — always enabled, fires dataReady event to refresh the SAC table without uploading new data.',
+      'Roadmap updated: Q4 2026 marked complete (localStorage trimming, top bar, shadow DOM keyboard fix added). Q1 2027 refreshed with new items (Append safe mode, config persistence). Q2 2027 adds dry-run simulation mode.',
+    ] },
   { v: '3.12.1', date: '2026-11-26', title: 'Fix: model picker keyboard nav + topSyncBtn guard',
     items: [
       'Fix: model picker ↑↓ / Enter keyboard navigation was broken in Shadow DOM. document.activeElement always returns the shadow host, not the focused row. Changed to shadow.activeElement so ArrowDown, ArrowUp and Enter correctly detect the focused .sac-model-pick-row.',
@@ -2447,6 +2452,14 @@ class ExcelUploaderPro extends HTMLElement {
     });
 
     // ── Top bar quick-action buttons ────────────────────────────────────────
+    const topRefreshBtn = shadow.getElementById('topRefreshBtn');
+    if (topRefreshBtn) {
+      topRefreshBtn.addEventListener('click', () => {
+        this._notify('↺ Refreshing SAC table…', 'info');
+        this.dispatchEvent(new CustomEvent('dataReady', { bubbles: true, composed: true }));
+      });
+    }
+
     const topSyncBtn = shadow.getElementById('topSyncBtn');
     if (topSyncBtn) {
       topSyncBtn.addEventListener('click', () => {
@@ -3477,16 +3490,21 @@ class ExcelUploaderPro extends HTMLElement {
         { icon: '✅', title: 'refreshData() tras carga', desc: 'Implementado en la historia SAC: ExcelUploaderPro_1 → onDataReady llama a Table_1.getDataSource().refreshData() — sin perder filtros ni sesión.' },
         { icon: '✅', title: 'targetVersion / targetDate como propiedades SAC', desc: 'v3.11.9: get targetVersion() y get targetDate() expuestos como propiedades legibles. El script onPublishRequested puede leer ExcelUploaderPro_1.targetVersion y pasarlos a DataAction_1.' },
         { icon: '✅', title: 'Version + Date en filtro de acumulación', desc: 'v3.11.1: _accumulateWithExisting filtra existingRows por targetVersion y targetDate antes de acumular — evita mezclar datos de otros meses o versiones.' },
+        { icon: '✅', title: 'Optimización localStorage audit', desc: 'v3.11.11: snapshots completos solo en las 5 últimas cargas; registros anteriores conservan solo metadatos. Resuelto QuotaExceededError en ficheros grandes.' },
+        { icon: '✅', title: 'Barra de acciones rápidas en la cabecera', desc: 'v3.12.x: botones 🔄 Refresh, 🚀 Sync to SAC y 📢 Publish siempre visibles en la barra superior, sin necesidad de navegar a ninguna pestaña.' },
+        { icon: '✅', title: 'Navegación por teclado en selector de modelos', desc: 'v3.12.1: corregido shadow.activeElement (antes document.activeElement devolvía el host), ↑↓ y Enter funcionan correctamente dentro del shadow DOM.' },
       ]},
       { quarter: 'Q1 2027', status: 'next', color: '#0064D9', items: [
-        { icon: '🔀', title: 'Disparar DataAction automáticamente tras carga', desc: 'Llamar a Table_1.getDataSource().triggerDataAction("DataAction_1") desde onDataReady para ejecutar distribuciones o cálculos derivados sin acción manual.' },
-        { icon: '💾', title: 'Optimización localStorage audit', desc: 'Guardar snapshots completos solo en las 5 últimas cargas; para las anteriores, conservar solo metadatos. Previene QuotaExceededError con ficheros grandes.' },
-        { icon: '🔎', title: 'Delta automático', desc: 'Detectar qué filas cambiaron respecto a la última carga y subir solo el delta, reduciendo el volumen enviado a DIS.' },
+        { icon: '🔀', title: 'Disparar DataAction automáticamente tras carga', desc: 'Llamar a Table_1.getDataSource().triggerDataAction("DataAction_1") desde onDataReady para ejecutar distribuciones o cálculos derivados sin acción manual en la historia SAC.' },
+        { icon: '🔎', title: 'Delta automático', desc: 'Detectar qué filas cambiaron respecto a la última carga y subir solo el delta, reduciendo el volumen enviado a DIS y el tiempo de carga.' },
+        { icon: '📌', title: 'Append sin existingDataInfo — modo seguro', desc: 'Cuando existingDataInfo no está disponible (no se llama a setExistingDataInfo), mostrar advertencia y ofrecer modo "solo nuevas filas" para evitar pérdidas silenciosas de datos existentes.' },
+        { icon: '💾', title: 'Persistencia de configuración por historia', desc: 'Guardar modelo, columnas requeridas y estrategia de carga en localStorage vinculado al ID de historia SAC para no reconfigurar en cada sesión.' },
       ]},
       { quarter: 'Q2 2027', status: 'planned', color: '#E76500', items: [
-        { icon: '🗺️', title: 'Galería de plantillas de mapeo', desc: 'Perfiles predefinidos de mapeo de columnas para los modelos SAC más comunes (CAPEX, OPEX, Headcount). Cargar en un clic.' },
+        { icon: '🗺️', title: 'Galería de plantillas de mapeo', desc: 'Perfiles predefinidos de mapeo de columnas para los modelos SAC más comunes (CAPEX, OPEX, Headcount). Cargar en un clic desde el wizard.' },
         { icon: '🤖', title: 'Mapeo de columnas asistido por IA', desc: 'Sugerir automáticamente el mapeo columna-dimensión usando el nombre y los valores de muestra del Excel contra las dimensiones del modelo SAC.' },
-        { icon: '📊', title: 'Upload a múltiples modelos', desc: 'Subir a más de un modelo SAC en la misma sesión desde distintas pestañas del Excel, con confirmación por modelo.' },
+        { icon: '📊', title: 'Upload a múltiples modelos', desc: 'Subir a más de un modelo SAC en la misma sesión desde distintas pestañas del Excel, con confirmación individual por modelo.' },
+        { icon: '🧪', title: 'Modo simulación (dry-run)', desc: 'Validar el payload contra el endpoint DIS sin confirmarlo — devuelve qué filas fallarían y por qué sin modificar el modelo SAC.' },
       ]},
       { quarter: 'Q3 2027', status: 'idea', color: '#8A9BB0', items: [
         { icon: '🔗', title: 'Integración con SAC Data Actions', desc: 'Configurar desde el Builder qué Data Action lanzar al finalizar la carga, sin necesitar script en la historia.' },
@@ -4192,6 +4210,8 @@ class ExcelUploaderPro extends HTMLElement {
         .btn-qab-sync:disabled { opacity:0.4; cursor:not-allowed; }
         .btn-qab-publish { background:#107E3E; color:#FFFFFF; }
         .btn-qab-publish:hover { background:#0C6230; }
+        .btn-qab-refresh { background:#FFFFFF; color:#0070F2; border:1px solid #BCC8D4; }
+        .btn-qab-refresh:hover { background:#F0F6FF; border-color:#0070F2; }
       </style>
 
       <div class="main-card">
@@ -4236,6 +4256,10 @@ class ExcelUploaderPro extends HTMLElement {
             }
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
+            <button class="btn-qab btn-qab-refresh" id="topRefreshBtn" type="button"
+              title="Refresh the SAC table (fires dataReady event)">
+              🔄 Refresh
+            </button>
             <button class="btn-qab btn-qab-sync" id="topSyncBtn" type="button"
               ${totalRows === 0 ? 'disabled' : ''}
               ${stats.blockingRows > 0 ? 'style="opacity:0.55;"' : ''}
