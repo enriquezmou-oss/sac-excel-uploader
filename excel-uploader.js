@@ -1,6 +1,6 @@
 /**
  * ExcelUploaderPro — SAP Analytics Cloud Custom Widget
- * Version: 2.6.0
+ * Version: 3.11.11
  * Requires: SheetJS (loaded via CDN automatically if not present)
  * Tag:      <custom-excel-uploader-pro>
  *
@@ -19,10 +19,18 @@
  */
 if (typeof ExcelUploaderPro === 'undefined') {
 
-const _EPM_VERSION = '3.11.10';
+const _EPM_VERSION = '3.11.11';
 
 const _EPM_CHANGELOG = [
-  { v: '3.11.10', date: '2026-11-26', title: 'Model browser: fix Shadow DOM close bug + UX improvements',
+  { v: '3.11.11', date: '2026-11-26', title: 'Dead code removed · localStorage audit trimming · new Function safety',
+    items: [
+      'Removed dead methods: _fetchDeltaPreview, _fetchExistingDataOData (replaced by existingDataInfo bridge in v3.9.6+), _renderPublishModal / _showPublishModal (modal was never triggered).',
+      'Removed dead state: this._dspArtifactSync, this._deltaPreview, loadDeltaPreviewBtn binding — reduces constructor size and _bindEvents() noise.',
+      'Fixed file header comment (was stuck at Version: 2.6.0, now 3.11.11).',
+      '_saveHistory(): full snapshot (snapshotRows + payloadJson) kept only for the 5 most recent loads; older records stored as metadata-only. Prevents QuotaExceededError on localStorage ~5MB limit.',
+      '_evalAssistedCode(): new Function() compilation now wrapped in try/catch — a syntax error in a rule expression logs a warning and returns null instead of throwing and breaking the render cycle.',
+      'No behavior change for any existing feature.',
+    ] },
     items: [
       'Fix root cause: clicks inside picker (search input, model rows) were closing it immediately. In Shadow DOM, document click handler receives e.target = widget host — picker.contains(host) is always false. Fix: stopPropagation on the entire picker container.',
       'Keyboard navigation: ↑↓ arrows move between model rows, Enter selects, Escape closes.',
@@ -284,10 +292,8 @@ class ExcelUploaderPro extends HTMLElement {
     this._showHelpModal = false;
     this._showChangelog = false;
     this._changelogTab = 'changelog'; // 'changelog' | 'roadmap'
-    this._showPublishModal = false;
 
     this._loadStrategy  = 'FULL';
-    this._dspArtifactSync = true;
     this._targetVersion = this._storageGet('sac_target_version') || '';
     this._targetDate    = this._storageGet('sac_target_date')    || '';
     this._parseConfig = { format: 'AUTO', delimiter: 'AUTO', numberFormat: 'STD', headerRow: 1 };
@@ -366,7 +372,6 @@ class ExcelUploaderPro extends HTMLElement {
     this._sacModelId      = this._storageGet('sac_dis_model_id')   || 'PLAN_CAPEX_PLANNING';
     this._sacImportType   = this._storageGet('sac_import_type')    || 'privateFactData';
     this._importMethod    = this._storageGet('sac_import_method')  || 'replace';
-    this._deltaPreview    = { rows: [], cols: [], loading: false, error: null, loaded: false };
     this._sacModelName    = '';
     this._sacModelDesc    = this._storageGet('sac_dis_model_desc') || '';
     this._sacModelState   = '';
@@ -506,7 +511,17 @@ class ExcelUploaderPro extends HTMLElement {
     this._currentSessionLogs.unshift({ time: new Date().toLocaleTimeString(), type, target, detail, oldVal: String(oldVal ?? ''), newVal: String(newVal ?? '') });
   }
 
-  _saveHistory() { this._storageSet('sac_audit_history_v9', this._history.slice(0, 30)); }
+  _saveHistory() {
+    const FULL_LIMIT = 5;
+    const trimmed = this._history.slice(0, 30).map((rec, idx) => {
+      if (idx < FULL_LIMIT) return rec;
+      const slim = Object.assign({}, rec);
+      delete slim.snapshotRows;
+      delete slim.payloadJson;
+      return slim;
+    });
+    this._storageSet('sac_audit_history_v9', trimmed);
+  }
   _saveRules() { this._storageSet('sac_validation_rules_v9', this._validationRules); this._compiledRules = {}; }
 
   _notify(msg, type = 'info') {
@@ -572,11 +587,16 @@ class ExcelUploaderPro extends HTMLElement {
   _evalAssistedCode(expr, row, colName, cacheKey) {
     const value = String(row[colName] ?? '').trim();
     const num = Number(value);
-    // Always cache: use the provided key or fall back to the expression string itself
     const key = cacheKey || ('__expr__' + expr);
     if (!this._compiledRules[key]) {
-      this._compiledRules[key] = new Function('value', 'num', 'row', '"use strict"; return (' + expr + ');');
+      try {
+        this._compiledRules[key] = new Function('value', 'num', 'row', '"use strict"; return (' + expr + ');');
+      } catch (e) {
+        this._compiledRules[key] = null;
+        console.warn('[Rule] compile error:', e.message, '— expr:', expr.slice(0, 80));
+      }
     }
+    if (!this._compiledRules[key]) return null;
     return this._compiledRules[key](value, num, row);
   }
 
@@ -1122,105 +1142,6 @@ class ExcelUploaderPro extends HTMLElement {
   // 2. Create + Upload: POST /models/{GUID}/{importType} with CSV body → { jobID }
   // 3. Run   : POST /jobs/{jobId}/run
   // 4. Poll  : GET /jobs/{jobId} until successful
-  async _fetchDeltaPreview() {
-    if (!this._sacModelId || !this._targetVersion || !this._targetDate) {
-      this._deltaPreview = { rows: [], cols: [], loading: false, error: 'Set VERSION, PERIOD and MODEL ID first.', loaded: false };
-      this._render(); return;
-    }
-    this._deltaPreview = { rows: [], cols: [], loading: true, error: null, loaded: false };
-    this._render();
-    const base = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
-    const DIS  = base + '/api/v1/dataimport';
-    const DIS_HEADER = { 'x-sap-sac-custom-auth': 'true' };
-    let disModelId = this._sacDISModelId || '';
-    if (!disModelId) { try { disModelId = await this._resolveDISModelId(); } catch (_) { disModelId = this._sacModelId; } }
-
-    const vFilter = encodeURIComponent(this._targetVersion);
-    const dFilter = encodeURIComponent(this._targetDate);
-    const importType = this._sacImportType || 'privateFactData';
-
-    const endpoints = [
-      DIS + '/models/' + encodeURIComponent(disModelId) + '/' + importType + '?Version=' + vFilter + '&Date=' + dFilter + '&$format=json&$top=200',
-      DIS + '/models/' + encodeURIComponent(disModelId) + '/data?$filter=Version%20eq%20%27' + vFilter + '%27%20and%20Date%20eq%20%27' + dFilter + '%27&$top=200&$format=json',
-      DIS + '/models/' + encodeURIComponent(this._sacModelId) + '/' + importType + '?Version=' + vFilter + '&Date=' + dFilter + '&$format=json&$top=200',
-    ];
-
-    let rows = [], cols = [], error = null, loaded = false;
-    for (const url of endpoints) {
-      try {
-        const resp = await fetch(url, { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/json', ...DIS_HEADER } });
-        if (!resp.ok) { console.log('[DeltaPreview] GET', url.slice(-60), 'HTTP', resp.status); continue; }
-        const body = await resp.json().catch(() => null);
-        if (!body) continue;
-        const arr = body.value || body.data || body.rows || (Array.isArray(body) ? body : null);
-        if (arr && arr.length > 0) {
-          rows = arr;
-          cols = Object.keys(arr[0]).filter(k => !k.startsWith('@') && !k.startsWith('__'));
-          loaded = true;
-          console.log('[DeltaPreview] found', rows.length, 'rows via', url.slice(-60));
-          break;
-        }
-        // empty array → no data in region
-        if (arr && arr.length === 0) { loaded = true; rows = []; break; }
-      } catch (e) { console.warn('[DeltaPreview] endpoint failed:', e.message); }
-    }
-    if (!loaded) error = 'Preview not available on this DIS endpoint. Check data in SAC Modeler → ' + (this._sacModelId || 'model') + '.';
-    this._deltaPreview = { rows, cols, loading: false, error, loaded };
-    this._render();
-  }
-
-  async _fetchExistingDataOData(version, date) {
-    if (!version && !date) return null;
-    const base    = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
-    const DIS     = base + '/api/v1/dataimport';
-    const modelId = this._sacModelId;
-    const guid    = this._sacDISModelId || modelId;
-    const iType   = this._sacImportType || 'privateFactData';
-    const filterParts = [];
-    if (version) filterParts.push("Version eq '" + version + "'");
-    if (date)    filterParts.push("Date eq '" + date + "'");
-    const filter = filterParts.join(' and ');
-    const guidWithPrefix = guid.startsWith('t.5.') ? guid : ('t.5.' + guid);
-    const vEnc = encodeURIComponent(version || '');
-    const dEnc = encodeURIComponent(date    || '');
-    // Build tenant param if UUID is known (some SAC OData APIs require it)
-    const tParam = this._cachedTenantUUID ? '&tenant=' + encodeURIComponent(this._cachedTenantUUID) : '';
-    const endpoints = [
-      // ── OData Export Service — NO $filter first (SAC rejects $filter with 400 on some tenants) ──
-      // Get all rows and filter client-side. The client-side filter below handles Version+Date matching.
-      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(modelId) + '?$format=json&$top=50000' + tParam,
-      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guid)    + '?$format=json&$top=50000' + tParam,
-      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guidWithPrefix) + '?$format=json&$top=50000' + tParam,
-      // ── OData with $filter (secondary — servers that support it) ──
-      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(modelId) + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000' + tParam,
-      base + '/api/v1/dataexport/providers/sac/' + encodeURIComponent(guid)    + '?$format=json&$filter=' + encodeURIComponent(filter) + '&$top=50000' + tParam,
-      // ── DIS GET (same endpoints as Delta Preview, but with $top=50000) ──
-      DIS + '/models/' + encodeURIComponent(guid)    + '/' + iType + '?Version=' + vEnc + '&Date=' + dEnc + '&$format=json&$top=50000',
-      DIS + '/models/' + encodeURIComponent(modelId) + '/' + iType + '?Version=' + vEnc + '&Date=' + dEnc + '&$format=json&$top=50000',
-      DIS + '/models/' + encodeURIComponent(guid)    + '/data?$filter=' + encodeURIComponent(filter) + '&$top=50000&$format=json',
-    ];
-    for (const url of endpoints) {
-      try {
-        const r = await fetch(url, { credentials: 'include', headers: { 'Accept': 'application/json' } });
-        const shortUrl = url.replace(base, '').split('?')[0];
-        console.log('[DIS] existing data fetch:', r.status, shortUrl);
-        if (!r.ok) continue;
-        const data = await r.json().catch(() => null);
-        if (!data) continue;
-        const rows = data?.value || data?.d?.results || data?.data || data?.rows || (Array.isArray(data) ? data : null);
-        if (rows) {
-          const filtered = rows.filter(row => {
-            const rv = row?.Version || row?.version || '';
-            const rd = row?.Date    || row?.date    || '';
-            return (!version || rv === version) && (!date || rd === date);
-          });
-          console.log('[DIS] existing data: found', filtered.length, 'rows for Version=' + (version || '*') + ' Date=' + (date || '*'));
-          return filtered;
-        }
-      } catch (_) {}
-    }
-    return null; // null = cannot fetch (vs [] = no existing data)
-  }
 
   async _callDISApi(rows) {
     const base       = (this._sacTenantUrl || window.location.origin).replace(/\/+$/, '');
@@ -1816,7 +1737,6 @@ class ExcelUploaderPro extends HTMLElement {
             this._importMethod = 'replace';
             this._storageSet('sac_import_method', 'replace');
           }
-          this._deltaPreview = { rows: [], cols: [], loading: false, error: null, loaded: false };
           this._logAction('STRATEGY_CHANGE', 'Load Strategy', 'Planning mode switched from ' + prev + ' to ' + strat, prev, strat);
           this._render();
         }
@@ -1831,14 +1751,10 @@ class ExcelUploaderPro extends HTMLElement {
         if (m && this._importMethod !== m) {
           this._importMethod = m;
           this._storageSet('sac_import_method', m);
-          this._deltaPreview = { rows: [], cols: [], loading: false, error: null, loaded: false };
           this._render();
         }
       });
     });
-
-    const loadDeltaPreviewBtn = shadow.getElementById('loadDeltaPreviewBtn');
-    if (loadDeltaPreviewBtn) loadDeltaPreviewBtn.addEventListener('click', () => { this._fetchDeltaPreview(); });
 
     // ── SAC Load Target: Version & Period ─────────────────────────────────────
     const targetVersionInp = shadow.getElementById('targetVersionInp');
@@ -2515,8 +2431,6 @@ class ExcelUploaderPro extends HTMLElement {
       }));
     });
 
-    const closePublishModalBtn = shadow.getElementById('closePublishModalBtn');
-    if (closePublishModalBtn) closePublishModalBtn.addEventListener('click', () => { this._showPublishModal = false; this._render(); });
 
     const clearHistoryBtn = shadow.getElementById('clearHistoryBtn');
     if (clearHistoryBtn) {
@@ -2681,7 +2595,7 @@ class ExcelUploaderPro extends HTMLElement {
         });
 
         const cleanPayloadArray = this._rows.map(r => {
-          const clean = { _loadStrategy: this._loadStrategy, _dspArtifactSync: this._dspArtifactSync, _targetVersion: this._targetVersion, _targetDate: this._targetDate };
+          const clean = { _loadStrategy: this._loadStrategy, _targetVersion: this._targetVersion, _targetDate: this._targetDate };
           this._requiredColumns.forEach(c => { clean[c] = r[c] ?? ''; });
           return clean;
         });
@@ -2703,7 +2617,6 @@ class ExcelUploaderPro extends HTMLElement {
           targetVersion: this._targetVersion || '',
           targetDate: this._targetDate || '',
           importMethod: this._importMethod || 'replace',
-          dspArtifact: this._dspArtifactSync,
           semaphoreStatus: stats.preventiveRows > 0 ? 'AMBER' : (stats.checkRows > 0 ? 'PURPLE' : 'GREEN'),
           file: fileSummary,
           filesDetails: filesMetadata,
@@ -3577,48 +3490,6 @@ class ExcelUploaderPro extends HTMLElement {
       </div>`;
   }
 
-  _renderPublishModal() {
-    if (!this._showPublishModal) return '';
-    return `
-      <div class="help-modal-overlay">
-        <div class="help-modal-card" style="max-width:520px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #D9E0E6;padding-bottom:12px;margin-bottom:14px;">
-            <div style="display:flex;align-items:center;gap:10px;">
-              <span style="background:#107E3E;color:#FFF;width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;">📢</span>
-              <div>
-                <h3 style="margin:0;color:#1D2D3E;font-size:16px;">Publish Planning Data in SAC</h3>
-                <span style="font-size:11px;color:#556B82;">Make the imported data visible to all story users</span>
-              </div>
-            </div>
-            <button class="btn" id="closePublishModalBtn" type="button">✕ Close</button>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:14px;">
-            <div style="background:#E6F9EC;border:1px solid #A3D9B1;border-radius:8px;padding:12px 16px;">
-              <div style="font-size:12px;font-weight:700;color:#107E3E;margin-bottom:4px;">✅ Your data has been loaded successfully</div>
-              <div style="font-size:12px;color:#1D6B2E;">The rows are now in the planning model's private workspace. Publish to share them with all users of this story.</div>
-            </div>
-            <div>
-              <div style="font-size:13px;font-weight:700;color:#1D2D3E;margin-bottom:10px;">Steps to publish in SAP Analytics Cloud:</div>
-              <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:10px;">
-                <li style="font-size:12px;color:#3D4F5F;line-height:1.6;">In your SAC <strong>Story</strong>, click the <strong>Edit</strong> button in the top toolbar to enter edit mode (if not already editing).</li>
-                <li style="font-size:12px;color:#3D4F5F;line-height:1.6;">In the top menu bar, click <strong>Data</strong> → <strong>Publish Data Changes</strong>.<br><span style="color:#556B82;font-size:11px;">Alternatively: click the model name in a planning table → <em>Publish</em>.</span></li>
-                <li style="font-size:12px;color:#3D4F5F;line-height:1.6;">SAC will show a confirmation dialog with the planning version and timestamp. Review and click <strong>Publish</strong>.</li>
-                <li style="font-size:12px;color:#3D4F5F;line-height:1.6;">The data is now available in the <strong>public</strong> area of the model and visible to all story viewers.</li>
-              </ol>
-            </div>
-            <div style="background:#FFF8E1;border:1px solid #FFD54F;border-radius:8px;padding:12px 16px;">
-              <div style="font-size:12px;font-weight:700;color:#7A5A00;margin-bottom:4px;">⚠️ Important notes</div>
-              <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:4px;">
-                <li style="font-size:12px;color:#5A4200;line-height:1.5;">You need <em>Create and Edit Stories</em> and <em>Planning</em> permissions to publish.</li>
-                <li style="font-size:12px;color:#5A4200;line-height:1.5;">If you loaded with <strong>DELTA</strong> strategy, publishing updates only the matching key records and inserts new ones — non-matching rows in the model are preserved.</li>
-                <li style="font-size:12px;color:#5A4200;line-height:1.5;">If the Publish option is greyed out, contact your SAC administrator to verify your permissions on model <strong>${this._esc(this._sacModelId || 'your model')}</strong>.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>`;
-  }
-
   _renderHelpModal() {
     if (!this._showHelpModal) return '';
     return `
@@ -4263,7 +4134,6 @@ class ExcelUploaderPro extends HTMLElement {
         ${this._isLoading ? '<div class="busy-overlay"><div class="spinner"></div><div style="font-weight:700;color:#1D2D3E;">' + this._esc(this._loadingText) + '</div></div>' : ''}
         ${this._renderHelpModal()}
         ${this._renderChangelogModal()}
-        ${this._renderPublishModal()}
 
         <div class="sap-header">
           <div class="sap-brand">
